@@ -501,9 +501,12 @@ int main(void)
 
     printf("\n[AVB-AES3]\n");
 
-    // Wait for hw_reset to release and PHY to be MDIO-responsive.
-    busy_wait(100);
-    phy_enable_rxc_skew();
+    // BASELINE TEST: NO PHY MDIO writes at all. PHY runs at factory
+    // defaults set by board strap pins. Goal: reproduce yesterday's
+    // working TX config (frames reaching network, marginal but real)
+    // before adding fixes back in one at a time. RX will be broken
+    // (preamble errors) — that's expected; we'll fix it once TX works.
+    busy_wait(100);  // Wait for hw_reset to release
 
     // Init audio ring buffers
     memset(&tx_audio_ring, 0, sizeof(tx_audio_ring));

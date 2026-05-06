@@ -1,0 +1,8 @@
+build/
+firmware/*.o
+firmware/*.d
+firmware/firmware.elf
+firmware/firmware.elf.map
+firmware/firmware.bin
+__pycache__/
+*.pyc

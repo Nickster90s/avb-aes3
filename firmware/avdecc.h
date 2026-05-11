@@ -90,29 +90,111 @@
 #define AECP_MSG_AEM_COMMAND                    0
 #define AECP_MSG_AEM_RESPONSE                   1
 
-// AECP/AEM status codes
+// AECP/AEM status codes (IEEE 1722.1-2013 Table 7.127)
 #define AECP_STATUS_SUCCESS                     0
 #define AECP_STATUS_NOT_IMPLEMENTED             1
+#define AECP_STATUS_NO_SUCH_DESCRIPTOR          2
+#define AECP_STATUS_ENTITY_LOCKED               3
+#define AECP_STATUS_ENTITY_ACQUIRED             4
+#define AECP_STATUS_BAD_ARGUMENTS               7
+#define AECP_STATUS_STREAM_IS_RUNNING           10
 
 // AEM command types (IEEE 1722.1-2013 Table 7.126)
 #define AEM_CMD_ACQUIRE_ENTITY                  0x0000
 #define AEM_CMD_LOCK_ENTITY                     0x0001
 #define AEM_CMD_READ_DESCRIPTOR                 0x0004
+#define AEM_CMD_SET_STREAM_FORMAT               0x0008
 #define AEM_CMD_GET_STREAM_FORMAT               0x0009
+#define AEM_CMD_SET_CLOCK_SOURCE                0x0016
+#define AEM_CMD_GET_CLOCK_SOURCE                0x0017
 
-// AEM descriptor types
+// AEM descriptor types (IEEE 1722.1-2013 Table 7.1, cross-checked with
+// jdksavdecc-c/include/jdksavdecc_aem_descriptor.h)
 #define AEM_DESC_ENTITY                         0x0000
 #define AEM_DESC_CONFIGURATION                  0x0001
-#define AEM_DESC_AUDIO_UNIT                     0x0005
-#define AEM_DESC_STREAM_INPUT                   0x0006
-#define AEM_DESC_STREAM_OUTPUT                  0x0007
-#define AEM_DESC_AVB_INTERFACE                  0x000A
-#define AEM_DESC_CLOCK_SOURCE                   0x000B
-#define AEM_DESC_CLOCK_DOMAIN                   0x000C
+#define AEM_DESC_AUDIO_UNIT                     0x0002
+#define AEM_DESC_STREAM_INPUT                   0x0005
+#define AEM_DESC_STREAM_OUTPUT                  0x0006
+#define AEM_DESC_AVB_INTERFACE                  0x0009
+#define AEM_DESC_CLOCK_SOURCE                   0x000A
+#define AEM_DESC_LOCALE                         0x000C
+#define AEM_DESC_STRINGS                        0x000D
+#define AEM_DESC_STREAM_PORT_INPUT              0x000E
+#define AEM_DESC_STREAM_PORT_OUTPUT             0x000F
+#define AEM_DESC_AUDIO_CLUSTER                  0x0014
+#define AEM_DESC_AUDIO_MAP                      0x0017
+#define AEM_DESC_CLOCK_DOMAIN                   0x0024
+
+// Stream-format identifiers (IEEE 1722-2016 + 1722.1-2013 Annex A).
+// Byte order: octet 0 is subtype.
+//
+// CRF audio-sample 48000 Hz, pull 1/1, 6 timestamps/PDU.
+//   octet 0 = 0x04 (CRF subtype)
+//   octets 1..2 = type/timestamp_interval
+//   octet 3 = timestamps_per_pdu = 6 (0x06)? actually session_mgr.aemt
+//   uses 0x10 here (=16). Format word taken byte-exact from
+//   /home/lisp/avdecc-endpoint/models/session_mgr.aemt stream_input[0].
+#define STREAM_FMT_CRF_48K \
+    { 0x04, 0x10, 0x60, 0x01, 0x00, 0x00, 0xBB, 0x80 }
+// AAF PCM 48000 Hz, INT_32BIT, 8 channels, 6 samples/frame (class A).
+// Verified by decoding session_mgr.aemt stream_output[0].formats[1]:
+//   ch_msb<<2 | ch_lsb = 0x02<<2 | 0 = 8;  samples = (0<<4)|6 = 6
+#define STREAM_FMT_AAF_8CH_48K \
+    { 0x02, 0x05, 0x02, 0x20, 0x02, 0x00, 0x60, 0x00 }
+
+// AVB_INTERFACE flags (IEEE 1722.1 Table 7.84)
+#define AVB_INTERFACE_FLAG_GPTP_GRANDMASTER     (1u << 0)
+#define AVB_INTERFACE_FLAG_GPTP_SUPPORTED       (1u << 1)
+#define AVB_INTERFACE_FLAG_SRP_SUPPORTED        (1u << 2)
+
+// STREAM flags (IEEE 1722.1 Table 7.21)
+#define STREAM_FLAG_CLOCK_SYNC_SOURCE           (1u << 0)
+#define STREAM_FLAG_CLASS_A                     (1u << 1)
+#define STREAM_FLAG_CLASS_B                     (1u << 2)
+
+// STREAM_PORT flags
+#define STREAM_PORT_FLAG_CLOCK_SYNC_SOURCE      (1u << 0)
+#define STREAM_PORT_FLAG_ASYNC_SAMPLE_RATE_CONV (1u << 1)
+#define STREAM_PORT_FLAG_SYNC_SAMPLE_RATE_CONV  (1u << 2)
+
+// CLOCK_SOURCE type (IEEE 1722.1 Table 7.87)
+#define CLOCK_SOURCE_TYPE_INTERNAL              0x0000
+#define CLOCK_SOURCE_TYPE_EXTERNAL              0x0001
+#define CLOCK_SOURCE_TYPE_INPUT_STREAM          0x0002
+
+// AUDIO_CLUSTER format (IEEE 1722.1 Table 7.143)
+#define AUDIO_CLUSTER_FORMAT_IEC_60958          0x00
+#define AUDIO_CLUSTER_FORMAT_MBLA               0x40
+#define AUDIO_CLUSTER_FORMAT_MIDI               0x80
+#define AUDIO_CLUSTER_FORMAT_SMPTE              0x88
 
 // ---------------------------------------------------------------------------
 // AVDECC state
 // ---------------------------------------------------------------------------
+
+// Talker stream — we are the source. One per stream_output descriptor.
+typedef struct {
+    uint8_t  stream_id[8];        // our advertised stream_id
+    uint8_t  dest_mac[6];         // our advertised stream_dest_mac
+    // Connected listener (most recent CONNECT_TX)
+    uint8_t  listener_id[8];
+    uint16_t listener_uid;
+    uint8_t  connected;
+    uint16_t connection_count;
+} avdecc_talker_stream_t;
+
+// Listener stream — we are the sink. One per stream_input descriptor.
+typedef struct {
+    uint8_t  talker_id[8];        // remote talker entity (when connected)
+    uint16_t talker_uid;
+    uint8_t  stream_id[8];        // remote talker's stream_id
+    uint8_t  dest_mac[6];         // multicast dest MAC of the stream
+    uint8_t  connected;
+    uint16_t connection_count;
+} avdecc_listener_stream_t;
+
+#define AVDECC_MAX_TALKERS    1   // N_STREAM_OUTPUTS in avdecc.c
+#define AVDECC_MAX_LISTENERS  2   // N_STREAM_INPUTS  in avdecc.c
 
 typedef struct {
     // Identity
@@ -123,28 +205,25 @@ typedef struct {
     uint32_t adp_available_index;   // Increments each advertisement
     uint32_t last_adp_ms;
 
-    // Talker connection state
-    uint8_t  talker_connected;
-    uint8_t  talker_listener_id[8]; // Entity ID of connected listener
-    uint16_t talker_connection_count;
+    // Per-stream connection state (sized by descriptor counts in avdecc.c)
+    avdecc_talker_stream_t   talkers  [AVDECC_MAX_TALKERS];
+    avdecc_listener_stream_t listeners[AVDECC_MAX_LISTENERS];
 
-    // Listener connection state
-    uint8_t  listener_connected;
-    uint8_t  listener_talker_id[8]; // Entity ID of connected talker
-    uint8_t  listener_stream_id[8]; // Stream ID we're listening to
-    uint8_t  listener_dest_mac[6];  // Stream destination MAC
-    uint16_t listener_connection_count;
+    // Clock domain — written by SET_CLOCK_SOURCE, read by build_desc_clock_domain
+    // 0 = Internal oscillator, 1 = Media Clock (CRF stream input)
+    uint16_t current_clock_source;
 
-    // Stream config (set by caller)
-    uint8_t  stream_id[8];
-    uint8_t  stream_dest_mac[6];
-
-    // Callbacks (set by caller to wire AVTP/SRP)
-    void (*on_talker_connect)(const uint8_t *listener_entity_id);
-    void (*on_talker_disconnect)(void);
-    void (*on_listener_connect)(const uint8_t *stream_id, const uint8_t *dest_mac,
-                                const uint8_t *talker_entity_id);
-    void (*on_listener_disconnect)(void);
+    // Callbacks (set by caller to wire AVTP/SRP). `uid` is the stream's
+    // descriptor index (talker_unique_id or listener_unique_id).
+    void (*on_talker_connect)   (uint16_t uid, const uint8_t *listener_entity_id);
+    void (*on_talker_disconnect)(uint16_t uid);
+    void (*on_listener_connect) (uint16_t uid, const uint8_t *stream_id,
+                                 const uint8_t *dest_mac,
+                                 const uint8_t *talker_entity_id);
+    void (*on_listener_disconnect)(uint16_t uid);
+    // Fired when SET_CLOCK_SOURCE picks a new source for clock_domain 0.
+    // src_idx: 0 = Internal oscillator, 1 = Media Clock (CRF stream).
+    void (*on_clock_source_change)(uint16_t src_idx);
 
     // Stats
     uint32_t adp_tx_count;
@@ -158,8 +237,14 @@ typedef struct {
 // API
 // ---------------------------------------------------------------------------
 
-void avdecc_init(avdecc_state_t *s, const uint8_t *mac_addr,
-                 const uint8_t *stream_id, const uint8_t *stream_dest_mac);
+// Initialize state and derive entity_id from MAC. Per-talker stream_id +
+// dest_mac are set separately so callers can populate each stream output.
+void avdecc_init(avdecc_state_t *s, const uint8_t *mac_addr);
+
+// Configure the local talker stream `uid` (must be < AVDECC_MAX_TALKERS).
+void avdecc_set_talker_stream(avdecc_state_t *s, uint16_t uid,
+                              const uint8_t *stream_id,
+                              const uint8_t *stream_dest_mac);
 
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).

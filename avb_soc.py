@@ -244,6 +244,52 @@ class AudioClkGen(LiteXModule):
         self.sync += If(self.fs_48k, fs_count.eq(fs_count + 1))
         self.comb += self._fs_48k_count.status.eq(fs_count)
 
+
+# MCR NCO -----------------------------------------------------------------------------------------------
+
+class MCRNco(LiteXModule):
+    """Numerically-controlled oscillator that emits a sample-rate strobe.
+
+    fs = (increment * sys_clk_freq) / 2**32
+
+    Firmware sets `increment` from a PI servo on CRF timestamps (mcr.c).
+    A 33-bit add captures the carry-out as the sample strobe — that's the
+    standard NCO trick: every time the 32-bit phase wraps, one sample tick
+    has elapsed in fs-time.
+
+    `sample_count` is a free-running count of strobes; firmware reads it to
+    detect lock (delta_count over a known interval == expected sample count).
+    """
+    def __init__(self, sys_clk_freq, fs=48000):
+        self.sample_strobe = Signal()
+
+        # Default increment ≈ fs / sys_clk_freq, scaled to 32 bits.
+        default_inc = int(round(fs * (1 << 32) / sys_clk_freq))
+
+        self._increment = CSRStorage(32, reset=default_inc,
+            description="NCO phase increment per sys_clk. fs = (inc*sys_clk_freq)/2^32.")
+        self._sample_count = CSRStatus(32,
+            description="Free-running fs sample count (debug).")
+        self._phase = CSRStatus(32,
+            description="Current NCO phase (debug).")
+
+        phase        = Signal(32)
+        next_phase   = Signal(33)
+        sample_count = Signal(32)
+
+        self.comb += next_phase.eq(phase + self._increment.storage)
+        self.sync += [
+            phase.eq(next_phase[:32]),
+            self.sample_strobe.eq(next_phase[32]),
+            If(self.sample_strobe,
+                sample_count.eq(sample_count + 1)),
+        ]
+        self.comb += [
+            self._sample_count.status.eq(sample_count),
+            self._phase.status.eq(phase),
+        ]
+
+
 # AES3 Pin Extension -----------------------------------------------------------------------------------
 
 def i2s_io():
@@ -601,6 +647,9 @@ class AVBSoC(SoCCore):
 
         # Audio Clock Generator.
         self.audio_clk = AudioClkGen()
+
+        # Media Clock Recovery NCO — driven by firmware PI servo on CRF.
+        self.mcr = MCRNco(sys_clk_freq, fs=48000)
 
         # AES3 TX/RX.
         platform.add_extension(aes3_io())

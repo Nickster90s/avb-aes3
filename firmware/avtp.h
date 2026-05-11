@@ -19,8 +19,10 @@
 // For initial test we use a fixed multicast address.
 #define AVTP_MCAST_ADDR         {0x91, 0xE0, 0xF0, 0x00, 0xFE, 0x00}
 
-// Subtype
+// AVTP subtypes (IEEE 1722-2016 Table 7). cd-bit = 0 for these (data).
 #define AVTP_SUBTYPE_61883_IIDC 0x00
+#define AVTP_SUBTYPE_AAF        0x02
+#define AVTP_SUBTYPE_CRF        0x04
 
 // IEC 61883-6 constants
 #define CIP_FMT_61883_6        0x10

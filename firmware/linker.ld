@@ -42,7 +42,7 @@ SECTIONS
 		FILL(0);
 		. = ALIGN(8);
 		_edata = .;
-	} > sram AT > rom
+	} > main_ram AT > rom
 
 	.bss :
 	{
@@ -57,7 +57,7 @@ SECTIONS
 		. = ALIGN(8);
 		_ebss = .;
 		_end = .;
-	} > sram
+	} > main_ram
 
 	/DISCARD/ :
 	{
@@ -66,7 +66,7 @@ SECTIONS
 	}
 }
 
-PROVIDE(_fstack = ORIGIN(sram) + LENGTH(sram));
+PROVIDE(_fstack = ORIGIN(main_ram) + LENGTH(main_ram));
 
 PROVIDE(_fdata_rom = LOADADDR(.data));
 PROVIDE(_edata_rom = LOADADDR(.data) + SIZEOF(.data));

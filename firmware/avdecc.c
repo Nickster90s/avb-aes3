@@ -257,18 +257,28 @@ static void acmp_send_response(avdecc_state_t *s, uint8_t msg_type, uint8_t stat
     uint16_t st_cdl = ((uint16_t)(status & 0x1F) << 11) | ACMP_CONTROL_DATA_LEN;
     av_put_be16(p + 2, st_cdl);
 
-    // Fill in our stream info for talker responses
+    // Fill in our stream info for talker responses (by talker_unique_id)
     if (msg_type == ACMP_MSG_CONNECT_TX_RESPONSE ||
-        msg_type == ACMP_MSG_GET_TX_STATE_RESPONSE) {
-        memcpy(p + ACMP_OFF_STREAM_ID, s->stream_id, 8);
-        memcpy(p + ACMP_OFF_STREAM_DEST_MAC, s->stream_dest_mac, 6);
-        av_put_be16(p + ACMP_OFF_CONN_COUNT, s->talker_connection_count);
+        msg_type == ACMP_MSG_GET_TX_STATE_RESPONSE ||
+        msg_type == ACMP_MSG_DISCONNECT_TX_RESPONSE) {
+        uint16_t tuid = av_get_be16(p + ACMP_OFF_TALKER_UID);
+        if (tuid < AVDECC_MAX_TALKERS) {
+            avdecc_talker_stream_t *t = &s->talkers[tuid];
+            memcpy(p + ACMP_OFF_STREAM_ID, t->stream_id, 8);
+            memcpy(p + ACMP_OFF_STREAM_DEST_MAC, t->dest_mac, 6);
+            av_put_be16(p + ACMP_OFF_CONN_COUNT, t->connection_count);
+        }
     }
 
-    // Fill in connection info for listener responses
+    // Fill in connection info for listener responses (by listener_unique_id)
     if (msg_type == ACMP_MSG_CONNECT_RX_RESPONSE ||
-        msg_type == ACMP_MSG_GET_RX_STATE_RESPONSE) {
-        av_put_be16(p + ACMP_OFF_CONN_COUNT, s->listener_connection_count);
+        msg_type == ACMP_MSG_GET_RX_STATE_RESPONSE ||
+        msg_type == ACMP_MSG_DISCONNECT_RX_RESPONSE) {
+        uint16_t luid = av_get_be16(p + ACMP_OFF_LISTENER_UID);
+        if (luid < AVDECC_MAX_LISTENERS) {
+            av_put_be16(p + ACMP_OFF_CONN_COUNT,
+                        s->listeners[luid].connection_count);
+        }
     }
 
     uint32_t frame_len = 14 + ACMPDU_LEN;
@@ -283,32 +293,43 @@ static void acmp_handle_connect_tx(avdecc_state_t *s, const uint8_t *pdu)
 {
     // A controller or listener is asking us (talker) to start streaming
     const uint8_t *listener_id = pdu + ACMP_OFF_LISTENER_ID;
+    uint16_t tuid = av_get_be16(pdu + ACMP_OFF_TALKER_UID);
+    uint16_t luid = av_get_be16(pdu + ACMP_OFF_LISTENER_UID);
 
-    memcpy(s->talker_listener_id, listener_id, 8);
-    s->talker_connected = 1;
-    s->talker_connection_count++;
+    if (tuid >= AVDECC_MAX_TALKERS) {
+        acmp_send_response(s, ACMP_MSG_CONNECT_TX_RESPONSE,
+                           ACMP_STATUS_TALKER_UNKNOWN_ID, pdu);
+        return;
+    }
 
-    printf("[AVDECC] CONNECT_TX from listener %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+    avdecc_talker_stream_t *t = &s->talkers[tuid];
+    memcpy(t->listener_id, listener_id, 8);
+    t->listener_uid = luid;
+    t->connected = 1;
+    t->connection_count++;
+
+    printf("[AVDECC] CONNECT_TX uid=%u <- listener "
+           "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+           tuid,
            listener_id[0], listener_id[1], listener_id[2], listener_id[3],
            listener_id[4], listener_id[5], listener_id[6], listener_id[7]);
 
     if (s->on_talker_connect)
-        s->on_talker_connect(listener_id);
+        s->on_talker_connect(tuid, listener_id);
 
     acmp_send_response(s, ACMP_MSG_CONNECT_TX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
 }
 
 static void acmp_handle_disconnect_tx(avdecc_state_t *s, const uint8_t *pdu)
 {
-    s->talker_connected = 0;
-    if (s->talker_connection_count > 0)
-        s->talker_connection_count--;
-
-    printf("[AVDECC] DISCONNECT_TX\n");
-
-    if (s->on_talker_disconnect)
-        s->on_talker_disconnect();
-
+    uint16_t tuid = av_get_be16(pdu + ACMP_OFF_TALKER_UID);
+    if (tuid < AVDECC_MAX_TALKERS) {
+        avdecc_talker_stream_t *t = &s->talkers[tuid];
+        t->connected = 0;
+        if (t->connection_count > 0) t->connection_count--;
+        if (s->on_talker_disconnect) s->on_talker_disconnect(tuid);
+    }
+    printf("[AVDECC] DISCONNECT_TX uid=%u\n", tuid);
     acmp_send_response(s, ACMP_MSG_DISCONNECT_TX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
 }
 
@@ -323,34 +344,45 @@ static void acmp_handle_connect_rx(avdecc_state_t *s, const uint8_t *pdu)
     const uint8_t *talker_id  = pdu + ACMP_OFF_TALKER_ID;
     const uint8_t *stream_id  = pdu + ACMP_OFF_STREAM_ID;
     const uint8_t *dest_mac   = pdu + ACMP_OFF_STREAM_DEST_MAC;
+    uint16_t tuid = av_get_be16(pdu + ACMP_OFF_TALKER_UID);
+    uint16_t luid = av_get_be16(pdu + ACMP_OFF_LISTENER_UID);
 
-    memcpy(s->listener_talker_id, talker_id, 8);
-    memcpy(s->listener_stream_id, stream_id, 8);
-    memcpy(s->listener_dest_mac, dest_mac, 6);
-    s->listener_connected = 1;
-    s->listener_connection_count++;
+    if (luid >= AVDECC_MAX_LISTENERS) {
+        acmp_send_response(s, ACMP_MSG_CONNECT_RX_RESPONSE,
+                           ACMP_STATUS_LISTENER_UNKNOWN_ID, pdu);
+        return;
+    }
 
-    printf("[AVDECC] CONNECT_RX to stream %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+    avdecc_listener_stream_t *l = &s->listeners[luid];
+    memcpy(l->talker_id, talker_id, 8);
+    l->talker_uid = tuid;
+    memcpy(l->stream_id, stream_id, 8);
+    memcpy(l->dest_mac, dest_mac, 6);
+    l->connected = 1;
+    l->connection_count++;
+
+    printf("[AVDECC] CONNECT_RX uid=%u stream "
+           "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+           luid,
            stream_id[0], stream_id[1], stream_id[2], stream_id[3],
            stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
 
     if (s->on_listener_connect)
-        s->on_listener_connect(stream_id, dest_mac, talker_id);
+        s->on_listener_connect(luid, stream_id, dest_mac, talker_id);
 
     acmp_send_response(s, ACMP_MSG_CONNECT_RX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
 }
 
 static void acmp_handle_disconnect_rx(avdecc_state_t *s, const uint8_t *pdu)
 {
-    s->listener_connected = 0;
-    if (s->listener_connection_count > 0)
-        s->listener_connection_count--;
-
-    printf("[AVDECC] DISCONNECT_RX\n");
-
-    if (s->on_listener_disconnect)
-        s->on_listener_disconnect();
-
+    uint16_t luid = av_get_be16(pdu + ACMP_OFF_LISTENER_UID);
+    if (luid < AVDECC_MAX_LISTENERS) {
+        avdecc_listener_stream_t *l = &s->listeners[luid];
+        l->connected = 0;
+        if (l->connection_count > 0) l->connection_count--;
+        if (s->on_listener_disconnect) s->on_listener_disconnect(luid);
+    }
+    printf("[AVDECC] DISCONNECT_RX uid=%u\n", luid);
     acmp_send_response(s, ACMP_MSG_DISCONNECT_RX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
 }
 
@@ -369,13 +401,25 @@ static void acmp_handle_get_rx_state(avdecc_state_t *s, const uint8_t *pdu)
 #define AECP_OFF_SEQ_ID         20
 #define AECP_OFF_CMD_TYPE       22
 
-// Stream format: IEC 61883-6 AM824, 48 kHz, 2ch stereo, 24-bit MBLA
-// Encoding per IEEE 1722.1-2013 Section 7.3.2:
-//   v=0, subtype=0x00 (61883), sf=1, fmt=0x10 (61883-6),
-//   fdf: evt=0 (AM824), sfc=2 (48kHz), dbs=2, mbla_cnt=2
-static const uint8_t stream_fmt_48k_stereo[8] = {
-    0x00, 0xA0, 0x10, 0x10, 0x00, 0x20, 0x00, 0x00
-};
+// Stream-format constants (decoded from session_mgr.aemt + IEEE 1722.1-2013
+// Annex A; see avdecc.h for byte-by-byte derivation).
+//
+// Listener[0] = CRF audio-sample 48 kHz (Media Clock Input).
+// Listener[1] = AAF PCM 8ch / 48 kHz / 32-bit (Audio Input).
+// Talker[0]   = AAF PCM 8ch / 48 kHz / 32-bit (Audio Output).
+static const uint8_t stream_fmt_crf_48k[8]    = STREAM_FMT_CRF_48K;
+static const uint8_t stream_fmt_aaf_8ch_48k[8] = STREAM_FMT_AAF_8CH_48K;
+
+// Per-stream identity
+#define N_STREAM_INPUTS   2     // [0]=CRF Media Clock, [1]=AAF Audio Input
+#define N_STREAM_OUTPUTS  1     // [0]=AAF Audio Output
+#define N_CLOCK_SOURCES   2     // [0]=Internal osc, [1]=CRF stream
+#define N_AUDIO_CHANNELS  8     // 8ch AAF I/O
+#define LISTENER_CRF_INDEX 0
+#define LISTENER_AAF_INDEX 1
+#define TALKER_AAF_INDEX   0
+#define CLK_SRC_INTERNAL   0
+#define CLK_SRC_MEDIA      1    // CRF-driven media clock
 
 // Helper: write zero-padded 64-byte name field
 static void write_name64(uint8_t *p, const char *s)
@@ -409,18 +453,20 @@ static void aecp_set_status_cdl(uint8_t *pdu, uint8_t status, uint16_t cdl)
 // ---- Descriptor builders ----
 // Each writes directly into buffer d, returns descriptor length.
 
-static uint32_t build_desc_entity(uint8_t *d, avdecc_state_t *s)
+static uint32_t build_desc_entity(uint8_t *d, uint16_t idx, avdecc_state_t *s)
 {
+    if (idx != 0) return 0;
     // IEEE 1722.1-2013 Section 7.2.1 — 312 bytes
     memset(d, 0, 312);
     av_put_be16(d + 0, AEM_DESC_ENTITY);
+    av_put_be16(d + 2, 0);                       // descriptor_index
     memcpy(d + 4, s->entity_id, 8);             // entity_id
     memcpy(d + 12, s->entity_id, 8);            // entity_model_id
     av_put_be32(d + 20, ADP_CAP_ADP_SUPPORTED | ADP_CAP_ACMP_SUPPORTED |
                         ADP_CAP_GPTP_SUPPORTED); // entity_capabilities
-    av_put_be16(d + 24, 1);                      // talker_stream_sources
+    av_put_be16(d + 24, N_STREAM_OUTPUTS);       // talker_stream_sources = 1
     av_put_be16(d + 26, ADP_TALKER_CAP_IMPLEMENTED | ADP_TALKER_CAP_AUDIO_SOURCE);
-    av_put_be16(d + 28, 1);                      // listener_stream_sinks
+    av_put_be16(d + 28, N_STREAM_INPUTS);        // listener_stream_sinks = 2
     av_put_be16(d + 30, ADP_LISTENER_CAP_IMPLEMENTED | ADP_LISTENER_CAP_AUDIO_SINK);
     av_put_be32(d + 36, s->adp_available_index); // available_index
     write_name64(d + 48, "AVB-AES3 Endpoint");   // entity_name
@@ -429,100 +475,280 @@ static uint32_t build_desc_entity(uint8_t *d, avdecc_state_t *s)
     return 312;
 }
 
-static uint32_t build_desc_configuration(uint8_t *d)
+static uint32_t build_desc_configuration(uint8_t *d, uint16_t idx)
 {
-    // 7.2.2 — 74 fixed + 6 descriptor counts × 4 = 98 bytes
-    memset(d, 0, 98);
+    if (idx != 0) return 0;
+    // 7.2.2 — 74 fixed + 11 descriptor_counts × 4 = 118 bytes
+    memset(d, 0, 118);
     av_put_be16(d, AEM_DESC_CONFIGURATION);
+    av_put_be16(d + 2, 0);
     write_name64(d + 4, "Default");
     av_put_be16(d + 68, 0xFFFF);   // localized_description (none)
-    av_put_be16(d + 70, 6);        // descriptor_counts_count
+    av_put_be16(d + 70, 11);       // descriptor_counts_count
     av_put_be16(d + 72, 74);       // descriptor_counts_offset
 
     uint8_t *c = d + 74;
-    av_put_be16(c + 0,  AEM_DESC_AUDIO_UNIT);    av_put_be16(c + 2,  1);
-    av_put_be16(c + 4,  AEM_DESC_STREAM_INPUT);  av_put_be16(c + 6,  1);
-    av_put_be16(c + 8,  AEM_DESC_STREAM_OUTPUT);av_put_be16(c + 10, 1);
-    av_put_be16(c + 12, AEM_DESC_AVB_INTERFACE); av_put_be16(c + 14, 1);
-    av_put_be16(c + 16, AEM_DESC_CLOCK_SOURCE);  av_put_be16(c + 18, 1);
-    av_put_be16(c + 20, AEM_DESC_CLOCK_DOMAIN);  av_put_be16(c + 22, 1);
-    return 98;
+    av_put_be16(c +  0, AEM_DESC_AUDIO_UNIT);          av_put_be16(c +  2, 1);
+    av_put_be16(c +  4, AEM_DESC_STREAM_INPUT);        av_put_be16(c +  6, N_STREAM_INPUTS);
+    av_put_be16(c +  8, AEM_DESC_STREAM_OUTPUT);       av_put_be16(c + 10, N_STREAM_OUTPUTS);
+    av_put_be16(c + 12, AEM_DESC_AVB_INTERFACE);       av_put_be16(c + 14, 1);
+    av_put_be16(c + 16, AEM_DESC_CLOCK_SOURCE);        av_put_be16(c + 18, N_CLOCK_SOURCES);
+    av_put_be16(c + 20, AEM_DESC_LOCALE);              av_put_be16(c + 22, 1);
+    av_put_be16(c + 24, AEM_DESC_STRINGS);             av_put_be16(c + 26, 1);
+    av_put_be16(c + 28, AEM_DESC_STREAM_PORT_INPUT);   av_put_be16(c + 30, 1);
+    av_put_be16(c + 32, AEM_DESC_STREAM_PORT_OUTPUT);  av_put_be16(c + 34, 1);
+    av_put_be16(c + 36, AEM_DESC_AUDIO_CLUSTER);       av_put_be16(c + 38, N_AUDIO_CHANNELS * 2);
+    av_put_be16(c + 40, AEM_DESC_CLOCK_DOMAIN);        av_put_be16(c + 42, 1);
+    return 118;
 }
 
-static uint32_t build_desc_audio_unit(uint8_t *d)
+static uint32_t build_desc_audio_unit(uint8_t *d, uint16_t idx)
 {
-    // 7.2.3 — 104 fixed + 1 sampling rate (4) = 108 bytes
-    memset(d, 0, 108);
+    if (idx != 0) return 0;
+    // 7.2.3 — 144 fixed + 1 sampling rate (4) = 148 bytes
+    memset(d, 0, 148);
     av_put_be16(d, AEM_DESC_AUDIO_UNIT);
+    av_put_be16(d + 2, 0);
     write_name64(d + 4, "Audio Unit");
-    av_put_be16(d + 68, 0xFFFF);   // localized_description
-    // clock_domain_index = 0, all port counts = 0
-    av_put_be32(d + 96, 48000);    // current_sampling_rate
-    av_put_be16(d + 100, 104);     // sampling_rates_offset
-    av_put_be16(d + 102, 1);       // sampling_rates_count
-    av_put_be32(d + 104, 48000);   // rate[0]
-    return 108;
+    av_put_be16(d + 68, 0xFFFF);                 // localized_description
+    av_put_be16(d + 70, 0);                       // clock_domain_index
+    av_put_be16(d + 72, 1);                       // number_of_stream_input_ports
+    av_put_be16(d + 74, 0);                       // base_stream_input_port
+    av_put_be16(d + 76, 1);                       // number_of_stream_output_ports
+    av_put_be16(d + 78, 0);                       // base_stream_output_port
+    // 80..95 = other port counts (all 0)
+    av_put_be32(d + 136, 48000);                  // current_sampling_rate
+    av_put_be16(d + 140, 144);                    // sampling_rates_offset
+    av_put_be16(d + 142, 1);                      // sampling_rates_count
+    av_put_be32(d + 144, 48000);                  // rate[0]
+    return 148;
 }
 
-static uint32_t build_desc_stream(uint8_t *d, uint16_t desc_type, const char *name)
+static uint32_t build_desc_stream_input(uint8_t *d, uint16_t idx)
 {
     // 7.2.6 — 132 fixed + 1 format (8) = 140 bytes
+    if (idx >= N_STREAM_INPUTS) return 0;
     memset(d, 0, 140);
-    av_put_be16(d, desc_type);
+    av_put_be16(d, AEM_DESC_STREAM_INPUT);
+    av_put_be16(d + 2, idx);
+
+    const uint8_t *fmt;
+    const char *name;
+    uint16_t flags;
+    if (idx == LISTENER_CRF_INDEX) {
+        fmt   = stream_fmt_crf_48k;
+        name  = "Media Clock Input";
+        flags = STREAM_FLAG_CLOCK_SYNC_SOURCE | STREAM_FLAG_CLASS_A;
+    } else {
+        fmt   = stream_fmt_aaf_8ch_48k;
+        name  = "Audio Input";
+        flags = STREAM_FLAG_CLASS_A;
+    }
+
     write_name64(d + 4, name);
     av_put_be16(d + 68, 0xFFFF);                  // localized_description
-    memcpy(d + 74, stream_fmt_48k_stereo, 8);     // current_format
-    av_put_be16(d + 82, 132);                      // formats_offset
-    av_put_be16(d + 84, 1);                        // number_of_formats
-    memcpy(d + 132, stream_fmt_48k_stereo, 8);    // format[0]
+    av_put_be16(d + 70, 0);                       // clock_domain_index
+    av_put_be16(d + 72, flags);                   // stream_flags
+    memcpy(d + 74, fmt, 8);                       // current_format
+    av_put_be16(d + 82, 132);                     // formats_offset
+    av_put_be16(d + 84, 1);                       // number_of_formats
+    // 86..103 = backup_talker_*  (zeroed)
+    av_put_be16(d + 104, 0);                      // avb_interface_index
+    av_put_be32(d + 106, 2000000);                // buffer_length (2ms in ns)
+    memcpy(d + 132, fmt, 8);                      // format[0]
     return 140;
 }
 
-static uint32_t build_desc_avb_interface(uint8_t *d, avdecc_state_t *s)
+static uint32_t build_desc_stream_output(uint8_t *d, uint16_t idx)
 {
+    if (idx >= N_STREAM_OUTPUTS) return 0;
+    memset(d, 0, 140);
+    av_put_be16(d, AEM_DESC_STREAM_OUTPUT);
+    av_put_be16(d + 2, idx);
+    write_name64(d + 4, "Audio Output");
+    av_put_be16(d + 68, 0xFFFF);
+    av_put_be16(d + 70, 0);                       // clock_domain_index
+    av_put_be16(d + 72, STREAM_FLAG_CLASS_A);
+    memcpy(d + 74, stream_fmt_aaf_8ch_48k, 8);
+    av_put_be16(d + 82, 132);
+    av_put_be16(d + 84, 1);
+    av_put_be16(d + 104, 0);
+    av_put_be32(d + 106, 2000000);
+    memcpy(d + 132, stream_fmt_aaf_8ch_48k, 8);
+    return 140;
+}
+
+static uint32_t build_desc_avb_interface(uint8_t *d, uint16_t idx, avdecc_state_t *s)
+{
+    if (idx != 0) return 0;
     // 7.2.8 — 100 fixed + 1 MSRP mapping (4) = 104 bytes
     memset(d, 0, 104);
     av_put_be16(d, AEM_DESC_AVB_INTERFACE);
+    av_put_be16(d + 2, 0);
     write_name64(d + 4, "Ethernet");
     av_put_be16(d + 68, 0xFFFF);
-    memcpy(d + 70, s->src_mac, 6);       // mac_address
-    av_put_be16(d + 76, 0x0006);          // flags: GPTP_SUPPORTED | SRP_SUPPORTED
-    memcpy(d + 78, s->entity_id, 8);      // clock_identity
-    d[86] = 255;                           // priority1
-    d[87] = 248;                           // clock_class (slave only)
-    d[90] = 0xFE;                          // clock_accuracy (unknown)
-    d[91] = 255;                           // priority2
-    av_put_be16(d + 96, 100);             // msrp_mappings_offset
-    av_put_be16(d + 98, 1);               // msrp_mappings_count
-    d[100] = 1;                            // traffic_class = SR class A
-    d[101] = 3;                            // priority
-    av_put_be16(d + 102, 2);              // vlan_id
+    memcpy(d + 70, s->src_mac, 6);                // mac_address
+    av_put_be16(d + 76, AVB_INTERFACE_FLAG_GPTP_SUPPORTED |
+                        AVB_INTERFACE_FLAG_SRP_SUPPORTED);
+    memcpy(d + 78, s->entity_id, 8);              // clock_identity
+    d[86] = 248;                                  // priority1
+    d[87] = 248;                                  // clock_class
+    d[90] = 0xFE;                                 // clock_accuracy (unknown)
+    d[91] = 248;                                  // priority2
+    av_put_be16(d + 96, 100);                     // msrp_mappings_offset
+    av_put_be16(d + 98, 1);                       // msrp_mappings_count
+    d[100] = 1;                                   // traffic_class = SR class A
+    d[101] = 3;                                   // priority
+    av_put_be16(d + 102, 2);                      // vlan_id
     return 104;
 }
 
-static uint32_t build_desc_clock_source(uint8_t *d, avdecc_state_t *s)
+static uint32_t build_desc_clock_source(uint8_t *d, uint16_t idx, avdecc_state_t *s)
 {
+    if (idx >= N_CLOCK_SOURCES) return 0;
     // 7.2.9 — 86 bytes
     memset(d, 0, 86);
     av_put_be16(d, AEM_DESC_CLOCK_SOURCE);
-    write_name64(d + 4, "Internal");
-    av_put_be16(d + 68, 0xFFFF);
-    av_put_be16(d + 72, 0x0000);          // type = INTERNAL
-    memcpy(d + 74, s->entity_id, 8);      // identifier
-    av_put_be16(d + 82, AEM_DESC_AUDIO_UNIT);  // location_type
+    av_put_be16(d + 2, idx);
+
+    if (idx == CLK_SRC_INTERNAL) {
+        write_name64(d + 4, "Internal");
+        av_put_be16(d + 68, 0xFFFF);
+        av_put_be16(d + 70, 0);                   // flags
+        av_put_be16(d + 72, CLOCK_SOURCE_TYPE_INTERNAL);
+        memcpy(d + 74, s->entity_id, 8);          // identifier
+        av_put_be16(d + 82, AEM_DESC_AUDIO_UNIT); // location_type
+        av_put_be16(d + 84, 0);                   // location_index
+    } else {
+        write_name64(d + 4, "Media Clock");
+        av_put_be16(d + 68, 0xFFFF);
+        av_put_be16(d + 70, 0);
+        av_put_be16(d + 72, CLOCK_SOURCE_TYPE_INPUT_STREAM);
+        memcpy(d + 74, s->entity_id, 8);
+        av_put_be16(d + 82, AEM_DESC_STREAM_INPUT);
+        av_put_be16(d + 84, LISTENER_CRF_INDEX);  // points at CRF stream
+    }
     return 86;
 }
 
-static uint32_t build_desc_clock_domain(uint8_t *d)
+static uint32_t build_desc_clock_domain(uint8_t *d, uint16_t idx, avdecc_state_t *s)
 {
-    // 7.2.10 — 76 fixed + 1 clock source (2) = 78 bytes
-    memset(d, 0, 78);
+    if (idx != 0) return 0;
+    // 7.2.10 — 76 fixed + N_CLOCK_SOURCES × 2 bytes
+    uint32_t len = 76 + N_CLOCK_SOURCES * 2;
+    memset(d, 0, len);
     av_put_be16(d, AEM_DESC_CLOCK_DOMAIN);
+    av_put_be16(d + 2, 0);
     write_name64(d + 4, "Clock Domain");
     av_put_be16(d + 68, 0xFFFF);
-    av_put_be16(d + 72, 76);     // clock_sources_offset
-    av_put_be16(d + 74, 1);      // clock_sources_count
-    return 78;
+    av_put_be16(d + 70, s->current_clock_source); // clock_source_index (dynamic)
+    av_put_be16(d + 72, 76);                       // clock_sources_offset
+    av_put_be16(d + 74, N_CLOCK_SOURCES);          // clock_sources_count
+    for (uint16_t i = 0; i < N_CLOCK_SOURCES; i++)
+        av_put_be16(d + 76 + 2 * i, i);
+    return len;
+}
+
+static uint32_t build_desc_locale(uint8_t *d, uint16_t idx)
+{
+    if (idx != 0) return 0;
+    // 7.2.11 — 68 bytes
+    memset(d, 0, 68);
+    av_put_be16(d, AEM_DESC_LOCALE);
+    av_put_be16(d + 2, 0);
+    // locale_identifier: 64-byte ASCII string
+    const char *loc = "en-US";
+    memcpy(d + 4, loc, 5);
+    av_put_be16(d + 68 - 4, 1);   // number_of_strings
+    av_put_be16(d + 68 - 2, 0);   // base_strings = 0
+    return 68;
+}
+
+// 7-string STRINGS descriptor: each string is fixed 64 bytes.
+// strings[0] = "AVB-AES3", strings[1] = "Audio Unit", etc.
+static uint32_t build_desc_strings(uint8_t *d, uint16_t idx)
+{
+    if (idx != 0) return 0;
+    // 7.2.12 — 4 header + 7 × 64 string slots = 452 bytes
+    memset(d, 0, 452);
+    av_put_be16(d, AEM_DESC_STRINGS);
+    av_put_be16(d + 2, 0);
+    static const char *const strs[7] = {
+        "AVB-AES3",          // 0
+        "Audio Unit",        // 1
+        "Media Clock Input", // 2
+        "Audio Input",       // 3
+        "Audio Output",      // 4
+        "Clock Domain",      // 5
+        "Ethernet"           // 6
+    };
+    for (int i = 0; i < 7; i++)
+        write_name64(d + 4 + i * 64, strs[i]);
+    return 452;
+}
+
+static uint32_t build_desc_stream_port(uint8_t *d, uint16_t desc_type, uint16_t idx)
+{
+    if (idx != 0) return 0;
+    // 7.2.13 — 16 bytes
+    memset(d, 0, 16);
+    av_put_be16(d +  0, desc_type);
+    av_put_be16(d +  2, 0);
+    av_put_be16(d +  4, 0);                              // clock_domain_index
+    av_put_be16(d +  6, STREAM_PORT_FLAG_CLOCK_SYNC_SOURCE);
+    av_put_be16(d +  8, N_AUDIO_CHANNELS);               // number_of_controls = 0; reuse field
+    // For STREAM_PORT_INPUT: number_of_clusters = 8, base_cluster = 0
+    // For STREAM_PORT_OUTPUT: number_of_clusters = 8, base_cluster = 8
+    // 7.2.13 layout:
+    //   +0  desc_type
+    //   +2  desc_index
+    //   +4  clock_domain_index
+    //   +6  port_flags
+    //   +8  number_of_controls
+    //  +10  base_control
+    //  +12  number_of_clusters
+    //  +14  base_cluster
+    av_put_be16(d +  8, 0);                              // number_of_controls
+    av_put_be16(d + 10, 0);                              // base_control
+    av_put_be16(d + 12, N_AUDIO_CHANNELS);               // number_of_clusters
+    av_put_be16(d + 14, (desc_type == AEM_DESC_STREAM_PORT_INPUT) ? 0 : N_AUDIO_CHANNELS);
+    return 16;
+}
+
+static uint32_t build_desc_audio_cluster(uint8_t *d, uint16_t idx)
+{
+    // 7.2.16 — 83 bytes total:
+    //  +0   descriptor_type (2)
+    //  +2   descriptor_index (2)
+    //  +4   object_name (64)
+    //  +68  localized_description (2)
+    //  +70  signal_type (2)
+    //  +72  signal_index (2)
+    //  +74  signal_output (2)
+    //  +76  path_latency (4)
+    //  +80  block_latency (4)
+    //  +84  channel_count (2)
+    //  +86  format (1)
+    if (idx >= N_AUDIO_CHANNELS * 2) return 0;
+    memset(d, 0, 87);
+    av_put_be16(d, AEM_DESC_AUDIO_CLUSTER);
+    av_put_be16(d + 2, idx);
+
+    char name[8];
+    int ch = (idx < N_AUDIO_CHANNELS) ? (idx + 1) : (idx - N_AUDIO_CHANNELS + 1);
+    const char *prefix = (idx < N_AUDIO_CHANNELS) ? "In " : "Out ";
+    int n = 0;
+    while (prefix[n]) { name[n] = prefix[n]; n++; }
+    if (ch >= 10) name[n++] = '0' + (ch / 10);
+    name[n++] = '0' + (ch % 10);
+    name[n] = 0;
+    write_name64(d + 4, name);
+
+    av_put_be16(d + 68, 0xFFFF);                  // localized_description
+    // signal_type/index/output, path/block latency all 0
+    av_put_be16(d + 84, 1);                       // channel_count
+    d[86] = AUDIO_CLUSTER_FORMAT_MBLA;            // format
+    return 87;
 }
 
 // ---- AECP command handler ----
@@ -555,31 +781,44 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         av_put_be16(tp + 24, av_get_be16(pdu + 24));  // echo config_index
         av_put_be16(tp + 26, 0);                        // reserved
 
-        // Only index 0 supported for all descriptors
-        if (desc_index != 0) {
+        uint8_t *desc = tp + 28;
+        uint32_t desc_len = 0;
+
+        switch (desc_type) {
+            case AEM_DESC_ENTITY:
+                desc_len = build_desc_entity(desc, desc_index, s); break;
+            case AEM_DESC_CONFIGURATION:
+                desc_len = build_desc_configuration(desc, desc_index); break;
+            case AEM_DESC_AUDIO_UNIT:
+                desc_len = build_desc_audio_unit(desc, desc_index); break;
+            case AEM_DESC_STREAM_INPUT:
+                desc_len = build_desc_stream_input(desc, desc_index); break;
+            case AEM_DESC_STREAM_OUTPUT:
+                desc_len = build_desc_stream_output(desc, desc_index); break;
+            case AEM_DESC_AVB_INTERFACE:
+                desc_len = build_desc_avb_interface(desc, desc_index, s); break;
+            case AEM_DESC_CLOCK_SOURCE:
+                desc_len = build_desc_clock_source(desc, desc_index, s); break;
+            case AEM_DESC_CLOCK_DOMAIN:
+                desc_len = build_desc_clock_domain(desc, desc_index, s); break;
+            case AEM_DESC_LOCALE:
+                desc_len = build_desc_locale(desc, desc_index); break;
+            case AEM_DESC_STRINGS:
+                desc_len = build_desc_strings(desc, desc_index); break;
+            case AEM_DESC_STREAM_PORT_INPUT:
+            case AEM_DESC_STREAM_PORT_OUTPUT:
+                desc_len = build_desc_stream_port(desc, desc_type, desc_index); break;
+            case AEM_DESC_AUDIO_CLUSTER:
+                desc_len = build_desc_audio_cluster(desc, desc_index); break;
+            default:
+                break;
+        }
+
+        if (desc_len == 0) {
             aecp_set_status_cdl(tp, AECP_STATUS_NOT_IMPLEMENTED, 16);
             avdecc_eth_send(14 + 28);
             s->aecp_tx_count++;
             return;
-        }
-
-        uint8_t *desc = tp + 28;
-        uint32_t desc_len;
-
-        switch (desc_type) {
-            case AEM_DESC_ENTITY:        desc_len = build_desc_entity(desc, s);            break;
-            case AEM_DESC_CONFIGURATION: desc_len = build_desc_configuration(desc);         break;
-            case AEM_DESC_AUDIO_UNIT:    desc_len = build_desc_audio_unit(desc);            break;
-            case AEM_DESC_STREAM_INPUT:  desc_len = build_desc_stream(desc, desc_type, "AES3 Input");  break;
-            case AEM_DESC_STREAM_OUTPUT: desc_len = build_desc_stream(desc, desc_type, "AES3 Output"); break;
-            case AEM_DESC_AVB_INTERFACE: desc_len = build_desc_avb_interface(desc, s);      break;
-            case AEM_DESC_CLOCK_SOURCE:  desc_len = build_desc_clock_source(desc, s);       break;
-            case AEM_DESC_CLOCK_DOMAIN:  desc_len = build_desc_clock_domain(desc);          break;
-            default:
-                aecp_set_status_cdl(tp, AECP_STATUS_NOT_IMPLEMENTED, 16);
-                avdecc_eth_send(14 + 28);
-                s->aecp_tx_count++;
-                return;
         }
 
         aecp_set_status_cdl(tp, AECP_STATUS_SUCCESS, 16 + desc_len);
@@ -609,13 +848,111 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
 
     case AEM_CMD_GET_STREAM_FORMAT: {
         if (pdu_len < 28) return;
+        uint16_t dt = av_get_be16(pdu + 24);
+        uint16_t di = av_get_be16(pdu + 26);
+        const uint8_t *fmt = NULL;
+        if (dt == AEM_DESC_STREAM_INPUT) {
+            if (di == LISTENER_CRF_INDEX)      fmt = stream_fmt_crf_48k;
+            else if (di == LISTENER_AAF_INDEX) fmt = stream_fmt_aaf_8ch_48k;
+        } else if (dt == AEM_DESC_STREAM_OUTPUT && di == TALKER_AAF_INDEX) {
+            fmt = stream_fmt_aaf_8ch_48k;
+        }
         uint8_t *tf = avdecc_tx_buf();
         uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
         memcpy(tp + 24, pdu + 24, 4);                 // echo desc_type + desc_index
-        memcpy(tp + 28, stream_fmt_48k_stereo, 8);    // stream_format
-        aecp_set_status_cdl(tp, AECP_STATUS_SUCCESS, 24);
+        if (fmt) {
+            memcpy(tp + 28, fmt, 8);
+            aecp_set_status_cdl(tp, AECP_STATUS_SUCCESS, 24);
+        } else {
+            memset(tp + 28, 0, 8);
+            aecp_set_status_cdl(tp, AECP_STATUS_NO_SUCH_DESCRIPTOR, 24);
+        }
         avdecc_eth_send(64);  // 14 + 36 = 50, pad to 64
         s->aecp_tx_count++;
+        break;
+    }
+
+    case AEM_CMD_SET_STREAM_FORMAT: {
+        // Payload: desc_type(2) desc_index(2) stream_format(8)
+        if (pdu_len < 36) return;
+        uint16_t dt = av_get_be16(pdu + 24);
+        uint16_t di = av_get_be16(pdu + 26);
+        const uint8_t *want = pdu + 28;
+
+        const uint8_t *expect = NULL;
+        if (dt == AEM_DESC_STREAM_INPUT) {
+            if (di == LISTENER_CRF_INDEX)      expect = stream_fmt_crf_48k;
+            else if (di == LISTENER_AAF_INDEX) expect = stream_fmt_aaf_8ch_48k;
+        } else if (dt == AEM_DESC_STREAM_OUTPUT && di == TALKER_AAF_INDEX) {
+            expect = stream_fmt_aaf_8ch_48k;
+        }
+
+        uint8_t st;
+        if (!expect) {
+            st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+        } else {
+            int diff = 0;
+            for (int i = 0; i < 8; i++)
+                diff |= want[i] ^ expect[i];
+            st = diff ? AECP_STATUS_BAD_ARGUMENTS : AECP_STATUS_SUCCESS;
+        }
+
+        uint8_t *tf = avdecc_tx_buf();
+        uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+        memcpy(tp + 24, pdu + 24, 12);                // echo desc_type+idx+format
+        aecp_set_status_cdl(tp, st, 24);
+        avdecc_eth_send(64);
+        s->aecp_tx_count++;
+        printf("[AVDECC] SET_STREAM_FORMAT dt=%u di=%u -> status=%u\n", dt, di, st);
+        break;
+    }
+
+    case AEM_CMD_GET_CLOCK_SOURCE: {
+        // Payload (response): desc_type(2) desc_index(2) clock_source_index(2) rsvd(2)
+        if (pdu_len < 28) return;
+        uint16_t dt = av_get_be16(pdu + 24);
+        uint16_t di = av_get_be16(pdu + 26);
+        uint8_t st = (dt == AEM_DESC_CLOCK_DOMAIN && di == 0)
+                       ? AECP_STATUS_SUCCESS : AECP_STATUS_NO_SUCH_DESCRIPTOR;
+        uint8_t *tf = avdecc_tx_buf();
+        uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+        memcpy(tp + 24, pdu + 24, 4);                 // echo desc_type+idx
+        av_put_be16(tp + 28, s->current_clock_source);
+        av_put_be16(tp + 30, 0);                       // reserved
+        aecp_set_status_cdl(tp, st, 20);
+        avdecc_eth_send(64);
+        s->aecp_tx_count++;
+        break;
+    }
+
+    case AEM_CMD_SET_CLOCK_SOURCE: {
+        if (pdu_len < 32) return;
+        uint16_t dt  = av_get_be16(pdu + 24);
+        uint16_t di  = av_get_be16(pdu + 26);
+        uint16_t src = av_get_be16(pdu + 28);
+
+        uint8_t st;
+        if (dt != AEM_DESC_CLOCK_DOMAIN || di != 0)
+            st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+        else if (src >= N_CLOCK_SOURCES)
+            st = AECP_STATUS_BAD_ARGUMENTS;
+        else {
+            s->current_clock_source = src;
+            st = AECP_STATUS_SUCCESS;
+            if (s->on_clock_source_change)
+                s->on_clock_source_change(src);
+        }
+
+        uint8_t *tf = avdecc_tx_buf();
+        uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+        memcpy(tp + 24, pdu + 24, 4);
+        av_put_be16(tp + 28, s->current_clock_source);
+        av_put_be16(tp + 30, 0);
+        aecp_set_status_cdl(tp, st, 20);
+        avdecc_eth_send(64);
+        s->aecp_tx_count++;
+        printf("[AVDECC] SET_CLOCK_SOURCE -> %u (status=%u)\n",
+               s->current_clock_source, st);
         break;
     }
 
@@ -714,8 +1051,7 @@ void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len)
 // Init
 // ---------------------------------------------------------------------------
 
-void avdecc_init(avdecc_state_t *s, const uint8_t *mac_addr,
-                 const uint8_t *stream_id, const uint8_t *stream_dest_mac)
+void avdecc_init(avdecc_state_t *s, const uint8_t *mac_addr)
 {
     memset(s, 0, sizeof(*s));
 
@@ -726,14 +1062,20 @@ void avdecc_init(avdecc_state_t *s, const uint8_t *mac_addr,
     s->entity_id[6] = 0x00;
     s->entity_id[7] = 0x00;
 
-    memcpy(s->stream_id, stream_id, 8);
-    memcpy(s->stream_dest_mac, stream_dest_mac, 6);
-
     avdecc_txslot = 0;
 
     printf("[AVDECC] Entity ID=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
            s->entity_id[0], s->entity_id[1], s->entity_id[2], s->entity_id[3],
            s->entity_id[4], s->entity_id[5], s->entity_id[6], s->entity_id[7]);
+}
+
+void avdecc_set_talker_stream(avdecc_state_t *s, uint16_t uid,
+                              const uint8_t *stream_id,
+                              const uint8_t *stream_dest_mac)
+{
+    if (uid >= AVDECC_MAX_TALKERS) return;
+    memcpy(s->talkers[uid].stream_id, stream_id, 8);
+    memcpy(s->talkers[uid].dest_mac,  stream_dest_mac, 6);
 }
 
 void avdecc_depart(avdecc_state_t *s)

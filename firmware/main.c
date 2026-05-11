@@ -19,6 +19,8 @@
 #include "aes3.h"
 #include "srp.h"
 #include "avdecc.h"
+#include "mcr.h"
+#include "aaf.h"
 
 // MAC address — locally administered, unique per device.
 // TODO: read from SPI flash or EEPROM in production.
@@ -29,6 +31,13 @@ static avtp_stream_t avtp;
 static aes3_state_t aes3;
 static srp_state_t srp;
 static avdecc_state_t avdecc;
+static mcr_state_t    mcr;
+static aaf_state_t    aaf;
+
+// Local stream UIDs (must match build_desc_* in avdecc.c)
+#define LISTENER_UID_CRF  0
+#define LISTENER_UID_AAF  1
+#define TALKER_UID_AAF    0
 
 // Audio ring buffers (talker + listener)
 static audio_ring_t tx_audio_ring;
@@ -80,16 +89,28 @@ static void dispatch_rx(void)
                 break;
             case AVTP_ETHERTYPE: {
                 rx_avtp++;
-                // AVTP and AVDECC share EtherType 0x22F0.
-                // Peek at subtype byte to distinguish.
+                // AVTP and AVDECC share EtherType 0x22F0. Demux by subtype.
+                // Control PDUs (ADP/AECP/ACMP) have cd=1 → byte 0 = 0xFA/B/C.
+                // Data PDUs (61883/AAF/CRF) have cd=0 → byte 0 = 0x00/02/04.
                 if (len >= 15) {
                     uint8_t subtype = frame[14];
-                    if (subtype == AVTP_SUBTYPE_ADP ||
-                        subtype == AVTP_SUBTYPE_AECP ||
-                        subtype == AVTP_SUBTYPE_ACMP) {
-                        avdecc_process_rx(&avdecc, frame, len);
-                    } else {
-                        avtp_process_rx(&avtp, frame, len);
+                    switch (subtype) {
+                        case AVTP_SUBTYPE_ADP:
+                        case AVTP_SUBTYPE_AECP:
+                        case AVTP_SUBTYPE_ACMP:
+                            avdecc_process_rx(&avdecc, frame, len);
+                            break;
+                        case AVTP_SUBTYPE_CRF:
+                            mcr_process_rx(&mcr, frame, len);
+                            break;
+                        case AVTP_SUBTYPE_AAF:
+                            aaf_process_rx(&aaf, frame, len);
+                            break;
+                        case AVTP_SUBTYPE_61883_IIDC:
+                            avtp_process_rx(&avtp, frame, len);
+                            break;
+                        default:
+                            break;
                     }
                 }
                 break;
@@ -373,14 +394,17 @@ static void check_uart_cmd(void)
                    (unsigned long)srp.rx_pdu_count,
                    srp.domain_received,
                    srp.talker_registered);
-            printf("[AVDECC] adp=%lu acmp=%lu/%lu aecp=%lu/%lu t=%d l=%d\n",
+            printf("[AVDECC] adp=%lu acmp=%lu/%lu aecp=%lu/%lu "
+                   "tx[aaf]=%d rx[crf]=%d rx[aaf]=%d clk_src=%u\n",
                    (unsigned long)avdecc.adp_tx_count,
                    (unsigned long)avdecc.acmp_rx_count,
                    (unsigned long)avdecc.acmp_tx_count,
                    (unsigned long)avdecc.aecp_rx_count,
                    (unsigned long)avdecc.aecp_tx_count,
-                   avdecc.talker_connected,
-                   avdecc.listener_connected);
+                   avdecc.talkers[TALKER_UID_AAF].connected,
+                   avdecc.listeners[LISTENER_UID_CRF].connected,
+                   avdecc.listeners[LISTENER_UID_AAF].connected,
+                   avdecc.current_clock_source);
             printf("[I2S] %lu %lu %lu\n",
                    (unsigned long)main_i2s_mmcm_locked_read(),
                    (unsigned long)main_i2s_bck_count_read(),
@@ -462,9 +486,47 @@ static void check_uart_cmd(void)
                        hba, hbb, d, d ? "alive" : "*** DEAD ***");
             }
             break;
+        case 'm':
+            printf("\n[MCR] bound=%d locked=%d step=%lu rx=%lu seq_err=%lu other=%lu bad_type=%lu\n",
+                   mcr.bound, mcr.servo_locked,
+                   (unsigned long)mcr.servo_step_count,
+                   (unsigned long)mcr.rx_count,
+                   (unsigned long)mcr.seq_errors,
+                   (unsigned long)mcr.rx_other_count,
+                   (unsigned long)mcr.bad_type_count);
+            printf("  base_freq=%lu ts_interval=%u ts/pdu=%u type=%u pull=%u\n",
+                   (unsigned long)mcr.base_frequency,
+                   mcr.timestamp_interval, mcr.timestamps_per_pdu,
+                   mcr.type, mcr.pull);
+            printf("  offset_ns=%08lx_%08lx integral=%08lx_%08lx\n",
+                   (unsigned long)(uint32_t)(mcr.latest_offset_ns >> 32),
+                   (unsigned long)(uint32_t)mcr.latest_offset_ns,
+                   (unsigned long)(uint32_t)(mcr.servo_integral >> 32),
+                   (unsigned long)(uint32_t)mcr.servo_integral);
+            printf("  inc base=%08lx cur=%08lx hw_sample_count=%lu hw_phase=%08lx\n",
+                   (unsigned long)mcr.base_increment,
+                   (unsigned long)mcr.current_increment,
+                   (unsigned long)mcr_sample_count_read(),
+                   (unsigned long)mcr_phase_read());
+            break;
+        case 'a':
+            printf("\n[AAF] bound=%d rx_en=%d tx_en=%d\n"
+                   "  rx: count=%lu seq_err=%lu other=%lu fmt_err=%lu lvl=%lu\n"
+                   "  tx: count=%lu underrun=%lu lvl=%lu seq=%u\n"
+                   "  last_pres_ts=%08lx\n",
+                   aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
+                   (unsigned long)aaf.rx_count, (unsigned long)aaf.rx_seq_errors,
+                   (unsigned long)aaf.rx_other_count, (unsigned long)aaf.format_errors,
+                   (unsigned long)aaf_rx_level(&aaf),
+                   (unsigned long)aaf.tx_packet_count,
+                   (unsigned long)aaf.tx_underrun_count,
+                   (unsigned long)aaf_tx_level(&aaf),
+                   aaf.tx_seq,
+                   (unsigned long)aaf.last_presentation_ts);
+            break;
         case 'h':
         case '?':
-            printf("\ns t l d p P R k e r\n  P=phy dump  R=phy reset  k=RXC skew\n");
+            printf("\ns t l d p P R k e r m a\n  P=phy dump  R=phy reset  k=RXC skew  m=MCR  a=AAF\n");
             break;
     }
 }
@@ -473,37 +535,44 @@ static void check_uart_cmd(void)
 // AVDECC callbacks — wire connection management to AVTP/SRP
 // ---------------------------------------------------------------------------
 
-static void on_talker_connect(const uint8_t *listener_entity_id)
+static void on_talker_connect(uint16_t uid, const uint8_t *listener_entity_id)
 {
     (void)listener_entity_id;
-    avtp_tx_enable(&avtp, 1);
+    if (uid != TALKER_UID_AAF) return;
+    aaf_tx_enable(&aaf, 1);
     srp_talker_enable(&srp, 1);
-    printf("[main] Talker stream started via AVDECC\n");
+    printf("[main] AAF talker started via AVDECC\n");
 }
 
-static void on_talker_disconnect(void)
+static void on_talker_disconnect(uint16_t uid)
 {
-    avtp_tx_enable(&avtp, 0);
+    if (uid != TALKER_UID_AAF) return;
+    aaf_tx_enable(&aaf, 0);
     srp_talker_enable(&srp, 0);
-    printf("[main] Talker stream stopped via AVDECC\n");
+    printf("[main] AAF talker stopped via AVDECC\n");
 }
 
-static void on_listener_connect(const uint8_t *stream_id, const uint8_t *dest_mac,
+static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
+                                const uint8_t *dest_mac,
                                 const uint8_t *talker_entity_id)
 {
-    (void)dest_mac;
-    (void)talker_entity_id;
-    avtp_set_listen_stream_id(&avtp, stream_id);
-    avtp_rx_enable(&avtp, 1);
-    srp_listener_enable(&srp, stream_id, 1);
-    printf("[main] Listener started via AVDECC\n");
+    (void)dest_mac; (void)talker_entity_id;
+    if (uid == LISTENER_UID_CRF) {
+        mcr_bind(&mcr, stream_id);
+    } else if (uid == LISTENER_UID_AAF) {
+        aaf_bind(&aaf, stream_id);
+        srp_listener_enable(&srp, stream_id, 1);
+    }
 }
 
-static void on_listener_disconnect(void)
+static void on_listener_disconnect(uint16_t uid)
 {
-    avtp_rx_enable(&avtp, 0);
-    srp_listener_enable(&srp, avtp.stream_id, 0);
-    printf("[main] Listener stopped via AVDECC\n");
+    if (uid == LISTENER_UID_CRF) {
+        mcr_unbind(&mcr);
+    } else if (uid == LISTENER_UID_AAF) {
+        aaf_unbind(&aaf);
+        srp_listener_enable(&srp, aaf.stream_id, 0);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -533,22 +602,27 @@ int main(void)
     avtp_init(&avtp, mac_addr, &tx_audio_ring, &rx_audio_ring);
     aes3_init(&aes3);
     srp_init(&srp, mac_addr);
-
-    // Configure SRP talker parameters to match our AVTP stream
+    mcr_init(&mcr, CONFIG_CLOCK_FREQUENCY, 48000);
     {
-        static const uint8_t avtp_mcast[] = {0x91, 0xE0, 0xF0, 0x00, 0xFE, 0x00};
-        srp_talker_set(&srp, avtp.stream_id, avtp_mcast, AVTP_FRAME_LEN);
+        // AAF uses the same talker stream_id/dest_mac advertised in AVDECC.
+        // stream_id = MAC + 0x00 0x01 (matches avtp_set_stream_id default).
+        uint8_t aaf_stream_id[8] = {0,0,0,0,0,0, 0x00, 0x01};
+        memcpy(aaf_stream_id, mac_addr, 6);
+        static const uint8_t aaf_mcast[] = {0x91, 0xE0, 0xF0, 0x00, 0xFE, 0x00};
+        aaf_init(&aaf, mac_addr, aaf_stream_id, aaf_mcast);
     }
 
-    // Init AVDECC (discovery + connection management)
-    {
-        static const uint8_t avtp_mcast[] = {0x91, 0xE0, 0xF0, 0x00, 0xFE, 0x00};
-        avdecc_init(&avdecc, mac_addr, avtp.stream_id, avtp_mcast);
-        avdecc.on_talker_connect    = on_talker_connect;
-        avdecc.on_talker_disconnect = on_talker_disconnect;
-        avdecc.on_listener_connect  = on_listener_connect;
-        avdecc.on_listener_disconnect = on_listener_disconnect;
-    }
+    // Configure SRP talker to advertise our AAF stream
+    srp_talker_set(&srp, aaf.stream_id, aaf.dest_mac, 230);   // 14+24+192
+
+    // Init AVDECC (discovery + connection management) using the AAF talker
+    // stream identity as the advertised one.
+    avdecc_init(&avdecc, mac_addr);
+    avdecc_set_talker_stream(&avdecc, TALKER_UID_AAF, aaf.stream_id, aaf.dest_mac);
+    avdecc.on_talker_connect    = on_talker_connect;
+    avdecc.on_talker_disconnect = on_talker_disconnect;
+    avdecc.on_listener_connect  = on_listener_connect;
+    avdecc.on_listener_disconnect = on_listener_disconnect;
 
     printf("[main] Press 'h' for commands.\n\n");
 
@@ -559,6 +633,16 @@ int main(void)
         aes3_poll(&aes3, &tx_audio_ring, &rx_audio_ring);
         srp_poll(&srp);
         avdecc_poll(&avdecc);
+        mcr_servo_update(&mcr);
+        // RX→TX loopback: drain AAF RX buffer into TX buffer so a listener
+        // connected to our talker sees back what was sent into the listener.
+        // Real audio routing (AES3 source, MCR-clocked) replaces this.
+        {
+            int32_t blk[AAF_CHANNELS];
+            while (aaf_rx_pop(&aaf, blk))
+                aaf_tx_push(&aaf, blk);
+        }
+        aaf_tx_poll(&aaf);
         dac_test_poll();
         check_uart_cmd();
     }

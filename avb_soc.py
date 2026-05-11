@@ -756,7 +756,11 @@ def main():
         sys_clk_freq             = int(args.sys_clk_freq),
         cpu_type                 = "vexriscv",
         cpu_variant              = "minimal",
-        integrated_main_ram_size = 0x10000,  # 64 KB SRAM
+        # 64 KB integrated SRAM holds .data/.bss/stack. The default 8 KB
+        # is too small once AAF per-channel buffers (4 KB total) are in
+        # play. Use SRAM rather than a separate main_ram region so all
+        # firmware data lives in the proven-bootable scratchpad.
+        integrated_sram_size     = 0x10000,  # 64 KB SRAM (RW data + stack)
         integrated_rom_size      = 0x18000,  # 96 KB ROM
         uart_name                = "serial",
     )
@@ -777,7 +781,17 @@ def main():
 
     builder = Builder(soc, **builder_kwargs)
     if args.build:
-        builder.build()
+        # nextpnr-xilinx seed selection. The design is on the timing edge:
+        # eth_tx_clk wants 125 MHz, our 8-seed sweep got 81–124 MHz with
+        # none cleanly passing the static-timing budget. Seed=4 (124.10 MHz)
+        # is verified-working on hardware — RGMII actually clocks correctly
+        # despite the 0.9 MHz nominal miss. If a future change pushes
+        # placement worse, run a fresh seed sweep:
+        #     for s in 2 3 4 5 7 11 13 17 19; do
+        #         nextpnr-xilinx … --seed $s --freq 125 …
+        #     done
+        # and pick the seed with the highest eth_tx_clk result.
+        builder.build(seed=4)
 
     if args.load:
         prog = soc.platform.create_programmer()

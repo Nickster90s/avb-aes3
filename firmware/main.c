@@ -341,8 +341,22 @@ int main(void)
 
     printf("\n[AVB-AES3]\n");
 
-    // No PHY MDIO writes at boot — factory strap defaults only.
-    // TX-fix experiment: matches yesterday-evening's TX-working state.
+    // Enable PHY-side RGMII-ID delays at boot. The B50612D on i9plus needs:
+    //   shadow_07 bit 8 = 1 (RXC delay) — reg 0x18 write 0xF1E7
+    //   shadow_03 bit 9 = 1 (TXC delay) — reg 0x1C write 0x8E00
+    // Without TXC delay our outgoing frames are mis-clocked at the PHY and
+    // never make it onto the wire (tcpdump shows 0 packets from us even when
+    // firmware reports adp_tx_count growing). PHY shadow regs persist across
+    // bitstream reloads but NOT across power-cycle, so program at boot.
+    {
+        int a = 1;
+        mdio_write(a, 0x00, 0x9140);       // soft-reset + autoneg + 1G + FD
+        busy_wait(200);
+        mdio_write(a, 0x18, 0xF1E7);       // shadow_07 bit 8 = 1
+        busy_wait(10);
+        mdio_write(a, 0x1C, 0x8E00);       // shadow_03 bit 9 = 1
+        busy_wait(10);
+    }
     busy_wait(100);
 
     // Init audio ring buffers

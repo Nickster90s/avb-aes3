@@ -54,6 +54,26 @@ static inline uint32_t av_get_be32(const uint8_t *p)
 // TX
 // ---------------------------------------------------------------------------
 
+// Per-stream identity
+#define N_STREAM_INPUTS   2     // [0]=CRF Media Clock, [1]=AAF Audio Input
+#define N_STREAM_OUTPUTS  1     // [0]=AAF Audio Output
+#define N_CLOCK_SOURCES   2     // [0]=Internal osc, [1]=CRF stream
+#define N_AUDIO_CHANNELS  8     // 8ch AAF I/O
+#define LISTENER_CRF_INDEX 0
+#define LISTENER_AAF_INDEX 1
+#define TALKER_AAF_INDEX   0
+#define CLK_SRC_INTERNAL   0
+#define CLK_SRC_MEDIA      1    // CRF-driven media clock
+
+// Stream-format constants (decoded from session_mgr.aemt + IEEE 1722.1-2013
+// Annex A; see avdecc.h for byte-by-byte derivation).
+//
+// Listener[0] = CRF audio-sample 48 kHz (Media Clock Input).
+// Listener[1] = AAF PCM 8ch / 48 kHz / 32-bit (Audio Input).
+// Talker[0]   = AAF PCM 8ch / 48 kHz / 32-bit (Audio Output).
+static const uint8_t stream_fmt_crf_48k[8]     = STREAM_FMT_CRF_48K;
+static const uint8_t stream_fmt_aaf_8ch_48k[8] = STREAM_FMT_AAF_8CH_48K;
+
 static uint32_t avdecc_txslot;
 
 static uint8_t *avdecc_tx_buf(void)
@@ -140,15 +160,15 @@ static void adp_send(avdecc_state_t *s, uint8_t msg_type)
                     ADP_CAP_GPTP_SUPPORTED;
     av_put_be32(p + 20, caps);
 
-    // talker_stream_sources = 1
-    av_put_be16(p + 24, 1);
+    // talker_stream_sources = N_STREAM_OUTPUTS (1 AAF talker)
+    av_put_be16(p + 24, N_STREAM_OUTPUTS);
 
     // talker_capabilities
     uint16_t talker_caps = ADP_TALKER_CAP_IMPLEMENTED | ADP_TALKER_CAP_AUDIO_SOURCE;
     av_put_be16(p + 26, talker_caps);
 
-    // listener_stream_sinks = 1
-    av_put_be16(p + 28, 1);
+    // listener_stream_sinks = N_STREAM_INPUTS (1 CRF + 1 AAF)
+    av_put_be16(p + 28, N_STREAM_INPUTS);
 
     // listener_capabilities
     uint16_t listener_caps = ADP_LISTENER_CAP_IMPLEMENTED | ADP_LISTENER_CAP_AUDIO_SINK;
@@ -401,25 +421,6 @@ static void acmp_handle_get_rx_state(avdecc_state_t *s, const uint8_t *pdu)
 #define AECP_OFF_SEQ_ID         20
 #define AECP_OFF_CMD_TYPE       22
 
-// Stream-format constants (decoded from session_mgr.aemt + IEEE 1722.1-2013
-// Annex A; see avdecc.h for byte-by-byte derivation).
-//
-// Listener[0] = CRF audio-sample 48 kHz (Media Clock Input).
-// Listener[1] = AAF PCM 8ch / 48 kHz / 32-bit (Audio Input).
-// Talker[0]   = AAF PCM 8ch / 48 kHz / 32-bit (Audio Output).
-static const uint8_t stream_fmt_crf_48k[8]    = STREAM_FMT_CRF_48K;
-static const uint8_t stream_fmt_aaf_8ch_48k[8] = STREAM_FMT_AAF_8CH_48K;
-
-// Per-stream identity
-#define N_STREAM_INPUTS   2     // [0]=CRF Media Clock, [1]=AAF Audio Input
-#define N_STREAM_OUTPUTS  1     // [0]=AAF Audio Output
-#define N_CLOCK_SOURCES   2     // [0]=Internal osc, [1]=CRF stream
-#define N_AUDIO_CHANNELS  8     // 8ch AAF I/O
-#define LISTENER_CRF_INDEX 0
-#define LISTENER_AAF_INDEX 1
-#define TALKER_AAF_INDEX   0
-#define CLK_SRC_INTERNAL   0
-#define CLK_SRC_MEDIA      1    // CRF-driven media clock
 
 // Helper: write zero-padded 64-byte name field
 static void write_name64(uint8_t *p, const char *s)

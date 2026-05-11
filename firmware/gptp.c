@@ -124,9 +124,15 @@ ptp_timestamp_t gptp_read_time(void)
 
 ptp_timestamp_t gptp_read_rx_timestamp(void)
 {
+    // Reads the value popped from the RX timestamp ring by the central
+    // RX dispatcher (one pop per slot, before any handler runs). Calling
+    // this multiple times within one frame returns the same value — the
+    // pop register only updates when main_rx_ts_pop_write(1) is issued.
     ptp_timestamp_t ts;
-    ts.seconds     = tsu_rx_ts_seconds_read();
-    ts.nanoseconds = tsu_rx_ts_nsec_read();
+    uint32_t hi  = main_rx_ts_pop_hi_read();
+    uint32_t mid = main_rx_ts_pop_mid_read();
+    ts.seconds     = ((uint64_t)hi << 32) | mid;
+    ts.nanoseconds = main_rx_ts_pop_lo_read();
     return ts;
 }
 
@@ -138,9 +144,13 @@ ptp_timestamp_t gptp_read_tx_timestamp(void)
     return ts;
 }
 
-void gptp_set_addend(uint32_t addend)
+void gptp_set_addend_full(uint64_t addend_full)
 {
-    tsu_addend_write(addend);
+    // Split 52-bit addend_full into 32-bit integer + 20-bit fractional.
+    // TSU concatenates them as Cat(addend_frac, addend) → addend is the
+    // upper bits of full_addend, addend_frac is the low 20.
+    tsu_addend_write     ((uint32_t)(addend_full >> 20));
+    tsu_addend_frac_write((uint32_t)(addend_full & 0xFFFFFu));
 }
 
 void gptp_step_time(ptp_timestamp_t t)
@@ -205,13 +215,20 @@ static void build_ptp_header(uint8_t *ptp, uint8_t msg_type, uint16_t msg_len,
                               uint16_t seq_id, int8_t log_interval)
 {
     memset(ptp, 0, PTP_HEADER_LEN);
-    ptp[PTP_OFF_MSG_TYPE]  = msg_type & 0x0F;
+    // 802.1AS §10.5.2.1.6: transportSpecific MUST be 1 (high nibble of byte 0).
+    // With transportSpecific=0 we look like generic IEEE 1588 PTP and gPTP
+    // peers silently drop our frames — that's why pdelay_resp=0 and sync=0.
+    ptp[PTP_OFF_MSG_TYPE]  = 0x10 | (msg_type & 0x0F);
     ptp[PTP_OFF_VERSION]   = 0x02;  // PTP version 2
     put_be16(ptp + PTP_OFF_LENGTH, msg_len);
     ptp[PTP_OFF_DOMAIN] = GPTP_DOMAIN;
-    // Flags: two-step for event messages
-    if (msg_type <= 0x3)  // Event message
-        put_be16(ptp + PTP_OFF_FLAGS, PTP_FLAG_TWO_STEP);
+    // Flags: 802.1AS requires ptpTimescale (bit 3 of byte 7) on every msg.
+    // twoStepFlag (bit 1 of byte 6) only on Sync (we don't send) and
+    // Pdelay_Resp (we do — followed by Pdelay_Resp_Follow_Up).
+    uint16_t flags = PTP_FLAG_PTP_TIMESCALE;
+    if (msg_type == PTP_MSG_PDELAY_RESP)
+        flags |= PTP_FLAG_TWO_STEP;
+    put_be16(ptp + PTP_OFF_FLAGS, flags);
     // Source port identity
     memcpy(ptp + PTP_OFF_SRC_PORT_ID, clock_id, CLOCK_ID_LEN);
     put_be16(ptp + PTP_OFF_SRC_PORT_ID + 8, port_num);
@@ -337,22 +354,46 @@ static void process_follow_up(gptp_t *g, const uint8_t *ptp, uint32_t ptp_len)
     // Extract preciseOriginTimestamp from Follow_Up body
     g->sync_origin_ts = get_ptp_ts(ptp + PTP_HEADER_LEN);
 
-    // Add correction field from Follow_Up (cumulative with Sync correction)
+    // 802.1AS §10.2.7.2.4 / §11.4.4.3.4: transparent-clock bridges update
+    // the Follow_Up's correctionField (not Sync's). The slave shall use the
+    // Follow_Up's correctionField alone — combining it with Sync's would
+    // double-count bridge residence time. Matches GenAVB md_sync_rcv.
     int64_t fup_correction = get_be64_signed(ptp + PTP_OFF_CORRECTION);
-    int64_t total_correction = g->sync_correction + fup_correction;
 
     // Compute offset from master:
-    // offset = sync_rx_ts - sync_origin_ts - correction - meanPathDelay
+    // offset = (sync_rx_ts - bias) - sync_origin_ts - correction - meanPathDelay
     int64_t rx_ns   = gptp_ts_diff_ns(g->sync_rx_ts, (ptp_timestamp_t){0, 0});
     int64_t orig_ns = gptp_ts_diff_ns(g->sync_origin_ts, (ptp_timestamp_t){0, 0});
 
     // Correction field is in units of 2^-16 nanoseconds
-    int64_t corr_ns = total_correction >> 16;
+    int64_t corr_ns = fup_correction >> 16;
 
+    // No static bias correction here. The capture-point delay between wire
+    // SFD and our sys-domain mac.core.source latch is constant for a given
+    // P&R but varies build-to-build; the PI servo's integrator absorbs it
+    // as a steady-state addend offset, which is the right place for it.
     g->offset_from_master_ns = rx_ns - orig_ns - corr_ns - g->mean_path_delay_ns;
 
     g->sync_received = 0;
     g->sync_count++;
+
+    // Debug: every 256th sync, dump the four offset components in hex pairs.
+    // picolibc's %lld truncates int64 to low-32-signed, so use 64-bit hex.
+    static uint32_t dump_count = 0;
+    if ((dump_count++ & 0xFF) == 0) {
+        uint64_t urx   = (uint64_t)rx_ns;
+        uint64_t uorig = (uint64_t)orig_ns;
+        uint64_t uoff  = (uint64_t)g->offset_from_master_ns;
+        uint64_t upd   = (uint64_t)g->mean_path_delay_ns;
+        printf("[gPTP] dump rx=%08lx_%08lx orig=%08lx_%08lx pd=%08lx_%08lx off=%08lx_%08lx sec=%08lx_%08lx ns=%08lx\n",
+               (unsigned long)(urx   >> 32), (unsigned long)(urx   & 0xFFFFFFFF),
+               (unsigned long)(uorig >> 32), (unsigned long)(uorig & 0xFFFFFFFF),
+               (unsigned long)(upd   >> 32), (unsigned long)(upd   & 0xFFFFFFFF),
+               (unsigned long)(uoff  >> 32), (unsigned long)(uoff  & 0xFFFFFFFF),
+               (unsigned long)(g->sync_rx_ts.seconds >> 32),
+               (unsigned long)(g->sync_rx_ts.seconds & 0xFFFFFFFF),
+               (unsigned long)g->sync_rx_ts.nanoseconds);
+    }
 
     gptp_servo_update(g);
 }
@@ -431,61 +472,80 @@ void gptp_servo_update(gptp_t *g)
 {
     int64_t offset = g->offset_from_master_ns;
 
-    // First sync: step the clock directly
-    if (g->servo_step_count == 0) {
-        printf("[gPTP] Initial step: offset=%lld ns\n", (long long)offset);
-        gptp_adjust_offset(-offset);
-        g->servo_step_count = 1;
+    // Show offset+addend in hex periodically so we can read true int64s
+    // (picolibc's %lld truncates to int32 for large magnitudes).
+    static uint32_t dbg_count = 0;
+    if ((dbg_count++ & 0xFF) == 0) {
+        printf("[gPTP] dbg off=0x%08lx_%08lx add=0x%08lx_%08lx int=0x%08lx_%08lx\n",
+               (unsigned long)((uint64_t)offset >> 32),
+               (unsigned long)((uint64_t)offset & 0xFFFFFFFF),
+               (unsigned long)(g->current_addend_full >> 32),
+               (unsigned long)(g->current_addend_full & 0xFFFFFFFF),
+               (unsigned long)((uint64_t)g->freq_integral >> 32),
+               (unsigned long)((uint64_t)g->freq_integral & 0xFFFFFFFF));
+    }
+
+    // Coarse step on first lock or whenever offset blows past ~500 ms
+    // (the TSU offset register is 34-bit signed ns; 500 ms is well inside).
+    int64_t big_thresh = 500000000LL;
+    if (g->servo_step_count == 0 || offset > big_thresh || offset < -big_thresh) {
+        ptp_timestamp_t tgt = g->sync_origin_ts;
+        uint64_t add_ns = (uint64_t)tgt.nanoseconds + (uint64_t)g->mean_path_delay_ns;
+        if (add_ns >= 1000000000ULL) {
+            tgt.seconds += add_ns / 1000000000ULL;
+            tgt.nanoseconds = (uint32_t)(add_ns % 1000000000ULL);
+        } else {
+            tgt.nanoseconds = (uint32_t)add_ns;
+        }
+        if (g->servo_step_count == 0) {
+            printf("[gPTP] Initial step to master ts %lu.%09lu (off=%lld ns)\n",
+                   (unsigned long)tgt.seconds, (unsigned long)tgt.nanoseconds,
+                   (long long)offset);
+        } else {
+            static uint32_t big_step_log = 0;
+            if ((big_step_log++ & 0x3F) == 0)
+                printf("[gPTP] Big step (offset=%lld ns)\n", (long long)offset);
+        }
+        gptp_step_time(tgt);
+        // Reset servo state so the integrator doesn't carry pre-step bias.
+        g->servo_step_count    = 1;
+        g->freq_integral       = 0;
+        g->current_addend_full = g->base_addend_full;
+        gptp_set_addend_full(g->current_addend_full);
         return;
     }
 
-    // If offset is very large (>100ms), step instead of slew
-    if (offset > 100000000LL || offset < -100000000LL) {
-        printf("[gPTP] Large offset step: %lld ns\n", (long long)offset);
-        gptp_adjust_offset(-offset);
-        g->freq_integral = 0;
-        return;
-    }
+    // PI servo on the 52-bit addend (frequency word).
+    // Positive offset means slave clock is AHEAD of master → we want to
+    // SLOW the slave by reducing addend.
+    g->freq_integral += offset;
+    if (g->freq_integral >  SERVO_INTEGRAL_CLAMP_NS) g->freq_integral =  SERVO_INTEGRAL_CLAMP_NS;
+    if (g->freq_integral < -SERVO_INTEGRAL_CLAMP_NS) g->freq_integral = -SERVO_INTEGRAL_CLAMP_NS;
 
-    // PI controller
-    // Proportional: immediate frequency adjustment
-    int64_t p_term = (offset * SERVO_KP) >> 16;
+    int64_t kp_term = (offset            * SERVO_KP_NUM) / SERVO_KP_DEN;
+    int64_t ki_term = (g->freq_integral  * SERVO_KI_NUM) / SERVO_KI_DEN;
+    int64_t addend_delta = -(kp_term + ki_term);
 
-    // Integral: accumulate for long-term drift
-    g->freq_integral += (offset * SERVO_KI) >> 16;
-
-    // Clamp integral to prevent windup (±10 ppm worth of addend)
-    int64_t max_integral = (int64_t)g->base_addend / 100;  // ~1% max
-    if (g->freq_integral > max_integral)
-        g->freq_integral = max_integral;
-    if (g->freq_integral < -max_integral)
-        g->freq_integral = -max_integral;
-
-    // Apply: adjust addend (higher addend = faster clock)
-    // Negative offset means we're ahead → slow down → decrease addend
-    int64_t adjustment = p_term + g->freq_integral;
-    int64_t new_addend = (int64_t)g->base_addend - adjustment;
-
-    if (new_addend > 0 && new_addend < (int64_t)g->base_addend * 2) {
-        g->current_addend = (uint32_t)new_addend;
-        gptp_set_addend(g->current_addend);
-    }
+    // Apply, clamped to the 52-bit addend space.
+    int64_t addend_new = (int64_t)g->base_addend_full + addend_delta;
+    if (addend_new < 1)                  addend_new = 1;
+    if (addend_new >= ((int64_t)1 << 52)) addend_new = ((int64_t)1 << 52) - 1;
+    g->current_addend_full = (uint64_t)addend_new;
+    gptp_set_addend_full(g->current_addend_full);
 
     g->servo_step_count++;
 
-    // Consider locked when offset is consistently small
-    if (offset > -1000 && offset < 1000)
-        g->servo_locked = 1;
-    else
-        g->servo_locked = 0;
+    // Locked when offset stays within ±1 µs (one Sync interval's worth
+    // of master-to-slave residence; tighter than the previous ±10 µs).
+    g->servo_locked = (offset > -1000 && offset < 1000) ? 1 : 0;
 
-    // Periodic status
     if ((g->sync_count % 8) == 0) {
-        printf("[gPTP] sync=%lu off=%lld ns delay=%lld ns add=%lu %s\n",
+        printf("[gPTP] sync=%lu off=%lld ns delay=%lld ns add=%lu/%lu %s\n",
                (unsigned long)g->sync_count,
                (long long)offset,
                (long long)g->mean_path_delay_ns,
-               (unsigned long)g->current_addend,
+               (unsigned long)(g->current_addend_full >> 20),
+               (unsigned long)(g->current_addend_full & 0xFFFFFu),
                g->servo_locked ? "LOCKED" : "");
     }
 }
@@ -574,13 +634,16 @@ void gptp_init(gptp_t *g, const uint8_t *mac_addr)
     g->port_number = 1;
     g->state = GPTP_STATE_LISTENING;
 
-    // Compute nominal TSU addend for this clock frequency
-    // addend = (2^32 + clk_freq/2) / clk_freq
+    // Compute nominal 52-bit TSU addend = (2^52 + clk_freq/2) / clk_freq.
+    // Matches LiteEthTSU's default with twenty extra fractional bits, which
+    // gives sub-ppm frequency resolution. This is the value the PI servo
+    // nudges around to track master frequency.
     uint32_t clk_freq = CONFIG_CLOCK_FREQUENCY;
-    g->base_addend = (uint32_t)(((uint64_t)1 << 32) / clk_freq +
-                                 (((uint64_t)1 << 32) % clk_freq > clk_freq/2 ? 1 : 0));
-    g->current_addend = g->base_addend;
-    gptp_set_addend(g->base_addend);
+    g->base_addend_full = ((uint64_t)1 << 52) / clk_freq +
+                          ((((uint64_t)1 << 52) % clk_freq) > (clk_freq / 2) ? 1 : 0);
+    g->current_addend_full = g->base_addend_full;
+    g->freq_integral = 0;
+    gptp_set_addend_full(g->base_addend_full);
 
     // Pdelay interval: 1 second
     g->pdelay_interval_ms = 1000;
@@ -599,8 +662,10 @@ void gptp_init(gptp_t *g, const uint8_t *mac_addr)
     printf("[gPTP] Clock ID=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
            g->clock_id[0], g->clock_id[1], g->clock_id[2], g->clock_id[3],
            g->clock_id[4], g->clock_id[5], g->clock_id[6], g->clock_id[7]);
-    printf("[gPTP] Base addend=%lu (clk=%lu Hz)\n",
-           (unsigned long)g->base_addend, (unsigned long)clk_freq);
+    printf("[gPTP] Base addend_full=0x%08lx_%08lx (clk=%lu Hz)\n",
+           (unsigned long)(g->base_addend_full >> 32),
+           (unsigned long)(g->base_addend_full & 0xFFFFFFFF),
+           (unsigned long)clk_freq);
 }
 
 // ---------------------------------------------------------------------------

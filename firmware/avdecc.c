@@ -104,9 +104,14 @@ static uint8_t *avdecc_eth_hdr(uint8_t *frame, const uint8_t *src_mac)
 //   [52..53] identify_control_index (2 bytes)
 //   [54..55] interface_index (2 bytes)
 //   [56..63] association_id (8 bytes)
-// Total ADPDU = 64 bytes, control_data_length = 56
+//   [64..67] reserved (4 bytes) — required: GenAVB and Hive treat the
+//            ADPDU body as 64 bytes (struct adp_pdu) so the AVTP frame
+//            after the 4-byte common header is 68 bytes. Without these
+//            4 trailing bytes, Hive logs "Adpdu::deserialize error:
+//            Not enough data in buffer".
+// Total ADPDU = 68 bytes, control_data_length = 56 (per IEEE 1722.1)
 
-#define ADPDU_LEN           64
+#define ADPDU_LEN           68
 #define ADP_CONTROL_DATA_LEN 56
 
 static void adp_send(avdecc_state_t *s, uint8_t msg_type)
@@ -170,6 +175,9 @@ static void adp_send(avdecc_state_t *s, uint8_t msg_type)
 
     // association_id
     memset(p + 56, 0, 8);
+
+    // reserved trailing 4 bytes (rsvd2 in GenAVB struct adp_pdu)
+    memset(p + 64, 0, 4);
 
     // Total frame
     uint32_t frame_len = 14 + ADPDU_LEN;

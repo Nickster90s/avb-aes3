@@ -22,7 +22,7 @@
 
 // MAC address — locally administered, unique per device.
 // TODO: read from SPI flash or EEPROM in production.
-static const uint8_t mac_addr[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+static const uint8_t mac_addr[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x42};
 
 static gptp_t gptp;
 static avtp_stream_t avtp;
@@ -56,6 +56,13 @@ static void dispatch_rx(void)
     uint32_t slot = ethmac_sram_writer_slot_read();
     uint8_t *frame = (uint8_t *)(ETHMAC_BASE + ETHMAC_SLOT_SIZE * slot);
     uint32_t len = ethmac_sram_writer_length_read();
+
+    // Advance the RX-timestamp ring in lock-step with slot consumption.
+    // The gateware pushes one entry per committed frame; we pop one per
+    // dispatched slot regardless of ethertype. After this write, any
+    // gptp_read_rx_timestamp() within this dispatch returns the value
+    // for THIS slot's frame.
+    main_rx_ts_pop_write(1);
 
     // Route by ethertype
     if (len >= 14) {
@@ -262,6 +269,14 @@ static void tx_test(void)
 // Reference: Linux drivers/net/phy/broadcom.c BCM54xx clock-delay setup.
 static void phy_enable_rxc_skew(void) {
     int a = 1;
+
+    // Soft-reset the PHY first (BMCR bit 15) to clear any persistent
+    // shadow-register state left over from earlier MDIO writes in this
+    // session. The PHY-side hw_reset only happens on FPGA boot; we need
+    // an explicit MDIO soft-reset to recover after live-firmware writes.
+    mdio_write(a, 0x00, 0x9140);          // reset + autoneg + 1G + FD
+    busy_wait(200);                        // wait for reset + autoneg restart
+
     mdio_write(a, 0x18, 0xF1E7);          // shadow_07 bit 8 = 1 (RXC delay)
     busy_wait(10);
     mdio_write(a, 0x18, 0x7000);
@@ -270,8 +285,7 @@ static void phy_enable_rxc_skew(void) {
     busy_wait(10);
     mdio_write(a, 0x1C, 0x0C00);
     int sh3 = mdio_read(a, 0x1C);
-    printf("\n[PHY skew] shadow_07=%04x shadow_03=%04x (full RGMII-ID)\n",
-           sh7, sh3);
+    printf("\n[PHY RGMII-ID] shadow_07=%04x shadow_03=%04x\n", sh7, sh3);
 }
 
 static void phy_probe(void) {
@@ -328,8 +342,9 @@ static void check_uart_cmd(void)
                    (unsigned long)gptp.pdelay_count,
                    (long long)gptp.offset_from_master_ns,
                    (long long)gptp.mean_path_delay_ns);
-            printf("  addend=%lu locked=%d\n",
-                   (unsigned long)gptp.current_addend,
+            printf("  addend=%lu/%lu locked=%d\n",
+                   (unsigned long)(gptp.current_addend_full >> 20),
+                   (unsigned long)(gptp.current_addend_full & 0xFFFFFu),
                    gptp.servo_locked);
             printf("  rx: sync=%lu fup=%lu pdreq=%lu pdresp=%lu pdfup=%lu ann=%lu other=%lu wdom=%lu last=mt%u dom%u\n",
                    (unsigned long)gptp.rx_sync_count,
@@ -434,6 +449,10 @@ static void check_uart_cmd(void)
                    ethmac_sram_writer_ev_enable_read(),
                    ethmac_sram_writer_ev_status_read(),
                    ethmac_sram_writer_ev_pending_read());
+            printf("  rx_ts ring: commits=%lu level=%lu overflow=%lu\n",
+                   (unsigned long)main_rx_ts_commit_count_read(),
+                   (unsigned long)main_rx_ts_level_read(),
+                   (unsigned long)main_rx_ts_overflow_count_read());
             {
                 uint8_t hba = main_eth_rx_heartbeat_read();
                 busy_wait(300);  // ≥1 top-byte tick at 125e6/2^24 ≈ 7.5 Hz
@@ -501,12 +520,9 @@ int main(void)
 
     printf("\n[AVB-AES3]\n");
 
-    // BASELINE TEST: NO PHY MDIO writes at all. PHY runs at factory
-    // defaults set by board strap pins. Goal: reproduce yesterday's
-    // working TX config (frames reaching network, marginal but real)
-    // before adding fixes back in one at a time. RX will be broken
-    // (preamble errors) — that's expected; we'll fix it once TX works.
-    busy_wait(100);  // Wait for hw_reset to release
+    // No PHY MDIO writes at boot — factory strap defaults only.
+    // TX-fix experiment: matches yesterday-evening's TX-working state.
+    busy_wait(100);
 
     // Init audio ring buffers
     memset(&tx_audio_ring, 0, sizeof(tx_audio_ring));

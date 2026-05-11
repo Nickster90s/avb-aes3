@@ -27,9 +27,12 @@
 #define PTP_MSG_ANNOUNCE        0xB
 #define PTP_MSG_SIGNALING       0xC
 
-// PTP header flags
-#define PTP_FLAG_TWO_STEP       (1 << 1)  // Byte offset 6, bit 1
-#define PTP_FLAG_PTP_TIMESCALE  (1 << 3)  // Byte offset 6, bit 3
+// PTP header flags. The 16-bit flags field is at offset 6 in the PTP header
+// and is transmitted big-endian: flags[0] = byte 6, flags[1] = byte 7.
+// twoStepFlag lives at bit 1 of byte 6 → 0x0200 in the 16-bit word.
+// ptpTimescale lives at bit 3 of byte 7 → 0x0008 in the 16-bit word.
+#define PTP_FLAG_TWO_STEP       0x0200
+#define PTP_FLAG_PTP_TIMESCALE  0x0008
 
 // Header sizes
 #define PTP_HEADER_LEN          34
@@ -58,9 +61,30 @@
 // Pdelay measurement
 #define PDELAY_LOST_RESPONSES_ALLOWED   3
 
-// PI servo gains (fixed-point, Q16.16)
-#define SERVO_KP                0x00000400  // 0.0625 (proportional)
-#define SERVO_KI                0x00000040  // 0.00390625 (integral)
+// PI servo gains for addend (frequency) control.
+// Each unit of full_addend changes the TSU rate by 1e9/2^52 ≈ 2.22e-7
+// ns/cycle, which at 50 MHz sysclk is ~11.1 ns/sec rate adjustment.
+// Per Sync interval (~125 ms): 1 addend unit = ~1.39 ns of phase change.
+//
+// Kp = 72/1000 ≈ 0.072 picks ~10% phase correction per Sync (gentle).
+// Ki = 72/1_000_000 = 100x slower — handles steady-state bias drift.
+// Both terms multiplied by the offset (in ns) to get addend delta.
+//
+// The integrator absorbs the constant LiteEth capture-point bias
+// (~145–290 µs depending on P&R) into a steady-state addend offset:
+// no static calibration constant needed; PI does it for free.
+#define SERVO_KP_NUM            72
+#define SERVO_KP_DEN            1000
+#define SERVO_KI_NUM            72
+#define SERVO_KI_DEN            1000000
+
+// Anti-windup: clamp |integral| at 100 ms — empirically the integrator
+// needs to settle around 50–80 ms-worth of "mass" to fully cancel the
+// LiteEth capture-point bias (the value depends on P&R variance). 10 ms
+// is too tight (saturates and leaves ~50 µs DC residual); 1 s is overkill
+// (lets the startup transient overshoot). 100 ms gives ~2x headroom over
+// the worst observed steady-state requirement.
+#define SERVO_INTEGRAL_CLAMP_NS 100000000LL
 
 // ---------------------------------------------------------------------------
 // PTP timestamp (80-bit: 48-bit seconds + 32-bit nanoseconds)
@@ -113,9 +137,9 @@ typedef struct {
 
     // Clock servo
     int64_t  offset_from_master_ns;
-    int64_t  freq_integral;           // Integral term (scaled)
-    uint32_t base_addend;             // Nominal TSU addend value
-    uint32_t current_addend;
+    int64_t  freq_integral;           // Sum of past offsets (ns)
+    uint64_t base_addend_full;        // Nominal 52-bit addend = (addend<<20)|frac
+    uint64_t current_addend_full;
     uint8_t  servo_locked;
     uint32_t servo_step_count;
 
@@ -157,7 +181,7 @@ void gptp_servo_update(gptp_t *g);
 ptp_timestamp_t gptp_read_time(void);
 ptp_timestamp_t gptp_read_rx_timestamp(void);
 ptp_timestamp_t gptp_read_tx_timestamp(void);
-void gptp_set_addend(uint32_t addend);
+void gptp_set_addend_full(uint64_t addend_full);  // 52-bit: (addend<<20)|frac
 void gptp_step_time(ptp_timestamp_t t);
 void gptp_adjust_offset(int64_t offset_ns);
 

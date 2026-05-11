@@ -128,8 +128,19 @@ class TSUWithCSRs(LiteXModule):
         # --- Writable control CSRs ---
 
         # Addend (frequency word for tick accumulation).
-        self._addend = CSRStorage(32, description="TSU addend (frequency word).")
-        self.comb += tsu.addend.eq(self._addend.storage)
+        # Full 52-bit resolution: (addend << 20) | addend_frac. 1 LSB of
+        # addend_frac changes ns/cycle by 1e9 / 2^52 ≈ 2.22e-7, i.e.
+        # ~11.1 ns/sec rate adjustment per LSB at 50 MHz — sub-ppm tuning.
+        # Routability of the 52x30 multiplier is fixed by patching
+        # liteeth/core/ptp.py to use a shift-add tree instead of the `*`
+        # operator (the natural form makes yosys infer a DSP48 cascade
+        # that nextpnr-xilinx fails to route on XC7A50T).
+        self._addend      = CSRStorage(32, description="TSU addend integer part.")
+        self._addend_frac = CSRStorage(20, description="TSU addend fractional part (20-bit).")
+        self.comb += [
+            tsu.addend.eq(self._addend.storage),
+            tsu.addend_frac.eq(self._addend_frac.storage),
+        ]
 
         # Offset correction (signed, applied once then cleared by TSU).
         self._offset_hi = CSRStorage(17, description="Offset correction [48:32] (signed).")
@@ -137,8 +148,17 @@ class TSUWithCSRs(LiteXModule):
         self._offset_apply = CSRStorage(1, description="Write 1 to apply offset correction.")
 
         # Apply offset on write strobe.
+        # tsu.offset is 81-bit signed; CSRs hold 49 bits (lo 32 + hi 17).
+        # The hi field's top bit (bit 16) is the sign bit at combined bit 48 —
+        # replicate it into bits 49..80 so a negative firmware value (e.g.
+        # -145000ns) doesn't get zero-extended into a huge positive offset.
+        sign_bit = self._offset_hi.storage[16]
         self.sync += If(self._offset_apply.re,
-            tsu.offset.eq(Cat(self._offset_lo.storage, self._offset_hi.storage)),
+            tsu.offset.eq(Cat(
+                self._offset_lo.storage,                # bits  0..31
+                self._offset_hi.storage,                # bits 32..48
+                Replicate(sign_bit, 81 - 49),           # bits 49..80
+            )),
         )
 
         # Coarse step (set time directly).
@@ -477,30 +497,87 @@ class AVBSoC(SoCCore):
         )
 
         # Wire TSU latch signals to MAC frame events.
-        # The MAC core's source.valid (RX) and sink.valid (TX) with .last
-        # indicate frame boundaries. We latch on first byte (SOF) for
-        # best timestamp accuracy.
+        #
+        # add_ethernet(data_width=8) maps to LiteEthMAC dw=32 internally
+        # (litex/soc/integration/soc.py:1919), so mac.core.source.data
+        # carries 4 wire bytes per beat. A byte-counted ethertype filter
+        # at this point is the wrong abstraction. Instead: latch the
+        # TSU's instantaneous time on the FIRST BEAT of every frame and
+        # push it into a small ring buffer that firmware pops in lock-
+        # step with slot consumption. No filter — works for all frames;
+        # firmware uses the popped value only when the slot is a PTP
+        # frame, and discards it for AVTP/MSRP/etc.
         mac = self.ethmac
+        sram_writer = mac.interface.sram.writer
 
-        # RX timestamp: latch on first byte of received frame.
-        rx_sof = Signal()
-        rx_active = Signal()
+        rx_active     = Signal()
+        rx_first_beat = Signal()
+        self.comb += rx_first_beat.eq(
+            mac.core.source.valid & mac.core.source.ready & ~rx_active
+        )
         self.sync += [
             If(mac.core.source.valid & mac.core.source.ready,
                 If(~rx_active,
-                    rx_sof.eq(1),
                     rx_active.eq(1),
-                ).Else(
-                    rx_sof.eq(0),
                 ),
                 If(mac.core.source.last,
                     rx_active.eq(0),
                 ),
-            ).Else(
-                rx_sof.eq(0),
             ),
         ]
-        self.comb += self.tsu.tsu.rx_latch.eq(rx_sof)
+
+        # Capture instantaneous TSU time on first beat (registered so
+        # subsequent frames can't overwrite before commit).
+        captured_rx_ts = Signal(80)
+        self.sync += If(rx_first_beat, captured_rx_ts.eq(self.tsu.timestamp))
+
+        # Keep the legacy _rx_ts CSRs working too (single-shot, last-frame).
+        self.comb += self.tsu.tsu.rx_latch.eq(rx_first_beat)
+
+        # RX timestamp ring: push when the SRAM writer commits a frame
+        # to a slot (stat_fifo.sink.valid pulses for one cycle during
+        # FSM TERMINATE state). This guarantees one ring entry per slot
+        # firmware will see — drops/MTU-discards don't desync the ring.
+        self.rx_ts_fifo = rx_ts_fifo = SyncFIFO(80, 8)
+
+        commit_pulse = sram_writer.stat_fifo.sink.valid
+        self.comb += [
+            rx_ts_fifo.din.eq(captured_rx_ts),
+            rx_ts_fifo.we.eq(commit_pulse & rx_ts_fifo.writable),
+        ]
+
+        # CSRs: pop strobe + 80-bit popped value + level + overflow count.
+        self.rx_ts_pop_lo  = CSRStatus(32, description="RX-ring popped nanoseconds.")
+        self.rx_ts_pop_mid = CSRStatus(32, description="RX-ring popped seconds[31:0].")
+        self.rx_ts_pop_hi  = CSRStatus(16, description="RX-ring popped seconds[47:32].")
+        self.rx_ts_pop     = CSRStorage(1, description="Write 1 to pop next ring entry into pop_lo/mid/hi.")
+        self.rx_ts_level   = CSRStatus(4, description="RX-ring fill level.")
+        self.rx_ts_overflow_count = CSRStatus(32, description="Frames where ring was full at commit (lost ts).")
+        self.rx_ts_commit_count   = CSRStatus(32, description="Total RX frames committed (sanity).")
+
+        popped       = Signal(80)
+        overflow_cnt = Signal(32)
+        commit_cnt   = Signal(32)
+        self.sync += [
+            If(self.rx_ts_pop.re & rx_ts_fifo.readable,
+                popped.eq(rx_ts_fifo.dout),
+            ),
+            If(commit_pulse,
+                commit_cnt.eq(commit_cnt + 1),
+                If(~rx_ts_fifo.writable,
+                    overflow_cnt.eq(overflow_cnt + 1),
+                ),
+            ),
+        ]
+        self.comb += [
+            rx_ts_fifo.re.eq(self.rx_ts_pop.re & rx_ts_fifo.readable),
+            self.rx_ts_pop_lo.status.eq(popped[0:32]),
+            self.rx_ts_pop_mid.status.eq(popped[32:64]),
+            self.rx_ts_pop_hi.status.eq(popped[64:80]),
+            self.rx_ts_level.status.eq(rx_ts_fifo.level),
+            self.rx_ts_overflow_count.status.eq(overflow_cnt),
+            self.rx_ts_commit_count.status.eq(commit_cnt),
+        ]
 
         # TX timestamp: latch on first byte sent.
         tx_sof = Signal()

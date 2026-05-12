@@ -405,13 +405,16 @@ int main(void)
         srp_poll(&srp);
         avdecc_poll(&avdecc);
         mcr_servo_update(&mcr);
-        // RX→TX loopback: drain AAF RX buffer into TX buffer so a listener
-        // connected to our talker sees back what was sent into the listener.
-        // Real audio routing (AES3 source, MCR-clocked) replaces this.
+        // Audio routing: drain AAF RX (8ch INT_32BIT) into:
+        //   - tx_audio_ring (channels 0+1, >>8 to 24-bit) → AES3 TX wire
+        //   - aaf_tx_push (all 8ch) → AAF talker (loopback for diagnostics)
         {
             int32_t blk[AAF_CHANNELS];
-            while (aaf_rx_pop(&aaf, blk))
+            while (aaf_rx_pop(&aaf, blk)) {
+                if (audio_ring_space(&tx_audio_ring) > 0)
+                    audio_ring_write(&tx_audio_ring, blk[0] >> 8, blk[1] >> 8);
                 aaf_tx_push(&aaf, blk);
+            }
         }
         aaf_tx_poll(&aaf);
         check_uart_cmd();

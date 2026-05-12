@@ -291,6 +291,13 @@ typedef struct {
     uint32_t acmp_tx_count;
     uint32_t aecp_rx_count;
     uint32_t aecp_tx_count;
+
+    // CLOCK_DOMAIN counters (Milan §5.3.11.2). Monotonic — increment on
+    // each gPTP-lock transition. Hive shows the CLOCK_DOMAIN indicator
+    // green when LOCKED > UNLOCKED, yellow when LOCKED == UNLOCKED.
+    uint32_t clock_locked_count;
+    uint32_t clock_unlocked_count;
+    uint8_t  clock_last_locked;     // last sampled gptp.servo_locked
 } avdecc_state_t;
 
 // ---------------------------------------------------------------------------

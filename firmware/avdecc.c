@@ -1231,8 +1231,8 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         case AEM_DESC_CLOCK_DOMAIN:
             if (di == 0) {
                 valid = 0x00000003;
-                counters[0] = g_gptp && g_gptp->servo_locked ? 1 : 0;
-                counters[1] = 0;
+                counters[0] = s->clock_locked_count;
+                counters[1] = s->clock_unlocked_count;
             }
             break;
         case AEM_DESC_STREAM_INPUT:
@@ -1608,8 +1608,24 @@ void avdecc_depart(avdecc_state_t *s)
 // Poll — periodic ADP advertisement
 // ---------------------------------------------------------------------------
 
+// Track gPTP lock transitions into Milan CLOCK_DOMAIN counters. Called
+// from avdecc_poll once per main-loop iteration; cheap (3 reads + maybe
+// 1 increment). Initial servo_locked=1 at startup also counts as the
+// first locked transition so Hive's first poll sees LOCKED=1 > 0.
+static void track_clock_lock(avdecc_state_t *s)
+{
+    if (!g_gptp) return;
+    uint8_t cur = g_gptp->servo_locked ? 1 : 0;
+    if (cur != s->clock_last_locked) {
+        if (cur) s->clock_locked_count++;
+        else     s->clock_unlocked_count++;
+        s->clock_last_locked = cur;
+    }
+}
+
 void avdecc_poll(avdecc_state_t *s)
 {
+    track_clock_lock(s);
     ptp_timestamp_t now = gptp_read_time();
     uint32_t now_ms = (uint32_t)(now.seconds & 0xFFFF) * 1000 +
                       (uint32_t)(now.nanoseconds / 1000000);

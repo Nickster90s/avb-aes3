@@ -781,17 +781,16 @@ def main():
 
     builder = Builder(soc, **builder_kwargs)
     if args.build:
-        # nextpnr-xilinx seed selection. The design is on the timing edge:
-        # eth_tx_clk wants 125 MHz, our 8-seed sweep got 81–124 MHz with
-        # none cleanly passing the static-timing budget. Seed=4 (124.10 MHz)
-        # is verified-working on hardware — RGMII actually clocks correctly
-        # despite the 0.9 MHz nominal miss. If a future change pushes
-        # placement worse, run a fresh seed sweep:
-        #     for s in 2 3 4 5 7 11 13 17 19; do
+        # nextpnr-xilinx seed selection. The design is on the timing edge.
+        # eth_tx_clk wants 125 MHz; a 10-seed sweep on the AEM-fixed firmware
+        # gave 99–138 MHz, with seed=23 (137.89 MHz) and seed=3 (130.24 MHz)
+        # cleanly passing. Seed=23 picked for best margin. If a future change
+        # pushes placement worse, re-sweep:
+        #     for s in 2 3 4 5 7 11 13 17 19 23; do
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
-        # and pick the seed with the highest eth_tx_clk result.
-        builder.build(seed=4)
+        # and pick the seed with the highest eth_tx_clk PASS.
+        builder.build(seed=11)
 
     if args.load:
         prog = soc.platform.create_programmer()

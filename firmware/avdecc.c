@@ -19,6 +19,20 @@
 #include <string.h>
 #include <stdio.h>
 
+// Backreference to the gPTP module so ADP/AVB_INTERFACE can surface the
+// learned grandmaster identity + our local clock_identity. Set by main.c
+// after both gptp_init and avdecc_init via avdecc_set_gptp().
+static const gptp_t *g_gptp = NULL;
+
+// Vendor's Entity Model ID (EUI-64) — IDENTIFIES THE PRODUCT MODEL, not
+// the specific device. All units running this firmware must report the
+// same value; per-device uniqueness is the entity_id (MAC-derived).
+// Layout: 02 FF EE (locally-administered OUI placeholder) | "NSAV" (4E53
+// 4156, "N-Series AV") | 0001 (product revision).
+static const uint8_t ENTITY_MODEL_ID[8] = {
+    0x02, 0xFF, 0xEE, 0x4E, 0x53, 0x41, 0x56, 0x01
+};
+
 // ---------------------------------------------------------------------------
 // Byte-order helpers
 // ---------------------------------------------------------------------------
@@ -152,11 +166,14 @@ static void adp_send(avdecc_state_t *s, uint8_t msg_type)
     // entity_id
     memcpy(p + 4, s->entity_id, 8);
 
-    // entity_model_id (vendor-specific, we use MAC + 0x0000)
-    memcpy(p + 12, s->entity_id, 8);
+    // entity_model_id — static, identifies the firmware/product model.
+    memcpy(p + 12, ENTITY_MODEL_ID, 8);
 
-    // entity_capabilities
-    uint32_t caps = ADP_CAP_ADP_SUPPORTED | ADP_CAP_ACMP_SUPPORTED |
+    // entity_capabilities — AEM_SUPPORTED is required for controllers to
+    // issue READ_DESCRIPTOR; without it Hive lists the entity but treats
+    // it as having no AEM model and shows it as empty.
+    uint32_t caps = ADP_CAP_AEM_SUPPORTED |
+                    ADP_CAP_CLASS_A_SUPPORTED |
                     ADP_CAP_GPTP_SUPPORTED;
     av_put_be32(p + 20, caps);
 
@@ -180,8 +197,12 @@ static void adp_send(avdecc_state_t *s, uint8_t msg_type)
     // available_index
     av_put_be32(p + 36, s->adp_available_index);
 
-    // gptp_grandmaster_id (all zeros = unknown)
-    memset(p + 40, 0, 8);
+    // gptp_grandmaster_id — learned from Announce messages by gPTP.
+    // Zero until first Announce; matches the actual GM thereafter.
+    if (g_gptp && g_gptp->gm_valid)
+        memcpy(p + 40, g_gptp->gm_clock_id, 8);
+    else
+        memset(p + 40, 0, 8);
 
     // gptp_domain_number = 0
     p[48] = 0;
@@ -189,8 +210,11 @@ static void adp_send(avdecc_state_t *s, uint8_t msg_type)
     // reserved
     p[49] = 0; p[50] = 0; p[51] = 0;
 
-    // identify_control_index, interface_index
-    av_put_be16(p + 52, 0);
+    // identify_control_index: 0xFFFF = no CONTROL descriptor implements
+    // identify. We have no CONTROL descriptors at all, so any other value
+    // is a dangling reference and Hive flags the entity as non-compliant.
+    av_put_be16(p + 52, 0xFFFF);
+    // interface_index: 0 = AVB_INTERFACE descriptor at index 0
     av_put_be16(p + 54, 0);
 
     // association_id
@@ -461,46 +485,55 @@ static uint32_t build_desc_entity(uint8_t *d, uint16_t idx, avdecc_state_t *s)
     memset(d, 0, 312);
     av_put_be16(d + 0, AEM_DESC_ENTITY);
     av_put_be16(d + 2, 0);                       // descriptor_index
-    memcpy(d + 4, s->entity_id, 8);             // entity_id
-    memcpy(d + 12, s->entity_id, 8);            // entity_model_id
-    av_put_be32(d + 20, ADP_CAP_ADP_SUPPORTED | ADP_CAP_ACMP_SUPPORTED |
+    memcpy(d + 4, s->entity_id, 8);             // entity_id (unique per device)
+    memcpy(d + 12, ENTITY_MODEL_ID, 8);          // entity_model_id (same for all units of this model)
+    av_put_be32(d + 20, ADP_CAP_AEM_SUPPORTED |
+                        ADP_CAP_CLASS_A_SUPPORTED |
                         ADP_CAP_GPTP_SUPPORTED); // entity_capabilities
     av_put_be16(d + 24, N_STREAM_OUTPUTS);       // talker_stream_sources = 1
     av_put_be16(d + 26, ADP_TALKER_CAP_IMPLEMENTED | ADP_TALKER_CAP_AUDIO_SOURCE);
     av_put_be16(d + 28, N_STREAM_INPUTS);        // listener_stream_sinks = 2
     av_put_be16(d + 30, ADP_LISTENER_CAP_IMPLEMENTED | ADP_LISTENER_CAP_AUDIO_SINK);
     av_put_be32(d + 36, s->adp_available_index); // available_index
-    write_name64(d + 48, "AVB-AES3 Endpoint");   // entity_name
-    write_name64(d + 116, "1.0.0");              // firmware_version
+    // association_id (offset 40, 8 bytes) — left as 0 (memset)
+    write_name64(d + 48, "AVB-AES3 Endpoint");   // entity_name (inline)
+    // Localized name refs: STRINGS desc 0 slot N = (0<<3)|N. We populate
+    // slot 0="N-Series" (vendor), slot 1="AVB-AES3 Endpoint" (model).
+    av_put_be16(d + 112, 0x0000);                // vendor_name_string → "N-Series"
+    av_put_be16(d + 114, 0x0001);                // model_name_string → "AVB-AES3 Endpoint"
+    write_name64(d + 116, "1.0.0");              // firmware_version (inline)
+    // group_name (offset 180, 64 bytes) — empty string OK
+    // serial_number (offset 244, 64 bytes) — empty string OK
     av_put_be16(d + 308, 1);                     // configurations_count
+    av_put_be16(d + 310, 0);                     // current_configuration
     return 312;
 }
 
 static uint32_t build_desc_configuration(uint8_t *d, uint16_t idx)
 {
     if (idx != 0) return 0;
-    // 7.2.2 — 74 fixed + 11 descriptor_counts × 4 = 118 bytes
-    memset(d, 0, 118);
+    // 7.2.2 — descriptor_counts lists ONLY top-level descriptors.
+    // STREAM_PORT_*, AUDIO_CLUSTER, AUDIO_MAP, and STRINGS are children
+    // (of AUDIO_UNIT, STREAM_PORT, STREAM_PORT, and LOCALE respectively)
+    // and must NOT appear here — Hive rejects the model otherwise.
+    // 7 top-level types × 4 bytes = 28; 74 + 28 = 102 bytes.
+    memset(d, 0, 102);
     av_put_be16(d, AEM_DESC_CONFIGURATION);
     av_put_be16(d + 2, 0);
     write_name64(d + 4, "Default");
     av_put_be16(d + 68, 0xFFFF);   // localized_description (none)
-    av_put_be16(d + 70, 11);       // descriptor_counts_count
+    av_put_be16(d + 70, 7);        // descriptor_counts_count
     av_put_be16(d + 72, 74);       // descriptor_counts_offset
 
     uint8_t *c = d + 74;
-    av_put_be16(c +  0, AEM_DESC_AUDIO_UNIT);          av_put_be16(c +  2, 1);
-    av_put_be16(c +  4, AEM_DESC_STREAM_INPUT);        av_put_be16(c +  6, N_STREAM_INPUTS);
-    av_put_be16(c +  8, AEM_DESC_STREAM_OUTPUT);       av_put_be16(c + 10, N_STREAM_OUTPUTS);
-    av_put_be16(c + 12, AEM_DESC_AVB_INTERFACE);       av_put_be16(c + 14, 1);
-    av_put_be16(c + 16, AEM_DESC_CLOCK_SOURCE);        av_put_be16(c + 18, N_CLOCK_SOURCES);
-    av_put_be16(c + 20, AEM_DESC_LOCALE);              av_put_be16(c + 22, 1);
-    av_put_be16(c + 24, AEM_DESC_STRINGS);             av_put_be16(c + 26, 1);
-    av_put_be16(c + 28, AEM_DESC_STREAM_PORT_INPUT);   av_put_be16(c + 30, 1);
-    av_put_be16(c + 32, AEM_DESC_STREAM_PORT_OUTPUT);  av_put_be16(c + 34, 1);
-    av_put_be16(c + 36, AEM_DESC_AUDIO_CLUSTER);       av_put_be16(c + 38, N_AUDIO_CHANNELS * 2);
-    av_put_be16(c + 40, AEM_DESC_CLOCK_DOMAIN);        av_put_be16(c + 42, 1);
-    return 118;
+    av_put_be16(c +  0, AEM_DESC_AUDIO_UNIT);     av_put_be16(c +  2, 1);
+    av_put_be16(c +  4, AEM_DESC_STREAM_INPUT);   av_put_be16(c +  6, N_STREAM_INPUTS);
+    av_put_be16(c +  8, AEM_DESC_STREAM_OUTPUT);  av_put_be16(c + 10, N_STREAM_OUTPUTS);
+    av_put_be16(c + 12, AEM_DESC_AVB_INTERFACE);  av_put_be16(c + 14, 1);
+    av_put_be16(c + 16, AEM_DESC_CLOCK_SOURCE);   av_put_be16(c + 18, N_CLOCK_SOURCES);
+    av_put_be16(c + 20, AEM_DESC_LOCALE);         av_put_be16(c + 22, 1);
+    av_put_be16(c + 24, AEM_DESC_CLOCK_DOMAIN);   av_put_be16(c + 26, 1);
+    return 102;
 }
 
 static uint32_t build_desc_audio_unit(uint8_t *d, uint16_t idx)
@@ -582,26 +615,48 @@ static uint32_t build_desc_stream_output(uint8_t *d, uint16_t idx)
 static uint32_t build_desc_avb_interface(uint8_t *d, uint16_t idx, avdecc_state_t *s)
 {
     if (idx != 0) return 0;
-    // 7.2.8 — 100 fixed + 1 MSRP mapping (4) = 104 bytes
-    memset(d, 0, 104);
+    // 7.2.8 — 98 bytes (jdksavdecc JDKSAVDECC_DESCRIPTOR_AVB_INTERFACE_LEN).
+    // Per IEEE 1722.1-2013, msrp_mappings are NOT inside this descriptor;
+    // sending the older 104-byte form caused Hive payload-size mismatches
+    // for some derived parsers. Use the canonical 98-byte layout.
+    //
+    // priority1/clock_class/etc are the GM values learned from Announce
+    // (when we're a slave they belong to the upstream GM); fall back to
+    // "slave-only / not GM-capable" defaults until first Announce.
+    memset(d, 0, 98);
     av_put_be16(d, AEM_DESC_AVB_INTERFACE);
     av_put_be16(d + 2, 0);
     write_name64(d + 4, "Ethernet");
-    av_put_be16(d + 68, 0xFFFF);
+    av_put_be16(d + 68, 0xFFFF);                  // localized_description
     memcpy(d + 70, s->src_mac, 6);                // mac_address
     av_put_be16(d + 76, AVB_INTERFACE_FLAG_GPTP_SUPPORTED |
                         AVB_INTERFACE_FLAG_SRP_SUPPORTED);
-    memcpy(d + 78, s->entity_id, 8);              // clock_identity
-    d[86] = 248;                                  // priority1
-    d[87] = 248;                                  // clock_class
-    d[90] = 0xFE;                                 // clock_accuracy (unknown)
-    d[91] = 248;                                  // priority2
-    av_put_be16(d + 96, 100);                     // msrp_mappings_offset
-    av_put_be16(d + 98, 1);                       // msrp_mappings_count
-    d[100] = 1;                                   // traffic_class = SR class A
-    d[101] = 3;                                   // priority
-    av_put_be16(d + 102, 2);                      // vlan_id
-    return 104;
+
+    // clock_identity = our local gPTP clock identity (MAC + FF:FE), not entity_id.
+    if (g_gptp)
+        memcpy(d + 78, g_gptp->clock_id, 8);
+    else
+        memcpy(d + 78, s->entity_id, 8);
+
+    if (g_gptp && g_gptp->gm_valid) {
+        d[86] = g_gptp->gm_priority1;
+        d[87] = g_gptp->gm_clock_class;
+        av_put_be16(d + 88, g_gptp->gm_offset_scaled_log_variance);
+        d[90] = g_gptp->gm_clock_accuracy;
+        d[91] = g_gptp->gm_priority2;
+    } else {
+        d[86] = 248;                              // priority1 (slave-only)
+        d[87] = 248;                              // clock_class (slave-only)
+        av_put_be16(d + 88, 0x4E5D);              // offset_scaled_log_variance default
+        d[90] = 0xFE;                             // clock_accuracy (unknown)
+        d[91] = 248;                              // priority2
+    }
+    d[92] = 0;                                    // domain_number
+    d[93] = LOG_SYNC_INTERVAL;                    // log_sync_interval
+    d[94] = LOG_ANNOUNCE_INTERVAL;                // log_announce_interval
+    d[95] = LOG_PDELAY_REQ_INTERVAL;              // log_pdelay_interval
+    av_put_be16(d + 96, 1);                       // port_number
+    return 98;
 }
 
 static uint32_t build_desc_clock_source(uint8_t *d, uint16_t idx, avdecc_state_t *s)
@@ -653,16 +708,20 @@ static uint32_t build_desc_clock_domain(uint8_t *d, uint16_t idx, avdecc_state_t
 static uint32_t build_desc_locale(uint8_t *d, uint16_t idx)
 {
     if (idx != 0) return 0;
-    // 7.2.11 — 68 bytes
-    memset(d, 0, 68);
+    // 7.2.11 — 72 bytes (jdksavdecc JDKSAVDECC_DESCRIPTOR_LOCALE_LEN)
+    //  +0   descriptor_type
+    //  +2   descriptor_index
+    //  +4   locale_identifier (64 bytes)
+    //  +68  number_of_strings
+    //  +70  base_strings (index of first STRINGS descriptor used by this locale)
+    memset(d, 0, 72);
     av_put_be16(d, AEM_DESC_LOCALE);
     av_put_be16(d + 2, 0);
-    // locale_identifier: 64-byte ASCII string
     const char *loc = "en-US";
     memcpy(d + 4, loc, 5);
-    av_put_be16(d + 68 - 4, 1);   // number_of_strings
-    av_put_be16(d + 68 - 2, 0);   // base_strings = 0
-    return 68;
+    av_put_be16(d + 68, 1);   // number_of_strings (1 STRINGS desc with 7 slots)
+    av_put_be16(d + 70, 0);   // base_strings = 0
+    return 72;
 }
 
 // 7-string STRINGS descriptor: each string is fixed 64 bytes.
@@ -675,13 +734,13 @@ static uint32_t build_desc_strings(uint8_t *d, uint16_t idx)
     av_put_be16(d, AEM_DESC_STRINGS);
     av_put_be16(d + 2, 0);
     static const char *const strs[7] = {
-        "AVB-AES3",          // 0
-        "Audio Unit",        // 1
-        "Media Clock Input", // 2
-        "Audio Input",       // 3
-        "Audio Output",      // 4
-        "Clock Domain",      // 5
-        "Ethernet"           // 6
+        "N-Series",          // 0 — vendor_name_string in ENTITY
+        "AVB-AES3 Endpoint", // 1 — model_name_string in ENTITY
+        "Audio Unit",        // 2
+        "Media Clock Input", // 3
+        "Audio Input",       // 4
+        "Audio Output",      // 5
+        "Clock Domain"       // 6
     };
     for (int i = 0; i < 7; i++)
         write_name64(d + 4 + i * 64, strs[i]);
@@ -691,65 +750,33 @@ static uint32_t build_desc_strings(uint8_t *d, uint16_t idx)
 static uint32_t build_desc_stream_port(uint8_t *d, uint16_t desc_type, uint16_t idx)
 {
     if (idx != 0) return 0;
-    // 7.2.13 — 16 bytes
-    memset(d, 0, 16);
+    // 7.2.13 — 20 bytes (jdksavdecc JDKSAVDECC_DESCRIPTOR_STREAM_PORT_LEN)
+    //  +0  desc_type
+    //  +2  desc_index
+    //  +4  clock_domain_index
+    //  +6  port_flags
+    //  +8  number_of_controls
+    // +10  base_control
+    // +12  number_of_clusters
+    // +14  base_cluster
+    // +16  number_of_maps
+    // +18  base_map
+    //
+    // Channel info comes from the stream_format (AAF specifies 8ch); the
+    // working session_mgr.aemt uses 0 clusters / 0 maps on its stream_ports
+    // — matching that gets Milan-compliant validation through Hive.
+    memset(d, 0, 20);
     av_put_be16(d +  0, desc_type);
     av_put_be16(d +  2, 0);
-    av_put_be16(d +  4, 0);                              // clock_domain_index
+    av_put_be16(d +  4, 0);                                // clock_domain_index
     av_put_be16(d +  6, STREAM_PORT_FLAG_CLOCK_SYNC_SOURCE);
-    av_put_be16(d +  8, N_AUDIO_CHANNELS);               // number_of_controls = 0; reuse field
-    // For STREAM_PORT_INPUT: number_of_clusters = 8, base_cluster = 0
-    // For STREAM_PORT_OUTPUT: number_of_clusters = 8, base_cluster = 8
-    // 7.2.13 layout:
-    //   +0  desc_type
-    //   +2  desc_index
-    //   +4  clock_domain_index
-    //   +6  port_flags
-    //   +8  number_of_controls
-    //  +10  base_control
-    //  +12  number_of_clusters
-    //  +14  base_cluster
-    av_put_be16(d +  8, 0);                              // number_of_controls
-    av_put_be16(d + 10, 0);                              // base_control
-    av_put_be16(d + 12, N_AUDIO_CHANNELS);               // number_of_clusters
-    av_put_be16(d + 14, (desc_type == AEM_DESC_STREAM_PORT_INPUT) ? 0 : N_AUDIO_CHANNELS);
-    return 16;
-}
-
-static uint32_t build_desc_audio_cluster(uint8_t *d, uint16_t idx)
-{
-    // 7.2.16 — 83 bytes total:
-    //  +0   descriptor_type (2)
-    //  +2   descriptor_index (2)
-    //  +4   object_name (64)
-    //  +68  localized_description (2)
-    //  +70  signal_type (2)
-    //  +72  signal_index (2)
-    //  +74  signal_output (2)
-    //  +76  path_latency (4)
-    //  +80  block_latency (4)
-    //  +84  channel_count (2)
-    //  +86  format (1)
-    if (idx >= N_AUDIO_CHANNELS * 2) return 0;
-    memset(d, 0, 87);
-    av_put_be16(d, AEM_DESC_AUDIO_CLUSTER);
-    av_put_be16(d + 2, idx);
-
-    char name[8];
-    int ch = (idx < N_AUDIO_CHANNELS) ? (idx + 1) : (idx - N_AUDIO_CHANNELS + 1);
-    const char *prefix = (idx < N_AUDIO_CHANNELS) ? "In " : "Out ";
-    int n = 0;
-    while (prefix[n]) { name[n] = prefix[n]; n++; }
-    if (ch >= 10) name[n++] = '0' + (ch / 10);
-    name[n++] = '0' + (ch % 10);
-    name[n] = 0;
-    write_name64(d + 4, name);
-
-    av_put_be16(d + 68, 0xFFFF);                  // localized_description
-    // signal_type/index/output, path/block latency all 0
-    av_put_be16(d + 84, 1);                       // channel_count
-    d[86] = AUDIO_CLUSTER_FORMAT_MBLA;            // format
-    return 87;
+    av_put_be16(d +  8, 0);                                // number_of_controls
+    av_put_be16(d + 10, 0);                                // base_control
+    av_put_be16(d + 12, 0);                                // number_of_clusters
+    av_put_be16(d + 14, 0);                                // base_cluster
+    av_put_be16(d + 16, 0);                                // number_of_maps
+    av_put_be16(d + 18, 0);                                // base_map
+    return 20;
 }
 
 // ---- AECP command handler ----
@@ -809,8 +836,6 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
             case AEM_DESC_STREAM_PORT_INPUT:
             case AEM_DESC_STREAM_PORT_OUTPUT:
                 desc_len = build_desc_stream_port(desc, desc_type, desc_index); break;
-            case AEM_DESC_AUDIO_CLUSTER:
-                desc_len = build_desc_audio_cluster(desc, desc_index); break;
             default:
                 break;
         }
@@ -832,17 +857,35 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
 
     case AEM_CMD_ACQUIRE_ENTITY:
     case AEM_CMD_LOCK_ENTITY: {
-        // Accept without tracking — simple endpoint
+        // Payload: flags(4) | owner/locked_id(8) | desc_type(2) | desc_index(2)
+        //
+        // The "release" flag bit lives in DIFFERENT positions between
+        // ACQUIRE_ENTITY and LOCK_ENTITY (verified against la_avdecc
+        // src/protocol/protocolDefines.cpp):
+        //   AemAcquireEntityFlags::Release = 0x80000000  (bit 31, MSB)
+        //   AemLockEntityFlags::Unlock     = 0x00000001  (bit 0,  LSB)
+        // Hive flags "LockingEntity field is not set to 0 on UnlockEntity
+        // response" if we treat them the same — the owner_id/locked_id
+        // MUST be 8 zero bytes on a successful RELEASE or UNLOCK.
+        if (pdu_len < 40) return;
+        uint32_t flags = av_get_be32(pdu + 24);
+        int is_release;
+        if (cmd_type == AEM_CMD_ACQUIRE_ENTITY)
+            is_release = (flags & 0x80000000u) ? 1 : 0;
+        else
+            is_release = (flags & 0x00000001u) ? 1 : 0;
+
         uint8_t *tf = avdecc_tx_buf();
         uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
-        memcpy(tp + 24, pdu + 24, 16);  // echo flags + owner/locked_id + desc_type + desc_index
+        memcpy(tp + 24, pdu + 24, 16);    // echo flags + owner + desc_type + desc_index
 
-        // For ACQUIRE, set owner to controller
-        if (cmd_type == AEM_CMD_ACQUIRE_ENTITY)
+        if (is_release)
+            memset(tp + 28, 0, 8);        // owner/locked_id = 0
+        else
             memcpy(tp + 28, pdu + AECP_OFF_CONTROLLER_ID, 8);
 
         aecp_set_status_cdl(tp, AECP_STATUS_SUCCESS, 28);
-        avdecc_eth_send(14 + 40 < 64 ? 64 : 14 + 40);
+        avdecc_eth_send(64);              // 14 + 38 = 52, pad to 64
         s->aecp_tx_count++;
         break;
     }
@@ -923,6 +966,115 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         aecp_set_status_cdl(tp, st, 20);
         avdecc_eth_send(64);
         s->aecp_tx_count++;
+        break;
+    }
+
+    case AEM_CMD_GET_MAX_TRANSIT_TIME: {
+        // Response payload (12 bytes from after cmd_type):
+        //   +0  descriptor_type(2) +2 descriptor_index(2) +4 max_transit_time(8)
+        // max_transit_time is the maximum buffer latency, in ns. We use
+        // 2 ms (matches the buffer_length in our STREAM descriptors).
+        if (pdu_len < 28) return;
+        uint16_t dt = av_get_be16(pdu + 24);
+        uint16_t di = av_get_be16(pdu + 26);
+        uint8_t  st = AECP_STATUS_SUCCESS;
+        if (!((dt == AEM_DESC_STREAM_OUTPUT && di < N_STREAM_OUTPUTS) ||
+              (dt == AEM_DESC_STREAM_INPUT  && di < N_STREAM_INPUTS)))
+            st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+
+        uint8_t *tf = avdecc_tx_buf();
+        uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+        av_put_be16(tp + 24, dt);
+        av_put_be16(tp + 26, di);
+        // 64-bit max_transit_time = 2,000,000 ns (2 ms)
+        av_put_be32(tp + 28, 0);
+        av_put_be32(tp + 32, 2000000);
+        aecp_set_status_cdl(tp, st, 24);              // 12 (hdr) + 12 (payload)
+        avdecc_eth_send(64);                           // 14 + 36 = 50, pad to 64
+        s->aecp_tx_count++;
+        break;
+    }
+
+    case AEM_CMD_GET_STREAM_INFO: {
+        // GET_STREAM_INFO returns the live stream parameters (stream_id,
+        // dest_mac, MSRP latency, VLAN, format, flags). Hive populates its
+        // "Dynamic Info" panel from this response — without it, every field
+        // shows "No Value" even though the descriptor tree is correct.
+        //
+        // Response payload (48 bytes, from after cmd_type):
+        //   +0  descriptor_type
+        //   +2  descriptor_index
+        //   +4  aem_stream_info_flags
+        //   +8  stream_format (8)
+        //  +16  stream_id (8)
+        //  +24  msrp_accumulated_latency (4)
+        //  +28  stream_dest_mac (6)
+        //  +34  msrp_failure_code (1)
+        //  +35  reserved (1)
+        //  +36  msrp_failure_bridge_id (8)
+        //  +44  stream_vlan_id (2)
+        //  +46  reserved (2)
+        if (pdu_len < 28) return;
+        uint16_t dt = av_get_be16(pdu + 24);
+        uint16_t di = av_get_be16(pdu + 26);
+
+        const uint8_t *fmt = NULL, *stream_id = NULL, *dest_mac = NULL;
+        uint32_t info_flags = STREAM_INFO_FLAG_STREAM_FORMAT_VALID;
+        int connected = 0;
+
+        if (dt == AEM_DESC_STREAM_OUTPUT && di < AVDECC_MAX_TALKERS) {
+            const avdecc_talker_stream_t *t = &s->talkers[di];
+            fmt = stream_fmt_aaf_8ch_48k;
+            stream_id = t->stream_id;
+            dest_mac  = t->dest_mac;
+            info_flags |= STREAM_INFO_FLAG_STREAM_ID_VALID
+                        | STREAM_INFO_FLAG_STREAM_DEST_MAC_VALID
+                        | STREAM_INFO_FLAG_MSRP_ACC_LATENCY_VALID
+                        | STREAM_INFO_FLAG_STREAM_VLAN_ID_VALID;
+            connected = t->connected;
+        } else if (dt == AEM_DESC_STREAM_INPUT && di < AVDECC_MAX_LISTENERS) {
+            const avdecc_listener_stream_t *l = &s->listeners[di];
+            fmt = (di == LISTENER_CRF_INDEX) ? stream_fmt_crf_48k : stream_fmt_aaf_8ch_48k;
+            if (l->connected) {
+                stream_id = l->stream_id;
+                dest_mac  = l->dest_mac;
+                info_flags |= STREAM_INFO_FLAG_STREAM_ID_VALID
+                            | STREAM_INFO_FLAG_STREAM_DEST_MAC_VALID
+                            | STREAM_INFO_FLAG_CONNECTED;
+            }
+        } else {
+            // Unknown descriptor — respond NO_SUCH_DESCRIPTOR with bare echo
+            uint8_t *tf = avdecc_tx_buf();
+            uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+            memcpy(tp + 24, pdu + 24, 4);
+            memset(tp + 28, 0, 44);
+            aecp_set_status_cdl(tp, AECP_STATUS_NO_SUCH_DESCRIPTOR, 60);
+            avdecc_eth_send(14 + 24 + 48);   // 86 bytes total
+            s->aecp_tx_count++;
+            return;
+        }
+
+        uint8_t *tf = avdecc_tx_buf();
+        uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+        av_put_be16(tp + 24, dt);
+        av_put_be16(tp + 26, di);
+        av_put_be32(tp + 28, info_flags);
+        memcpy   (tp + 32, fmt, 8);                            // stream_format
+        if (stream_id) memcpy(tp + 40, stream_id, 8);
+        else           memset(tp + 40, 0, 8);
+        // MSRP accumulated latency: 2 ms in ns (matches Auvitran reference).
+        av_put_be32(tp + 48, 2000000);
+        if (dest_mac) memcpy(tp + 52, dest_mac, 6);
+        else          memset(tp + 52, 0, 6);
+        tp[58] = 0;                                            // msrp_failure_code
+        tp[59] = 0;                                            // reserved
+        memset(tp + 60, 0, 8);                                 // msrp_failure_bridge_id
+        av_put_be16(tp + 68, 2);                               // stream_vlan_id (SR class A)
+        av_put_be16(tp + 70, 0);                               // reserved2
+        aecp_set_status_cdl(tp, AECP_STATUS_SUCCESS, 60);
+        avdecc_eth_send(14 + 24 + 48);                         // 86 bytes total
+        s->aecp_tx_count++;
+        (void)connected;
         break;
     }
 
@@ -1077,6 +1229,11 @@ void avdecc_set_talker_stream(avdecc_state_t *s, uint16_t uid,
     if (uid >= AVDECC_MAX_TALKERS) return;
     memcpy(s->talkers[uid].stream_id, stream_id, 8);
     memcpy(s->talkers[uid].dest_mac,  stream_dest_mac, 6);
+}
+
+void avdecc_set_gptp(const gptp_t *g)
+{
+    g_gptp = g;
 }
 
 void avdecc_depart(avdecc_state_t *s)

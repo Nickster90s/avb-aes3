@@ -117,6 +117,16 @@ typedef struct {
     uint8_t  master_clock_id[CLOCK_ID_LEN];
     uint16_t master_port_number;
 
+    // Grandmaster info (learned from Announce) — surfaced in ADP/AVB_INTERFACE
+    // so AVDECC controllers (e.g. Hive) show the actual GM ID and quality.
+    uint8_t  gm_clock_id[CLOCK_ID_LEN];
+    uint8_t  gm_priority1;
+    uint8_t  gm_clock_class;
+    uint8_t  gm_clock_accuracy;
+    uint16_t gm_offset_scaled_log_variance;
+    uint8_t  gm_priority2;
+    uint8_t  gm_valid;                  // 1 = at least one Announce seen
+
     // Pdelay measurement
     uint16_t pdelay_seq_id;
     ptp_timestamp_t pdelay_t1;  // Our Pdelay_Req TX timestamp

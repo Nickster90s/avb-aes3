@@ -8,6 +8,7 @@
 #define AVDECC_H
 
 #include <stdint.h>
+#include "gptp.h"   // gptp_t — surfaced via avdecc_set_gptp()
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -35,12 +36,22 @@
 #define ADP_VALID_TIME              10
 #define ADP_ADVERTISE_PERIOD_MS     10000   // Send every 10s (< valid_time * 2)
 
-// ADP Entity Capabilities (IEEE 1722.1-2013 Table 6.2)
-#define ADP_CAP_ADP_SUPPORTED                   (1u << 0)
-#define ADP_CAP_ACMP_SUPPORTED                  (1u << 1)
-#define ADP_CAP_AVDECC_ENTITY_PROXY             (1u << 2)
-// ...
-#define ADP_CAP_GPTP_SUPPORTED                  (1u << 11)
+// ADP Entity Capabilities (IEEE 1722.1-2013 Table 6.2, cross-checked with
+// jdksavdecc_adp.h). Bit numbers in the spec are MSB-counted; these constants
+// use the on-the-wire (network-byte-order) numeric values from jdksavdecc.
+// AEM_SUPPORTED is mandatory for Hive/L-Acoustics controllers to issue
+// READ_DESCRIPTOR — without it the entity appears discovered-but-empty.
+#define ADP_CAP_EFU_MODE                        0x00000001UL
+#define ADP_CAP_ADDRESS_ACCESS_SUPPORTED        0x00000002UL
+#define ADP_CAP_GATEWAY_ENTITY                  0x00000004UL
+#define ADP_CAP_AEM_SUPPORTED                   0x00000008UL
+#define ADP_CAP_LEGACY_AVC                      0x00000010UL
+#define ADP_CAP_ASSOCIATION_ID_SUPPORTED        0x00000020UL
+#define ADP_CAP_ASSOCIATION_ID_VALID            0x00000040UL
+#define ADP_CAP_VENDOR_UNIQUE_SUPPORTED         0x00000080UL
+#define ADP_CAP_CLASS_A_SUPPORTED               0x00000100UL
+#define ADP_CAP_CLASS_B_SUPPORTED               0x00000200UL
+#define ADP_CAP_GPTP_SUPPORTED                  0x00000400UL
 
 // ADP Talker Capabilities
 #define ADP_TALKER_CAP_IMPLEMENTED              (1u << 0)
@@ -105,8 +116,25 @@
 #define AEM_CMD_READ_DESCRIPTOR                 0x0004
 #define AEM_CMD_SET_STREAM_FORMAT               0x0008
 #define AEM_CMD_GET_STREAM_FORMAT               0x0009
+#define AEM_CMD_GET_STREAM_INFO                 0x000F
 #define AEM_CMD_SET_CLOCK_SOURCE                0x0016
 #define AEM_CMD_GET_CLOCK_SOURCE                0x0017
+#define AEM_CMD_GET_MAX_TRANSIT_TIME            0x004D
+
+// AEM_STREAM_INFO flags (IEEE 1722.1-2013 Table 7.16, la_avdecc src/protocol)
+// — included in GET_STREAM_INFO responses to advertise which fields are
+// populated. The "CONNECTED" bit is set on a listener when the controller
+// has issued CONNECT_RX for it; STREAM_VLAN_ID_VALID + others are set on
+// our talker because we always know dest_mac/stream_id/VLAN.
+#define STREAM_INFO_FLAG_STREAM_FORMAT_VALID       0x80000000UL
+#define STREAM_INFO_FLAG_STREAM_ID_VALID           0x40000000UL
+#define STREAM_INFO_FLAG_MSRP_ACC_LATENCY_VALID    0x20000000UL
+#define STREAM_INFO_FLAG_STREAM_DEST_MAC_VALID     0x10000000UL
+#define STREAM_INFO_FLAG_MSRP_FAILURE_VALID        0x08000000UL
+#define STREAM_INFO_FLAG_STREAM_VLAN_ID_VALID      0x04000000UL
+#define STREAM_INFO_FLAG_CONNECTED                 0x02000000UL
+#define STREAM_INFO_FLAG_STREAMING_WAIT            0x00008000UL
+#define STREAM_INFO_FLAG_CLASS_B                   0x00004000UL
 
 // AEM descriptor types (IEEE 1722.1-2013 Table 7.1, cross-checked with
 // jdksavdecc-c/include/jdksavdecc_aem_descriptor.h)
@@ -245,6 +273,11 @@ void avdecc_init(avdecc_state_t *s, const uint8_t *mac_addr);
 void avdecc_set_talker_stream(avdecc_state_t *s, uint16_t uid,
                               const uint8_t *stream_id,
                               const uint8_t *stream_dest_mac);
+
+// Provide a pointer to the gPTP state so ADP and AVB_INTERFACE responses
+// reflect the actual grandmaster identity learned from Announce messages.
+// Pass NULL to detach (advertised GM falls back to all-zeros).
+void avdecc_set_gptp(const gptp_t *g);
 
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).

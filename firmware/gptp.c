@@ -602,6 +602,32 @@ void gptp_process_rx(gptp_t *g, const uint8_t *frame, uint32_t len)
             break;
         case PTP_MSG_ANNOUNCE:
             g->rx_announce_count++;
+            // Announce body per IEEE 1588-2008 § 13.5.1 — the body STARTS
+            // with a 10-byte originTimestamp (6B seconds + 4B nanoseconds)
+            // before the grandmaster info. Layout from start of body:
+            //   +0..9   originTimestamp (6B sec + 4B ns)
+            //   +10..11 currentUtcOffset (Int16)
+            //   +12     reserved
+            //   +13     grandmasterPriority1
+            //   +14..17 grandmasterClockQuality {clockClass(1),
+            //                                   clockAccuracy(1),
+            //                                   offsetScaledLogVariance(2)}
+            //   +18     grandmasterPriority2
+            //   +19..26 grandmasterIdentity (8 bytes)
+            //   +27..28 stepsRemoved
+            //   +29     timeSource
+            // Forgetting the originTimestamp shifts every field by 10 bytes
+            // and yields a bogus "GM ID" that is really priority1+quality.
+            if (ptp_len >= PTP_HEADER_LEN + 30) {
+                const uint8_t *body = ptp + PTP_HEADER_LEN;
+                g->gm_priority1   = body[13];
+                g->gm_clock_class = body[14];
+                g->gm_clock_accuracy = body[15];
+                g->gm_offset_scaled_log_variance = get_be16(body + 16);
+                g->gm_priority2   = body[18];
+                memcpy(g->gm_clock_id, body + 19, CLOCK_ID_LEN);
+                g->gm_valid = 1;
+            }
             break;
         default:
             g->rx_other_count++;

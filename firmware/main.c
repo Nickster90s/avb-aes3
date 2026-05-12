@@ -155,6 +155,10 @@ static void check_uart_cmd(void)
                    (unsigned long)(gptp.current_addend_full >> 20),
                    (unsigned long)(gptp.current_addend_full & 0xFFFFFu),
                    gptp.servo_locked);
+            printf("  gm: id=%02x%02x%02x%02x%02x%02x%02x%02x p1=%u cc=%u p2=%u valid=%u\n",
+                   gptp.gm_clock_id[0], gptp.gm_clock_id[1], gptp.gm_clock_id[2], gptp.gm_clock_id[3],
+                   gptp.gm_clock_id[4], gptp.gm_clock_id[5], gptp.gm_clock_id[6], gptp.gm_clock_id[7],
+                   gptp.gm_priority1, gptp.gm_clock_class, gptp.gm_priority2, gptp.gm_valid);
             printf("  rx: sync=%lu fup=%lu pdreq=%lu pdresp=%lu pdfup=%lu ann=%lu other=%lu wdom=%lu last=mt%u dom%u\n",
                    (unsigned long)gptp.rx_sync_count,
                    (unsigned long)gptp.rx_followup_count,
@@ -384,6 +388,7 @@ int main(void)
     // Init AVDECC (discovery + connection management) using the AAF talker
     // stream identity as the advertised one.
     avdecc_init(&avdecc, mac_addr);
+    avdecc_set_gptp(&gptp);   // surface GM identity in ADP/AVB_INTERFACE
     avdecc_set_talker_stream(&avdecc, TALKER_UID_AAF, aaf.stream_id, aaf.dest_mac);
     avdecc.on_talker_connect    = on_talker_connect;
     avdecc.on_talker_disconnect = on_talker_disconnect;

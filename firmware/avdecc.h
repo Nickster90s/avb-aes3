@@ -52,6 +52,15 @@
 #define ADP_CAP_CLASS_A_SUPPORTED               0x00000100UL
 #define ADP_CAP_CLASS_B_SUPPORTED               0x00000200UL
 #define ADP_CAP_GPTP_SUPPORTED                  0x00000400UL
+#define ADP_CAP_AEM_AUTH_SUPPORTED              0x00000800UL
+#define ADP_CAP_AEM_AUTH_REQUIRED               0x00001000UL
+#define ADP_CAP_AEM_PERSISTENT_ACQ_SUPPORTED    0x00002000UL
+#define ADP_CAP_AEM_IDENTIFY_CTRL_INDEX_VALID   0x00004000UL
+// Tells the controller that ADP's interface_index field is meaningful
+// (not just left as 0). Required for the controller to associate ADP
+// state with our AVB_INTERFACE descriptor. Hive flags entities without
+// this even though our interface_index=0 was already correct.
+#define ADP_CAP_AEM_INTERFACE_INDEX_VALID       0x00008000UL
 
 // ADP Talker Capabilities
 #define ADP_TALKER_CAP_IMPLEMENTED              (1u << 0)
@@ -100,6 +109,23 @@
 // AECP message types
 #define AECP_MSG_AEM_COMMAND                    0
 #define AECP_MSG_AEM_RESPONSE                   1
+#define AECP_MSG_VENDOR_UNIQUE_COMMAND          6
+#define AECP_MSG_VENDOR_UNIQUE_RESPONSE         7
+
+// Milan Vendor Unique (MVU) — Avnu OUI-36 (00:1B:C5:0A:C) + ProtocolUniqueID 0x100
+// = 00:1B:C5:0A:C1:00. Hive treats us as Milan-base capable only after we
+// answer MvuCommandType::GetMilanInfo via this protocol_id.
+#define MVU_PROTOCOL_ID                         { 0x00, 0x1B, 0xC5, 0x0A, 0xC1, 0x00 }
+
+// MVU command types (Milan 1.3 Clause 5.4.3.2.3)
+#define MVU_CMD_GET_MILAN_INFO                  0x0000
+#define MVU_CMD_SET_SYSTEM_UNIQUE_ID            0x0001
+#define MVU_CMD_GET_SYSTEM_UNIQUE_ID            0x0002
+#define MVU_CMD_SET_MEDIA_CLOCK_REFERENCE_INFO  0x0003
+#define MVU_CMD_GET_MEDIA_CLOCK_REFERENCE_INFO  0x0004
+#define MVU_CMD_BIND_STREAM                     0x0005
+#define MVU_CMD_UNBIND_STREAM                   0x0006
+#define MVU_CMD_GET_STREAM_INPUT_INFO_EX        0x0007
 
 // AECP/AEM status codes (IEEE 1722.1-2013 Table 7.127)
 #define AECP_STATUS_SUCCESS                     0
@@ -119,6 +145,12 @@
 #define AEM_CMD_GET_STREAM_INFO                 0x000F
 #define AEM_CMD_SET_CLOCK_SOURCE                0x0016
 #define AEM_CMD_GET_CLOCK_SOURCE                0x0017
+#define AEM_CMD_REGISTER_UNSOLICITED            0x0024
+#define AEM_CMD_DEREGISTER_UNSOLICITED          0x0025
+#define AEM_CMD_GET_AVB_INFO                    0x0027
+#define AEM_CMD_GET_AS_PATH                     0x0028
+#define AEM_CMD_GET_COUNTERS                    0x0029
+#define AEM_CMD_GET_AUDIO_MAP                   0x002B
 #define AEM_CMD_GET_MAX_TRANSIT_TIME            0x004D
 
 // AEM_STREAM_INFO flags (IEEE 1722.1-2013 Table 7.16, la_avdecc src/protocol)

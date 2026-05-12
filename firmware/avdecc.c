@@ -509,8 +509,24 @@ static uint32_t build_desc_entity(uint8_t *d, uint16_t idx, avdecc_state_t *s)
     av_put_be16(d + 112, 0x0000);                // vendor_name_string → "N-Series"
     av_put_be16(d + 114, 0x0001);                // model_name_string → "AVB-AES3 Endpoint"
     write_name64(d + 116, "1.0.0");              // firmware_version (inline)
-    // group_name (offset 180, 64 bytes) — empty string OK
-    // serial_number (offset 244, 64 bytes) — empty string OK
+    // group_name (offset 180, 64 bytes) — empty
+    // serial_number at offset 244 (64 bytes inline ASCII). Derived from
+    // the MAC's lower 3 bytes so each unit is unique but the format is
+    // stable per product (matches working endpoint convention of using
+    // an ASCII numeric/short string).
+    {
+        char sn[16];
+        sn[ 0] = 'N'; sn[ 1] = 'S'; sn[ 2] = '-';
+        static const char hex[] = "0123456789ABCDEF";
+        sn[ 3] = hex[(s->src_mac[3] >> 4) & 0xF];
+        sn[ 4] = hex[ s->src_mac[3]       & 0xF];
+        sn[ 5] = hex[(s->src_mac[4] >> 4) & 0xF];
+        sn[ 6] = hex[ s->src_mac[4]       & 0xF];
+        sn[ 7] = hex[(s->src_mac[5] >> 4) & 0xF];
+        sn[ 8] = hex[ s->src_mac[5]       & 0xF];
+        sn[ 9] = 0;
+        write_name64(d + 244, sn);
+    }
     av_put_be16(d + 308, 1);                     // configurations_count
     av_put_be16(d + 310, 0);                     // current_configuration
     return 312;
@@ -1095,6 +1111,35 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         av_put_be16(tp + 30, 0);                       // reserved
         aecp_set_status_cdl(tp, st, 20);
         avdecc_eth_send(64);
+        s->aecp_tx_count++;
+        break;
+    }
+
+    case AEM_CMD_GET_AS_PATH: {
+        // Milan 1.3 §5.4.4 mandatory. Response payload (12 bytes from
+        // after cmd_type, IEEE 1722.1-2013 §7.4.41.2):
+        //   +0   descriptor_index (2) — echoed AVB_INTERFACE index
+        //   +2   count (2) — number of clock_identity entries
+        //   +4   path[count] (count × 8 bytes)
+        //
+        // We return a single-entry path containing the current GM's
+        // clock_id (we're directly bridged to it as far as gPTP knows;
+        // there's no upstream boundary clock chain we measure). Same
+        // approach the working endpoint takes.
+        if (pdu_len < 26) return;
+        uint16_t di = av_get_be16(pdu + 24);
+
+        uint8_t *tf = avdecc_tx_buf();
+        uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+        av_put_be16(tp + 24, di);
+        av_put_be16(tp + 26, 1);              // count = 1 entry
+        if (g_gptp && g_gptp->gm_valid)
+            memcpy(tp + 28, g_gptp->gm_clock_id, 8);
+        else
+            memset(tp + 28, 0, 8);
+        // CDL = AECPDU - 12 = (4 + 8 + 8 + 2 + 2 + 12) - 12 = 24
+        aecp_set_status_cdl(tp, AECP_STATUS_SUCCESS, 24);
+        avdecc_eth_send(64);                  // 14 + 36 = 50, pad to 64
         s->aecp_tx_count++;
         break;
     }

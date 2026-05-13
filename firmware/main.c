@@ -288,6 +288,104 @@ static void check_uart_cmd(void)
 }
 
 // ---------------------------------------------------------------------------
+// Pending FAST_CONNECT bindings — when Hive sends ACMP CONNECT_RX with
+// stream_id all-zero (Milan saved-state restore before talker is up), we
+// remember the dest_mac here. As soon as SRP observes a TalkerAdvertise
+// to that dest_mac, we copy its stream_id into mcr/aaf and start
+// filtering AVTP packets by it.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    uint8_t  active;             // 1 = waiting for SRP TalkerAdvertise
+    uint8_t  uid;                // listener_unique_id (CRF or AAF)
+    uint8_t  dest_mac[6];        // saved-state dest_mac (may be all-zero)
+    uint8_t  talker_entity_id[8];// saved-state talker_eid (may be all-zero)
+    uint16_t talker_uid;
+} pending_bind_t;
+
+static pending_bind_t pending_listeners[2];   // one slot per listener
+
+static int stream_id_is_zero(const uint8_t *sid)
+{
+    int v = 0;
+    for (int i = 0; i < 8; i++) v |= sid[i];
+    return v == 0;
+}
+
+static int mac_eq(const uint8_t *a, const uint8_t *b)
+{
+    int diff = 0;
+    for (int i = 0; i < 6; i++) diff |= a[i] ^ b[i];
+    return !diff;
+}
+
+static int dest_or_eid_match(const pending_bind_t *p,
+                              const uint8_t *adv_sid, const uint8_t *adv_dest)
+{
+    // 1) Strong match: dest_mac matches the saved binding's dest_mac.
+    int dest_zero = 1;
+    for (int i = 0; i < 6; i++) if (p->dest_mac[i]) { dest_zero = 0; break; }
+    if (!dest_zero && mac_eq(p->dest_mac, adv_dest)) return 1;
+
+    // 2) Saved talker_entity_id present? Match its MAC portion against
+    //    the advertise stream_id's MAC portion. Talker_entity_id is
+    //    typically MAC + 0x0000 or EUI-64-expanded MAC; in either form
+    //    the first 3 bytes are the OUI of the talker's MAC.
+    //    Advertised stream_id is typically MAC + uid; first 3 bytes are
+    //    the same OUI. So OUI-equality on bytes [0..2] indicates a
+    //    plausible match.
+    int eid_zero = 1;
+    for (int i = 0; i < 8; i++) if (p->talker_entity_id[i]) { eid_zero = 0; break; }
+    if (!eid_zero) {
+        // Compare first 3 bytes (OUI). Then if the talker_entity_id
+        // looks like MAC+uid (bytes [3..5] != FF:FE), compare bytes
+        // [3..5] as well for stricter matching.
+        if (p->talker_entity_id[0] == adv_sid[0] &&
+            p->talker_entity_id[1] == adv_sid[1] &&
+            p->talker_entity_id[2] == adv_sid[2]) {
+            int looks_like_eui64 = (p->talker_entity_id[3] == 0xFF &&
+                                    p->talker_entity_id[4] == 0xFE);
+            if (looks_like_eui64) return 1;
+            if (p->talker_entity_id[3] == adv_sid[3] &&
+                p->talker_entity_id[4] == adv_sid[4] &&
+                p->talker_entity_id[5] == adv_sid[5]) return 1;
+        }
+    }
+    return 0;
+}
+
+static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_mac)
+{
+    for (int i = 0; i < (int)(sizeof(pending_listeners)/sizeof(pending_listeners[0])); i++) {
+        pending_bind_t *p = &pending_listeners[i];
+        if (!p->active) continue;
+        if (!dest_or_eid_match(p, stream_id, dest_mac)) continue;
+
+        printf("[SRP-learn] uid=%u dest=%02x:%02x:%02x:%02x:%02x:%02x → "
+               "stream_id=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+               p->uid,
+               dest_mac[0], dest_mac[1], dest_mac[2],
+               dest_mac[3], dest_mac[4], dest_mac[5],
+               stream_id[0], stream_id[1], stream_id[2], stream_id[3],
+               stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
+
+        // Also reflect the learned stream_id back into AVDECC's listener
+        // state so subsequent GET_STREAM_INFO/GetStreamInputInfoEx
+        // responses report the real talker stream_id.
+        if (p->uid < AVDECC_MAX_LISTENERS)
+            memcpy(avdecc.listeners[p->uid].stream_id, stream_id, 8);
+
+        // Now declare SRP ListenerReady with the REAL stream_id and bind
+        // the audio engines to filter on it.
+        srp_listener_enable(&srp, stream_id, 1);
+        if (p->uid == LISTENER_UID_CRF)      mcr_bind(&mcr, stream_id);
+        else if (p->uid == LISTENER_UID_AAF) aaf_bind(&aaf, stream_id);
+
+        p->active = 0;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // AVDECC callbacks — wire connection management to AVTP/SRP
 // ---------------------------------------------------------------------------
 
@@ -312,25 +410,55 @@ static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
                                 const uint8_t *dest_mac,
                                 const uint8_t *talker_entity_id)
 {
-    (void)dest_mac; (void)talker_entity_id;
-    // Always declare SRP Listener Ready — without it the talker never
-    // sees us as registered for the stream and won't push packets. This
-    // applies to BOTH CRF (media clock) and AAF (audio) inputs.
-    srp_listener_enable(&srp, stream_id, 1);
-    if (uid == LISTENER_UID_CRF) {
-        mcr_bind(&mcr, stream_id);
-    } else if (uid == LISTENER_UID_AAF) {
-        aaf_bind(&aaf, stream_id);
+    // Two cases:
+    //  1. Normal connect (Hive matrix drag): controller has discovered
+    //     the talker's stream_id via ACMP CONNECT_TX and forwards it in
+    //     CONNECT_RX. Bind immediately to filter AVTP frames on it.
+    //  2. Milan FAST_CONNECT (saved state restore): stream_id all zeros
+    //     — talker may still be offline. Park a pending entry and wait
+    //     for SRP TalkerAdvertise matching either dest_mac OR the
+    //     saved talker_entity_id (which Hive always populates even when
+    //     the other fields are empty). Then bind to the learned stream_id.
+    if (uid >= (uint16_t)(sizeof(pending_listeners)/sizeof(pending_listeners[0])))
+        return;
+
+    if (stream_id_is_zero(stream_id)) {
+        pending_bind_t *p = &pending_listeners[uid];
+        p->active = 1;
+        p->uid    = (uint8_t)uid;
+        memcpy(p->dest_mac, dest_mac, 6);
+        memcpy(p->talker_entity_id, talker_entity_id, 8);
+        // talker_uid not exposed in callback signature yet; not needed
+        // for matching but recorded as 0 default.
+        p->talker_uid = 0;
+        printf("[main] Listener uid=%u FAST_CONNECT pending — "
+               "talker=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x "
+               "dest=%02x:%02x:%02x:%02x:%02x:%02x\n", uid,
+               talker_entity_id[0], talker_entity_id[1], talker_entity_id[2],
+               talker_entity_id[3], talker_entity_id[4], talker_entity_id[5],
+               talker_entity_id[6], talker_entity_id[7],
+               dest_mac[0], dest_mac[1], dest_mac[2],
+               dest_mac[3], dest_mac[4], dest_mac[5]);
+        return;
     }
+
+    // Normal path — stream_id is known up front.
+    pending_listeners[uid].active = 0;
+    srp_listener_enable(&srp, stream_id, 1);
+    if (uid == LISTENER_UID_CRF)      mcr_bind(&mcr, stream_id);
+    else if (uid == LISTENER_UID_AAF) aaf_bind(&aaf, stream_id);
 }
 
 static void on_listener_disconnect(uint16_t uid)
 {
+    if (uid < (uint16_t)(sizeof(pending_listeners)/sizeof(pending_listeners[0])))
+        pending_listeners[uid].active = 0;
+
     if (uid == LISTENER_UID_CRF) {
-        srp_listener_enable(&srp, mcr.stream_id, 0);
+        if (mcr.bound) srp_listener_enable(&srp, mcr.stream_id, 0);
         mcr_unbind(&mcr);
     } else if (uid == LISTENER_UID_AAF) {
-        srp_listener_enable(&srp, aaf.stream_id, 0);
+        if (aaf.bound) srp_listener_enable(&srp, aaf.stream_id, 0);
         aaf_unbind(&aaf);
     }
 }
@@ -388,6 +516,11 @@ int main(void)
 
     // Configure SRP talker to advertise our AAF stream
     srp_talker_set(&srp, aaf.stream_id, aaf.dest_mac, 230);   // 14+24+192
+
+    // Observe every TalkerAdvertise on the wire — used to learn the
+    // real stream_id for a FAST_CONNECT listener that arrived with
+    // stream_id=0 from ACMP.
+    srp.on_talker_advertise = on_talker_advertise;
 
     // Init AVDECC (discovery + connection management) using the AAF talker
     // stream identity as the advertised one.

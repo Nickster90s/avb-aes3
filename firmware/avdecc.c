@@ -415,11 +415,15 @@ static void acmp_handle_connect_rx(avdecc_state_t *s, const uint8_t *pdu)
     l->connected = 1;
     l->connection_count++;
 
-    printf("[AVDECC] CONNECT_RX uid=%u stream "
-           "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+    printf("[AVDECC] CONNECT_RX uid=%u talker=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x[%u] "
+           "stream=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x dest=%02x:%02x:%02x:%02x:%02x:%02x\n",
            luid,
+           talker_id[0], talker_id[1], talker_id[2], talker_id[3],
+           talker_id[4], talker_id[5], talker_id[6], talker_id[7], tuid,
            stream_id[0], stream_id[1], stream_id[2], stream_id[3],
-           stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
+           stream_id[4], stream_id[5], stream_id[6], stream_id[7],
+           dest_mac[0], dest_mac[1], dest_mac[2],
+           dest_mac[3], dest_mac[4], dest_mac[5]);
 
     if (s->on_listener_connect)
         s->on_listener_connect(luid, stream_id, dest_mac, talker_id);
@@ -1588,10 +1592,19 @@ void avdecc_init(avdecc_state_t *s, const uint8_t *mac_addr)
 
     memcpy(s->src_mac, mac_addr, 6);
 
-    // Entity ID: MAC(6) + 0x0000(2)
-    memcpy(s->entity_id, mac_addr, 6);
-    s->entity_id[6] = 0x00;
-    s->entity_id[7] = 0x00;
+    // Entity ID is an EUI-64 (per IEEE 1722.1 §6.2.1.1). Derive it from
+    // the MAC by inserting FF:FE in the middle — the standard EUI-48 →
+    // EUI-64 expansion. Matches our gPTP clock_identity, MOTU's format,
+    // and avoids the "MAC + 0000 padding" look that has five trailing
+    // zero bytes. e.g. MAC 02:00:00:00:00:42 → ID 02:00:00:FF:FE:00:00:42.
+    s->entity_id[0] = mac_addr[0];
+    s->entity_id[1] = mac_addr[1];
+    s->entity_id[2] = mac_addr[2];
+    s->entity_id[3] = 0xFF;
+    s->entity_id[4] = 0xFE;
+    s->entity_id[5] = mac_addr[3];
+    s->entity_id[6] = mac_addr[4];
+    s->entity_id[7] = mac_addr[5];
 
     avdecc_txslot = 0;
 

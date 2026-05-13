@@ -100,6 +100,14 @@ typedef struct {
     uint16_t rx_sr_vid;
     uint8_t  talker_registered;     // A remote talker was registered for our listener stream
     uint32_t rx_pdu_count;
+    uint32_t talker_last_seen_ms;   // last TalkerAdvertise matching our listener stream
+
+    // Callback fired for every TalkerAdvertise observed on the wire,
+    // regardless of whether it matches our currently-registered listener
+    // stream_id. Used by main.c to learn the real stream_id for a
+    // FAST_CONNECT listener bound only by dest_mac. NULL = disabled.
+    void (*on_talker_advertise)(const uint8_t *stream_id,
+                                const uint8_t *dest_mac);
 } srp_state_t;
 
 // ---------------------------------------------------------------------------

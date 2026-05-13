@@ -334,6 +334,61 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
             }
 
             if (attr_type == MSRP_ATTR_TALKER_ADV && attr_len >= 25) {
+                // TalkerAdvertise FirstValue layout (IEEE 802.1Q-2014 §35):
+                //   +0..7   stream_id (8)
+                //   +8..13  stream_dest_addr (6)
+                //   +14..15 vlan_id
+                //   +16..17 max_frame_size
+                //   +18..19 max_interval_frames
+                //   +20     priority_and_rank
+                //   +21..24 accumulated_latency
+                //
+                // (b) Diagnostic: rate-limited print of each unique
+                // stream_id+dest_mac we see. Rate limit = per-stream_id
+                // 5-second cache (cheap LRU of size 4). avb_session_mgr2
+                // re-advertises every 200 ms × 4 streams; without the
+                // cache we'd flood the UART.
+                {
+                    static uint8_t cache_sid[4][8];
+                    static uint32_t cache_t_ms[4];
+                    static int cache_n = 0;
+                    uint32_t now = gptp_uptime_ms();
+                    int found = -1, oldest = 0;
+                    uint32_t oldest_t = 0xFFFFFFFFu;
+                    for (int i = 0; i < cache_n; i++) {
+                        int eq = 1;
+                        for (int k = 0; k < 8; k++)
+                            if (cache_sid[i][k] != vp[k]) { eq = 0; break; }
+                        if (eq) { found = i; break; }
+                        if (cache_t_ms[i] < oldest_t) {
+                            oldest_t = cache_t_ms[i]; oldest = i;
+                        }
+                    }
+                    int log_it = 0;
+                    if (found < 0) {
+                        // new stream_id — log + cache
+                        int slot = (cache_n < 4) ? cache_n++ : oldest;
+                        memcpy(cache_sid[slot], vp, 8);
+                        cache_t_ms[slot] = now;
+                        log_it = 1;
+                    } else if ((now - cache_t_ms[found]) >= 5000) {
+                        cache_t_ms[found] = now;
+                        log_it = 1;
+                    }
+                    if (log_it) {
+                        printf("[SRP-RX] TalkerAdv sid=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x "
+                               "dest=%02x:%02x:%02x:%02x:%02x:%02x\n",
+                               vp[0], vp[1], vp[2], vp[3], vp[4], vp[5], vp[6], vp[7],
+                               vp[8], vp[9], vp[10], vp[11], vp[12], vp[13]);
+                    }
+                }
+
+                // Fire the observer callback — main.c uses it to learn
+                // stream_ids for FAST_CONNECT bindings that only know
+                // the dest_mac at ACMP CONNECT_RX time.
+                if (s->on_talker_advertise)
+                    s->on_talker_advertise(vp, vp + 8);
+
                 // Check if this talker's stream_id matches what our listener wants
                 if (s->listener_enabled) {
                     int match = 1;
@@ -348,6 +403,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                             printf("[SRP] Talker registered for our stream\n");
                         }
                         s->talker_registered = 1;
+                        s->talker_last_seen_ms = gptp_uptime_ms();
                         s->listener_substate = MSRP_LISTENER_READY;
                     }
                 }
@@ -445,6 +501,22 @@ void srp_poll(srp_state_t *s)
     if (elapsed_lva >= MRP_LEAVEALL_PERIOD_MS) {
         leaveall = 1;
         s->last_leaveall_ms = now_ms;
+    }
+
+    // (a) Age out talker_registered. If we haven't seen a matching
+    // TalkerAdvertise in 3× LeaveAll intervals (~30 s by default), the
+    // talker is presumed gone — clear the flag and notify upper layers.
+    // Without this, talker_registered stayed sticky forever even after
+    // the talker disconnected from the wire.
+    if (s->talker_registered) {
+        uint32_t age = now_ms - s->talker_last_seen_ms;
+        if (age > 2000000000) age = 0;          // wrap guard
+        if (age >= (3u * MRP_LEAVEALL_PERIOD_MS)) {
+            printf("[SRP] Talker timed out (no advertise in %u ms) — "
+                   "clearing registration\n", (unsigned)age);
+            s->talker_registered  = 0;
+            s->listener_substate  = MSRP_LISTENER_ASKFAILED;
+        }
     }
 
     // Join timer — send declarations periodically

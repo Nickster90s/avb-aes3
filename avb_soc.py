@@ -534,16 +534,21 @@ class AVBSoC(SoCCore):
 
         # Ethernet MAC (Wishbone interface for firmware raw frame access).
         # Pass TSU timestamp for RX/TX frame timestamping.
-        # nrxslots=4: tradeoff. With 2 slots, gPTP Syncs were dropped
-        # during Hive's AECP enumeration bursts. With 8 slots, the
-        # slot-RAM expansion perturbed RGMII TX placement and TX failed
-        # on real hardware despite ~166 MHz post-route timing. 4 slots
-        # gives 2× headroom without breaking placement.
+        # nrxslots=2 (LiteEthMAC default). Both nrxslots=4 and =8 were
+        # tried and broke TX on hardware — Hive lost the entity, peer
+        # never replied to Pdelay_Req, MSRP silent — despite >130 MHz
+        # post-route timing and firmware correctly rebuilt against the
+        # new headers. The slot-RAM expansion appears to perturb the
+        # LiteEthMAC TX path in ways static analysis doesn't catch.
+        # Sticking with 2 is the proven-working config; the gPTP Sync
+        # drop concern during AECP bursts (writer_errors > 0) will be
+        # addressed instead by draining all pending slots per dispatch
+        # call, not by widening the slot RAM.
         self.add_ethernet(
             phy            = self.ethphy,
             data_width     = 8,
             with_timestamp = False,  # We use our own TSU, not timer0 uptime
-            nrxslots       = 4,
+            nrxslots       = 2,
             ntxslots       = 2,
         )
 
@@ -795,7 +800,7 @@ def main():
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
         # and pick the seed with the highest eth_tx_clk PASS.
-        builder.build(seed=67)   # post-route 132.68 MHz on 4-rxslot netlist
+        builder.build(seed=79)   # last-known-good seed for nrxslots=2 netlist
 
     if args.load:
         prog = soc.platform.create_programmer()

@@ -383,6 +383,42 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                     }
                 }
 
+                // Upsert into the per-stream registrar table. Look for
+                // an existing matching stream_id; fall back to the
+                // oldest entry when full. Fields parsed per IEEE 802.1Q
+                // §35 FirstValue layout — see comment above for offsets.
+                {
+                    int slot = -1, oldest = 0;
+                    uint32_t oldest_t = 0xFFFFFFFFu;
+                    for (int i = 0; i < SRP_MAX_REMOTE_TALKERS; i++) {
+                        srp_remote_talker_t *t = &s->remote_talkers[i];
+                        if (t->valid) {
+                            int eq = 1;
+                            for (int k = 0; k < 8; k++)
+                                if (t->stream_id[k] != vp[k]) { eq = 0; break; }
+                            if (eq) { slot = i; break; }
+                            if (t->last_seen_ms < oldest_t) {
+                                oldest_t = t->last_seen_ms; oldest = i;
+                            }
+                        } else if (slot < 0) {
+                            slot = i;     // first free slot
+                        }
+                    }
+                    if (slot < 0) slot = oldest;
+                    srp_remote_talker_t *t = &s->remote_talkers[slot];
+                    t->valid = 1;
+                    memcpy(t->stream_id, vp, 8);
+                    memcpy(t->dest_mac,  vp + 8, 6);
+                    t->vlan_id              = srp_get_be16(vp + 14);
+                    t->max_frame_size       = srp_get_be16(vp + 16);
+                    t->max_interval_frames  = srp_get_be16(vp + 18);
+                    t->priority_and_rank    = vp[20];
+                    t->accumulated_latency_ns =
+                        ((uint32_t)vp[21] << 24) | ((uint32_t)vp[22] << 16) |
+                        ((uint32_t)vp[23] << 8)  |  (uint32_t)vp[24];
+                    t->last_seen_ms = gptp_uptime_ms();
+                }
+
                 // Fire the observer callback — main.c uses it to learn
                 // stream_ids for FAST_CONNECT bindings that only know
                 // the dest_mac at ACMP CONNECT_RX time.
@@ -437,6 +473,20 @@ void srp_init(srp_state_t *s, const uint8_t *mac_addr)
     srp_txslot = 0;
     s->listener_substate = MSRP_LISTENER_ASKFAILED;
     printf("[SRP] Initialized (MSRP)\n");
+}
+
+const srp_remote_talker_t *srp_find_talker(const srp_state_t *s,
+                                            const uint8_t *stream_id)
+{
+    for (int i = 0; i < SRP_MAX_REMOTE_TALKERS; i++) {
+        const srp_remote_talker_t *t = &s->remote_talkers[i];
+        if (!t->valid) continue;
+        int eq = 1;
+        for (int k = 0; k < 8; k++)
+            if (t->stream_id[k] != stream_id[k]) { eq = 0; break; }
+        if (eq) return t;
+    }
+    return NULL;
 }
 
 void srp_talker_set(srp_state_t *s, const uint8_t *stream_id,
@@ -516,6 +566,17 @@ void srp_poll(srp_state_t *s)
                    "clearing registration\n", (unsigned)age);
             s->talker_registered  = 0;
             s->listener_substate  = MSRP_LISTENER_ASKFAILED;
+        }
+    }
+
+    // Age out the per-stream registrar table on the same schedule.
+    for (int i = 0; i < SRP_MAX_REMOTE_TALKERS; i++) {
+        srp_remote_talker_t *t = &s->remote_talkers[i];
+        if (!t->valid) continue;
+        uint32_t age = now_ms - t->last_seen_ms;
+        if (age > 2000000000) age = 0;
+        if (age >= (3u * MRP_LEAVEALL_PERIOD_MS)) {
+            t->valid = 0;
         }
     }
 

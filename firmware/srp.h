@@ -72,6 +72,25 @@ typedef struct {
     uint32_t accumulated_latency_ns;
 } srp_talker_attr_t;
 
+// Per-stream registrar entry. We track every TalkerAdvertise heard on
+// the wire so AVDECC handlers (GET_STREAM_INFO, GetStreamInputInfoEx,
+// GET_AVB_INFO) can report the real MSRP-accumulated-latency, vlan_id
+// and dest_mac learned over SRP — not the hardcoded defaults we used
+// to ship. Aged out by srp_poll when last_seen_ms exceeds the timeout.
+#define SRP_MAX_REMOTE_TALKERS 8
+
+typedef struct {
+    uint8_t  valid;
+    uint8_t  stream_id[8];
+    uint8_t  dest_mac[6];
+    uint16_t vlan_id;
+    uint16_t max_frame_size;
+    uint16_t max_interval_frames;
+    uint8_t  priority_and_rank;
+    uint32_t accumulated_latency_ns;
+    uint32_t last_seen_ms;
+} srp_remote_talker_t;
+
 // ---------------------------------------------------------------------------
 // SRP state
 // ---------------------------------------------------------------------------
@@ -102,6 +121,10 @@ typedef struct {
     uint32_t rx_pdu_count;
     uint32_t talker_last_seen_ms;   // last TalkerAdvertise matching our listener stream
 
+    // Per-stream registrar table — one entry per unique TalkerAdvertise
+    // stream_id observed. Updated on every matching RX, aged out by poll.
+    srp_remote_talker_t remote_talkers[SRP_MAX_REMOTE_TALKERS];
+
     // Callback fired for every TalkerAdvertise observed on the wire,
     // regardless of whether it matches our currently-registered listener
     // stream_id. Used by main.c to learn the real stream_id for a
@@ -115,6 +138,11 @@ typedef struct {
 // ---------------------------------------------------------------------------
 
 void srp_init(srp_state_t *s, const uint8_t *mac_addr);
+
+// Look up a remote talker entry by stream_id. Returns NULL if not seen
+// or aged out.
+const srp_remote_talker_t *srp_find_talker(const srp_state_t *s,
+                                            const uint8_t *stream_id);
 
 // Configure talker advertisement for our stream.
 void srp_talker_set(srp_state_t *s, const uint8_t *stream_id,

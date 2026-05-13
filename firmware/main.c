@@ -369,11 +369,20 @@ static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_ma
                stream_id[0], stream_id[1], stream_id[2], stream_id[3],
                stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
 
-        // Also reflect the learned stream_id back into AVDECC's listener
-        // state so subsequent GET_STREAM_INFO/GetStreamInputInfoEx
-        // responses report the real talker stream_id.
-        if (p->uid < AVDECC_MAX_LISTENERS)
-            memcpy(avdecc.listeners[p->uid].stream_id, stream_id, 8);
+        // Reflect the learned stream identity AND MSRP-derived
+        // attributes (dest_mac, vlan_id, accumulated_latency) back into
+        // AVDECC so subsequent GET_STREAM_INFO/GetStreamInputInfoEx
+        // responses carry wire-truth.
+        if (p->uid < AVDECC_MAX_LISTENERS) {
+            avdecc_listener_stream_t *l = &avdecc.listeners[p->uid];
+            memcpy(l->stream_id, stream_id, 8);
+            memcpy(l->dest_mac,  dest_mac,  6);
+            const srp_remote_talker_t *t = srp_find_talker(&srp, stream_id);
+            if (t) {
+                l->msrp_accumulated_latency_ns = t->accumulated_latency_ns;
+                l->stream_vlan_id              = t->vlan_id;
+            }
+        }
 
         // Now declare SRP ListenerReady with the REAL stream_id and bind
         // the audio engines to filter on it.
@@ -444,6 +453,15 @@ static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
 
     // Normal path — stream_id is known up front.
     pending_listeners[uid].active = 0;
+    // If the talker is already in our SRP registrar table, copy its
+    // MSRP-learned attributes so the next GET_STREAM_INFO is accurate.
+    {
+        const srp_remote_talker_t *t = srp_find_talker(&srp, stream_id);
+        if (t) {
+            avdecc.listeners[uid].msrp_accumulated_latency_ns = t->accumulated_latency_ns;
+            avdecc.listeners[uid].stream_vlan_id              = t->vlan_id;
+        }
+    }
     srp_listener_enable(&srp, stream_id, 1);
     if (uid == LISTENER_UID_CRF)      mcr_bind(&mcr, stream_id);
     else if (uid == LISTENER_UID_AAF) aaf_bind(&aaf, stream_id);

@@ -1427,6 +1427,20 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
             if (s->listeners[di].connected) probing = 3;   // Completed
         }
 
+        // MSRP-derived fields: prefer the SRP-learned values stored
+        // in the listener struct when present, fall back to our static
+        // defaults (2 ms latency, VLAN 2) for the talker side or
+        // un-yet-learned listeners.
+        uint32_t msrp_latency = 2000000;
+        uint16_t vlan_id      = 2;
+        if (dt == AEM_DESC_STREAM_INPUT && di < AVDECC_MAX_LISTENERS) {
+            const avdecc_listener_stream_t *l = &s->listeners[di];
+            if (l->msrp_accumulated_latency_ns)
+                msrp_latency = l->msrp_accumulated_latency_ns;
+            if (l->stream_vlan_id)
+                vlan_id      = l->stream_vlan_id;
+        }
+
         uint8_t *tf = avdecc_tx_buf();
         uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
         av_put_be16(tp + 24, dt);
@@ -1435,14 +1449,13 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         memcpy   (tp + 32, fmt, 8);                            // stream_format
         if (stream_id) memcpy(tp + 40, stream_id, 8);
         else           memset(tp + 40, 0, 8);
-        // MSRP accumulated latency: 2 ms in ns (matches Auvitran reference).
-        av_put_be32(tp + 48, 2000000);
+        av_put_be32(tp + 48, msrp_latency);                    // MSRP accumulated latency
         if (dest_mac) memcpy(tp + 52, dest_mac, 6);
         else          memset(tp + 52, 0, 6);
         tp[58] = 0;                                            // msrp_failure_code
         tp[59] = 0;                                            // reserved
         memset(tp + 60, 0, 8);                                 // msrp_failure_bridge_id
-        av_put_be16(tp + 68, 2);                               // stream_vlan_id (SR class A)
+        av_put_be16(tp + 68, vlan_id);                         // stream_vlan_id
         av_put_be16(tp + 70, 0);                               // reserved2
         // Milan extension (bytes 48..55 of the AEM payload = tp+72..tp+79):
         av_put_be32(tp + 72, 0);                               // stream_info_flags_ex (no special flags)

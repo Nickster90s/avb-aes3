@@ -252,6 +252,12 @@ typedef struct {
     uint8_t  dest_mac[6];         // multicast dest MAC of the stream
     uint8_t  connected;
     uint16_t connection_count;
+    // MSRP-learned (filled when the talker's TalkerAdvertise has been
+    // observed via SRP). Used by GET_STREAM_INFO / GetStreamInputInfoEx
+    // to report wire-truth instead of hardcoded defaults. Zero when no
+    // SRP advertisement has matched yet.
+    uint32_t msrp_accumulated_latency_ns;
+    uint16_t stream_vlan_id;
 } avdecc_listener_stream_t;
 
 #define AVDECC_MAX_TALKERS    1   // N_STREAM_OUTPUTS in avdecc.c

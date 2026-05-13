@@ -800,7 +800,7 @@ def main():
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
         # and pick the seed with the highest eth_tx_clk PASS.
-        builder.build(seed=79)   # last-known-good seed for nrxslots=2 netlist
+        builder.build(seed=17)   # post-route 166.20 MHz on slow-path ACMP netlist
 
     if args.load:
         prog = soc.platform.create_programmer()

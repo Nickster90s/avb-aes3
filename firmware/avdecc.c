@@ -392,6 +392,121 @@ static void acmp_handle_get_tx_state(avdecc_state_t *s, const uint8_t *pdu)
     acmp_send_response(s, ACMP_MSG_GET_TX_STATE_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
 }
 
+// Send our own ACMP CONNECT_TX_COMMAND (slow-path resolve). We act as a
+// pseudo-controller asking the talker for stream details so we can fill
+// in the deferred CONNECT_RX_RESPONSE.
+static void send_connect_tx_command(avdecc_state_t *s, const avdecc_resolve_t *r)
+{
+    uint8_t *frame = avdecc_tx_buf();
+    uint8_t *p = avdecc_eth_hdr(frame, s->src_mac);
+
+    memset(p, 0, ACMPDU_LEN);
+    p[0] = AVTP_SUBTYPE_ACMP;
+    p[1] = ACMP_MSG_CONNECT_TX_COMMAND;
+    av_put_be16(p + 2, ACMP_CONTROL_DATA_LEN);          // status=0, cdl=44
+    // stream_id (offset 4..11) = 0 (we don't know it yet — that's why we're asking)
+    memcpy(p + ACMP_OFF_CONTROLLER_ID, s->entity_id, 8);
+    memcpy(p + ACMP_OFF_TALKER_ID,     r->talker_id,  8);
+    memcpy(p + ACMP_OFF_LISTENER_ID,   s->entity_id, 8);
+    av_put_be16(p + ACMP_OFF_TALKER_UID,   r->talker_uid);
+    av_put_be16(p + ACMP_OFF_LISTENER_UID, r->listener_uid);
+    // dest_mac/conn_count zero; vlan zero; flags zero
+    av_put_be16(p + ACMP_OFF_SEQ_ID, r->our_seq_id);
+
+    avdecc_eth_send(14 + ACMPDU_LEN);
+    s->acmp_tx_count++;
+}
+
+// Build and send the deferred CONNECT_RX_RESPONSE to the original
+// controller, using the talker's resolved stream_id / dest_mac / vlan.
+// The original controller's sequence_id is echoed back so it matches
+// up with their outstanding CONNECT_RX_COMMAND state.
+static void send_deferred_connect_rx_response(avdecc_state_t *s,
+                                               const avdecc_resolve_t *r,
+                                               uint8_t status,
+                                               const uint8_t *stream_id,
+                                               const uint8_t *dest_mac,
+                                               uint16_t vlan_id)
+{
+    uint8_t *frame = avdecc_tx_buf();
+    uint8_t *p = avdecc_eth_hdr(frame, s->src_mac);
+
+    memset(p, 0, ACMPDU_LEN);
+    p[0] = AVTP_SUBTYPE_ACMP;
+    p[1] = ACMP_MSG_CONNECT_RX_RESPONSE;
+    av_put_be16(p + 2, ((uint16_t)(status & 0x1F) << 11) | ACMP_CONTROL_DATA_LEN);
+    memcpy(p + ACMP_OFF_STREAM_ID,       stream_id, 8);
+    memcpy(p + ACMP_OFF_CONTROLLER_ID,   r->ctrl_eid_orig, 8);
+    memcpy(p + ACMP_OFF_TALKER_ID,       r->talker_id, 8);
+    memcpy(p + ACMP_OFF_LISTENER_ID,     s->entity_id, 8);
+    av_put_be16(p + ACMP_OFF_TALKER_UID,   r->talker_uid);
+    av_put_be16(p + ACMP_OFF_LISTENER_UID, r->listener_uid);
+    memcpy(p + ACMP_OFF_STREAM_DEST_MAC, dest_mac, 6);
+    av_put_be16(p + ACMP_OFF_CONN_COUNT,
+                s->listeners[r->listener_uid].connection_count);
+    av_put_be16(p + ACMP_OFF_SEQ_ID,   r->ctrl_seq_id_orig);   // echo controller's seq
+    av_put_be16(p + ACMP_OFF_FLAGS,    0);
+    av_put_be16(p + ACMP_OFF_VLAN_ID,  vlan_id);
+
+    avdecc_eth_send(14 + ACMPDU_LEN);
+    s->acmp_tx_count++;
+}
+
+// Receive a CONNECT_TX_RESPONSE that's destined for our listener (we
+// previously sent the matching CONNECT_TX_COMMAND). Extracts resolved
+// stream_id + dst_mac + vlan, binds our listener, and forwards the
+// deferred CONNECT_RX_RESPONSE to the original controller.
+static void acmp_handle_connect_tx_response(avdecc_state_t *s, const uint8_t *pdu)
+{
+    // Only our self-sent ones come back with listener_eid == us.
+    if (!entity_id_match(pdu + ACMP_OFF_LISTENER_ID, s->entity_id))
+        return;
+
+    uint16_t resp_seq = av_get_be16(pdu + ACMP_OFF_SEQ_ID);
+
+    for (int i = 0; i < AVDECC_MAX_LISTENERS; i++) {
+        avdecc_resolve_t *r = &s->resolves[i];
+        if (!r->active || r->our_seq_id != resp_seq) continue;
+
+        uint8_t status = (pdu[2] >> 3) & 0x1F;
+        const uint8_t *resolved_sid = pdu + ACMP_OFF_STREAM_ID;
+        const uint8_t *resolved_dst = pdu + ACMP_OFF_STREAM_DEST_MAC;
+        uint16_t       resolved_vlan = av_get_be16(pdu + ACMP_OFF_VLAN_ID);
+
+        printf("[ACMP] CONNECT_TX_RESPONSE seq=%u status=%u "
+               "sid=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x "
+               "dest=%02x:%02x:%02x:%02x:%02x:%02x vlan=%u\n",
+               resp_seq, status,
+               resolved_sid[0], resolved_sid[1], resolved_sid[2], resolved_sid[3],
+               resolved_sid[4], resolved_sid[5], resolved_sid[6], resolved_sid[7],
+               resolved_dst[0], resolved_dst[1], resolved_dst[2],
+               resolved_dst[3], resolved_dst[4], resolved_dst[5],
+               resolved_vlan);
+
+        if (status == ACMP_STATUS_SUCCESS) {
+            avdecc_listener_stream_t *l = &s->listeners[r->listener_uid];
+            memcpy(l->talker_id, r->talker_id, 8);
+            l->talker_uid = r->talker_uid;
+            memcpy(l->stream_id, resolved_sid, 8);
+            memcpy(l->dest_mac,  resolved_dst, 6);
+            l->connected = 1;
+            l->connection_count++;
+            l->stream_vlan_id = resolved_vlan;
+
+            if (s->on_listener_connect)
+                s->on_listener_connect(r->listener_uid,
+                                        resolved_sid, resolved_dst, r->talker_id);
+        }
+
+        send_deferred_connect_rx_response(s, r, status,
+                                           resolved_sid, resolved_dst, resolved_vlan);
+        r->active = 0;
+        return;
+    }
+    // No matching pending resolve — likely from another listener's transaction
+    // or stale; silently ignore.
+}
+
 static void acmp_handle_connect_rx(avdecc_state_t *s, const uint8_t *pdu)
 {
     // A controller is telling us (listener) to connect to a talker stream
@@ -407,6 +522,46 @@ static void acmp_handle_connect_rx(avdecc_state_t *s, const uint8_t *pdu)
         return;
     }
 
+    // Two paths per IEEE 1722.1-2013 §8.2.2:
+    //
+    //   Path A — fast-connect: controller already filled stream_id +
+    //            dst_mac (it queried the talker via CONNECT_TX itself).
+    //            Bind immediately and respond.
+    //
+    //   Path B — slow path: stream_id and dst_mac both zero. WE (the
+    //            listener) must send ACMP CONNECT_TX_COMMAND to the
+    //            talker, await CONNECT_TX_RESPONSE, then send back the
+    //            deferred CONNECT_RX_RESPONSE with resolved fields.
+    int sid_zero = 1, mac_zero = 1, talker_known = 0;
+    for (int i = 0; i < 8; i++) if (stream_id[i]) { sid_zero = 0; break; }
+    for (int i = 0; i < 6; i++) if (dest_mac[i])  { mac_zero = 0; break; }
+    for (int i = 0; i < 8; i++) if (talker_id[i]) { talker_known = 1; break; }
+
+    if (sid_zero && mac_zero && talker_known) {
+        avdecc_resolve_t *r = &s->resolves[luid];
+        r->active           = 1;
+        r->listener_uid     = (uint8_t)luid;
+        r->our_seq_id       = s->next_acmp_seq++;
+        memcpy(r->ctrl_eid_orig, pdu + ACMP_OFF_CONTROLLER_ID, 8);
+        r->ctrl_seq_id_orig = av_get_be16(pdu + ACMP_OFF_SEQ_ID);
+        memcpy(r->talker_id, talker_id, 8);
+        r->talker_uid       = tuid;
+        r->start_ms         = gptp_uptime_ms();
+
+        printf("[ACMP] CONNECT_RX uid=%u slow-path → query talker "
+               "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x[%u] (our seq=%u)\n",
+               luid,
+               talker_id[0], talker_id[1], talker_id[2], talker_id[3],
+               talker_id[4], talker_id[5], talker_id[6], talker_id[7], tuid,
+               r->our_seq_id);
+
+        send_connect_tx_command(s, r);
+        // CONNECT_RX_RESPONSE deferred until CONNECT_TX_RESPONSE arrives
+        // (or timeout in avdecc_poll).
+        return;
+    }
+
+    // Path A — fast connect
     avdecc_listener_stream_t *l = &s->listeners[luid];
     memcpy(l->talker_id, talker_id, 8);
     l->talker_uid = tuid;
@@ -1565,6 +1720,11 @@ void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len)
                 if (entity_id_match(talker_id, s->entity_id))
                     acmp_handle_connect_tx(s, pdu);
                 break;
+            case ACMP_MSG_CONNECT_TX_RESPONSE:
+                // Slow-path resolve: this is the talker's reply to our
+                // CONNECT_TX_COMMAND. Match by listener_eid + seq_id.
+                acmp_handle_connect_tx_response(s, pdu);
+                break;
             case ACMP_MSG_DISCONNECT_TX_COMMAND:
                 if (entity_id_match(talker_id, s->entity_id))
                     acmp_handle_disconnect_tx(s, pdu);
@@ -1680,9 +1840,36 @@ static void track_clock_lock(avdecc_state_t *s)
 void avdecc_poll(avdecc_state_t *s)
 {
     track_clock_lock(s);
-    ptp_timestamp_t now = gptp_read_time();
-    uint32_t now_ms = (uint32_t)(now.seconds & 0xFFFF) * 1000 +
-                      (uint32_t)(now.nanoseconds / 1000000);
+
+    // Slow-path resolve timeouts. Per IEEE 1722.1-2013 §8.2.2.1 the ACMP
+    // timeout for CONNECT_TX is 250 ms; we give 1.5 s to account for
+    // chatty bridges / slow talkers. On timeout, send the deferred
+    // CONNECT_RX_RESPONSE with status=LISTENER_TALKER_TIMEOUT.
+    // NOTE: must use the SAME time base as r->start_ms (gptp_uptime_ms),
+    // otherwise age computes against two different formulas and the
+    // timeout fires immediately on the very next poll.
+    {
+        uint32_t now_ms = gptp_uptime_ms();
+        for (int i = 0; i < AVDECC_MAX_LISTENERS; i++) {
+            avdecc_resolve_t *r = &s->resolves[i];
+            if (!r->active) continue;
+            uint32_t age = now_ms - r->start_ms;
+            if (age > 2000000000u) age = 0;     // wrap guard
+            if (age >= 1500u) {
+                printf("[ACMP] CONNECT_TX timeout uid=%u — no reply from talker\n",
+                       r->listener_uid);
+                uint8_t zero[8] = {0};
+                send_deferred_connect_rx_response(s, r,
+                    ACMP_STATUS_LISTENER_TALKER_TIMEOUT,
+                    zero, zero, 0);
+                r->active = 0;
+            }
+        }
+    }
+
+    // Use gptp_uptime_ms() everywhere in this file so all *_ms timestamps
+    // share one time base. See [[gptp-time-base-consistency-when-computing-ages]].
+    uint32_t now_ms = gptp_uptime_ms();
 
     uint32_t elapsed = now_ms - s->last_adp_ms;
     if (elapsed > 2000000000)

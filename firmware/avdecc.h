@@ -263,6 +263,22 @@ typedef struct {
 #define AVDECC_MAX_TALKERS    1   // N_STREAM_OUTPUTS in avdecc.c
 #define AVDECC_MAX_LISTENERS  2   // N_STREAM_INPUTS  in avdecc.c
 
+// Slow-path resolve state (IEEE 1722.1 §8.2.2 Path B). When CONNECT_RX
+// arrives with stream_id=0 + dst_mac=0, we (the listener) MUST send an
+// ACMP CONNECT_TX_COMMAND to the talker to learn its real stream_id +
+// dest_mac. The original controller's CONNECT_RX_RESPONSE is DEFERRED
+// until we get the talker's CONNECT_TX_RESPONSE (or until timeout).
+typedef struct {
+    uint8_t  active;                // 1 = waiting for talker's CONNECT_TX_RESPONSE
+    uint8_t  listener_uid;          // our listener that needs resolve
+    uint16_t our_seq_id;            // sequence_id of OUR outgoing CONNECT_TX_COMMAND
+    uint8_t  ctrl_eid_orig[8];      // original controller's entity_id
+    uint16_t ctrl_seq_id_orig;      // original controller's sequence_id (echo back)
+    uint8_t  talker_id[8];
+    uint16_t talker_uid;
+    uint32_t start_ms;              // gptp_uptime_ms() when we sent CONNECT_TX
+} avdecc_resolve_t;
+
 typedef struct {
     // Identity
     uint8_t  entity_id[8];      // Typically MAC + 0x0000 + unique_id
@@ -305,6 +321,10 @@ typedef struct {
     uint32_t clock_locked_count;
     uint32_t clock_unlocked_count;
     uint8_t  clock_last_locked;     // last sampled gptp.servo_locked
+
+    // ACMP slow-path resolve state. One per listener UID.
+    avdecc_resolve_t resolves[AVDECC_MAX_LISTENERS];
+    uint16_t next_acmp_seq;         // free-running counter for our outgoing ACMP commands
 } avdecc_state_t;
 
 // ---------------------------------------------------------------------------

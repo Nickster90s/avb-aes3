@@ -533,10 +533,11 @@ void srp_listener_enable(srp_state_t *s, const uint8_t *stream_id, uint8_t enabl
 
 void srp_poll(srp_state_t *s)
 {
-    // Get uptime in ms from gPTP time
-    ptp_timestamp_t now = gptp_read_time();
-    uint32_t now_ms = (uint32_t)(now.seconds & 0xFFFF) * 1000 +
-                      (uint32_t)(now.nanoseconds / 1000000);
+    // Must match the time base used for t->last_seen_ms / talker_last_seen_ms,
+    // which are stamped via gptp_uptime_ms() on TalkerAdvertise RX. Mixing the
+    // (sec & 0xFFFF) * 1000 inline form with gptp_uptime_ms() underflows the
+    // age calc → flaps registrations every poll. See [[gptp-time-base-consistency-when-computing-ages]].
+    uint32_t now_ms = gptp_uptime_ms();
 
     uint32_t elapsed_join = now_ms - s->last_join_ms;
     if (elapsed_join > 2000000000)

@@ -75,7 +75,12 @@
 // no static calibration constant needed; PI does it for free.
 #define SERVO_KP_NUM            72
 #define SERVO_KP_DEN            1000
-#define SERVO_KI_NUM            72
+// Ki was 72/1000000 = 7.2e-5 — that took the integrator hours to absorb
+// the natural crystal-vs-master frequency bias (the slave used to crawl
+// from a few-µs Kp-residual to ±80 ns over 13+ hours). Bumping ~50x to
+// 3600/1000000 = 3.6e-3 lets it converge in ~10 s. The Kp/Ki ratio
+// (Ti = Kp/Ki = 20 control intervals = 2.5 s) is comfortably stable.
+#define SERVO_KI_NUM            3600
 #define SERVO_KI_DEN            1000000
 
 // Anti-windup: clamp |integral| at 100 ms — empirically the integrator

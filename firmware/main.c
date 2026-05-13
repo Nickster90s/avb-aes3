@@ -313,21 +313,25 @@ static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
                                 const uint8_t *talker_entity_id)
 {
     (void)dest_mac; (void)talker_entity_id;
+    // Always declare SRP Listener Ready — without it the talker never
+    // sees us as registered for the stream and won't push packets. This
+    // applies to BOTH CRF (media clock) and AAF (audio) inputs.
+    srp_listener_enable(&srp, stream_id, 1);
     if (uid == LISTENER_UID_CRF) {
         mcr_bind(&mcr, stream_id);
     } else if (uid == LISTENER_UID_AAF) {
         aaf_bind(&aaf, stream_id);
-        srp_listener_enable(&srp, stream_id, 1);
     }
 }
 
 static void on_listener_disconnect(uint16_t uid)
 {
     if (uid == LISTENER_UID_CRF) {
+        srp_listener_enable(&srp, mcr.stream_id, 0);
         mcr_unbind(&mcr);
     } else if (uid == LISTENER_UID_AAF) {
-        aaf_unbind(&aaf);
         srp_listener_enable(&srp, aaf.stream_id, 0);
+        aaf_unbind(&aaf);
     }
 }
 
@@ -389,6 +393,7 @@ int main(void)
     // stream identity as the advertised one.
     avdecc_init(&avdecc, mac_addr);
     avdecc_set_gptp(&gptp);   // surface GM identity in ADP/AVB_INTERFACE
+    avdecc_set_mcr(&mcr);     // CLOCK_DOMAIN lock follows MCR when source=1
     avdecc_set_talker_stream(&avdecc, TALKER_UID_AAF, aaf.stream_id, aaf.dest_mac);
     avdecc.on_talker_connect    = on_talker_connect;
     avdecc.on_talker_disconnect = on_talker_disconnect;

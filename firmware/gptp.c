@@ -485,8 +485,12 @@ void gptp_servo_update(gptp_t *g)
                (unsigned long)((uint64_t)g->freq_integral & 0xFFFFFFFF));
     }
 
-    // Coarse step on first lock or whenever offset blows past ~500 ms
-    // (the TSU offset register is 34-bit signed ns; 500 ms is well inside).
+    // Coarse step on first lock or whenever offset blows past ~500 ms.
+    // Tried 1 ms initially but the step itself leaves a ~1–2 ms residual
+    // (Sync RX latency between step write and next measurement) which
+    // immediately re-triggered another step every Sync — the integrator
+    // was never given a chance to accumulate. 500 ms is well inside the
+    // 34-bit TSU offset register and reserves stepping for true outliers.
     int64_t big_thresh = 500000000LL;
     if (g->servo_step_count == 0 || offset > big_thresh || offset < -big_thresh) {
         ptp_timestamp_t tgt = g->sync_origin_ts;
@@ -522,8 +526,20 @@ void gptp_servo_update(gptp_t *g)
     if (g->freq_integral >  SERVO_INTEGRAL_CLAMP_NS) g->freq_integral =  SERVO_INTEGRAL_CLAMP_NS;
     if (g->freq_integral < -SERVO_INTEGRAL_CLAMP_NS) g->freq_integral = -SERVO_INTEGRAL_CLAMP_NS;
 
-    int64_t kp_term = (offset            * SERVO_KP_NUM) / SERVO_KP_DEN;
-    int64_t ki_term = (g->freq_integral  * SERVO_KI_NUM) / SERVO_KI_DEN;
+    // Adaptive Kp for moderate offsets. Aggressive multipliers (>3x)
+    // caused oscillation around -10 µs steady state because each Sync
+    // overshoots and the integrator never gets to absorb the natural
+    // frequency bias. With a 3x boost only, convergence is faster than
+    // pure gentle gains without destabilising the loop.
+    int32_t kp_num = SERVO_KP_NUM, kp_den = SERVO_KP_DEN;
+    int64_t abs_off = offset < 0 ? -offset : offset;
+    if (abs_off > 1000) {                // > 1 µs: 3x Kp
+        kp_num = 200;   kp_den = 1000;   // Kp = 0.2
+    }
+    // else: |offset| ≤ 1 µs, use default gentle gains for steady state.
+
+    int64_t kp_term = (offset            * kp_num)        / kp_den;
+    int64_t ki_term = (g->freq_integral  * SERVO_KI_NUM)  / SERVO_KI_DEN;
     int64_t addend_delta = -(kp_term + ki_term);
 
     // Apply, clamped to the 52-bit addend space.

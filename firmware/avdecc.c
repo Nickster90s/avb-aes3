@@ -24,6 +24,11 @@
 // after both gptp_init and avdecc_init via avdecc_set_gptp().
 static const gptp_t *g_gptp = NULL;
 
+// Backreference to the MCR module — when current_clock_source = 1, the
+// CLOCK_DOMAIN LOCKED counter follows mcr.servo_locked rather than gPTP,
+// so the Hive indicator turns green only when CRF actually flows.
+static const mcr_state_t *g_mcr = NULL;
+
 // Vendor's Entity Model ID (EUI-64) — IDENTIFIES THE PRODUCT MODEL, not
 // the specific device. All units running this firmware must report the
 // same value; per-device uniqueness is the entity_id (MAC-derived).
@@ -1387,8 +1392,16 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
                 stream_id = l->stream_id;
                 dest_mac  = l->dest_mac;
                 info_flags |= STREAM_INFO_FLAG_STREAM_ID_VALID
-                            | STREAM_INFO_FLAG_STREAM_DEST_MAC_VALID
-                            | STREAM_INFO_FLAG_CONNECTED;
+                            | STREAM_INFO_FLAG_STREAM_DEST_MAC_VALID;
+                // Only flag CONNECTED if we have a real talker (non-zero
+                // talker_id). FAST_CONNECT-style commands sometimes leave
+                // talker_id zeroed; Hive flags "connected but no Talker
+                // Identification" if we advertise CONNECTED in that case.
+                int has_talker = 0;
+                for (int i = 0; i < 8; i++)
+                    if (l->talker_id[i]) { has_talker = 1; break; }
+                if (has_talker)
+                    info_flags |= STREAM_INFO_FLAG_CONNECTED;
             }
         } else {
             // Unknown descriptor — respond NO_SUCH_DESCRIPTOR with bare echo (56-byte Milan layout)
@@ -1453,6 +1466,9 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
             st = AECP_STATUS_BAD_ARGUMENTS;
         else {
             s->current_clock_source = src;
+            // Re-sync lock tracker to the new source's current state so
+            // the next CLOCK_DOMAIN poll reflects the switch immediately.
+            s->clock_last_locked = 0xFF;   // force re-evaluation next poll
             st = AECP_STATUS_SUCCESS;
             if (s->on_clock_source_change)
                 s->on_clock_source_change(src);
@@ -1598,6 +1614,11 @@ void avdecc_set_gptp(const gptp_t *g)
     g_gptp = g;
 }
 
+void avdecc_set_mcr(const mcr_state_t *m)
+{
+    g_mcr = m;
+}
+
 void avdecc_depart(avdecc_state_t *s)
 {
     adp_send(s, ADP_MSG_ENTITY_DEPARTING);
@@ -1608,14 +1629,21 @@ void avdecc_depart(avdecc_state_t *s)
 // Poll — periodic ADP advertisement
 // ---------------------------------------------------------------------------
 
-// Track gPTP lock transitions into Milan CLOCK_DOMAIN counters. Called
-// from avdecc_poll once per main-loop iteration; cheap (3 reads + maybe
-// 1 increment). Initial servo_locked=1 at startup also counts as the
-// first locked transition so Hive's first poll sees LOCKED=1 > 0.
+// Track lock transitions for CLOCK_DOMAIN counters. Source depends on
+// current_clock_source: 0 = Internal (gPTP-locked oscillator) → follow
+// gptp.servo_locked; 1 = Media Clock (CRF) → follow mcr.servo_locked.
+// This is critical: with clock_source=1 and no CRF patched, mcr never
+// locks and the indicator must NOT go green just because gPTP is locked.
+// Resets on source switch (transition_count carries over but
+// "last_locked" gets re-read from the new source).
 static void track_clock_lock(avdecc_state_t *s)
 {
-    if (!g_gptp) return;
-    uint8_t cur = g_gptp->servo_locked ? 1 : 0;
+    uint8_t cur = 0;
+    if (s->current_clock_source == 1) {
+        if (g_mcr) cur = g_mcr->servo_locked ? 1 : 0;
+    } else {
+        if (g_gptp) cur = g_gptp->servo_locked ? 1 : 0;
+    }
     if (cur != s->clock_last_locked) {
         if (cur) s->clock_locked_count++;
         else     s->clock_unlocked_count++;

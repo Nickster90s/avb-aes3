@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include "gptp.h"   // gptp_t — surfaced via avdecc_set_gptp()
+#include "mcr.h"    // mcr_state_t — surfaced via avdecc_set_mcr()
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -317,6 +318,12 @@ void avdecc_set_talker_stream(avdecc_state_t *s, uint16_t uid,
 // reflect the actual grandmaster identity learned from Announce messages.
 // Pass NULL to detach (advertised GM falls back to all-zeros).
 void avdecc_set_gptp(const gptp_t *g);
+
+// Provide a pointer to the MCR state so CLOCK_DOMAIN counters report
+// the right "lock" source: when current_clock_source = 1 (Media Clock),
+// LOCKED tracks mcr.servo_locked; when source = 0 (Internal), it tracks
+// gptp.servo_locked.
+void avdecc_set_mcr(const mcr_state_t *m);
 
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).

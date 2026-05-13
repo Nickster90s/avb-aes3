@@ -534,15 +534,16 @@ class AVBSoC(SoCCore):
 
         # Ethernet MAC (Wishbone interface for firmware raw frame access).
         # Pass TSU timestamp for RX/TX frame timestamping.
-        # nrxslots=8: with only 2 slots we saw gPTP Syncs being dropped
-        # during Hive's AECP enumeration bursts (READ_DESCRIPTOR + GET_*
-        # series fills 2 slots faster than VexRiscv can dispatch). Bumping
-        # to 8 gives ~4x headroom; the cost is 8×ETHMAC_SLOT_SIZE of BRAM.
+        # nrxslots=4: tradeoff. With 2 slots, gPTP Syncs were dropped
+        # during Hive's AECP enumeration bursts. With 8 slots, the
+        # slot-RAM expansion perturbed RGMII TX placement and TX failed
+        # on real hardware despite ~166 MHz post-route timing. 4 slots
+        # gives 2× headroom without breaking placement.
         self.add_ethernet(
             phy            = self.ethphy,
             data_width     = 8,
             with_timestamp = False,  # We use our own TSU, not timer0 uptime
-            nrxslots       = 8,
+            nrxslots       = 4,
             ntxslots       = 2,
         )
 
@@ -794,7 +795,7 @@ def main():
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
         # and pick the seed with the highest eth_tx_clk PASS.
-        builder.build(seed=4)    # post-route 166.86 MHz on 8-rxslot netlist
+        builder.build(seed=67)   # post-route 132.68 MHz on 4-rxslot netlist
 
     if args.load:
         prog = soc.platform.create_programmer()

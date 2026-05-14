@@ -121,6 +121,16 @@ typedef struct {
     uint32_t rx_pdu_count;
     uint32_t talker_last_seen_ms;   // last TalkerAdvertise matching our listener stream
 
+    // Per-attribute RX diagnostic counters. Bumped once per vector
+    // (FirstValue) processed, NOT once per PDU. Lets the UART stats line
+    // distinguish "PDU received but parser dropped attr" from "PDU never
+    // arrived at all" — the missing-MOTU-TalkerAdv case under burst load.
+    uint32_t rx_talker_adv_count;
+    uint32_t rx_talker_failed_count;
+    uint32_t rx_listener_count;
+    uint32_t rx_domain_count;
+    uint32_t rx_match_count;        // TalkerAdv whose stream_id matched our listener
+
     // Per-stream registrar table — one entry per unique TalkerAdvertise
     // stream_id observed. Updated on every matching RX, aged out by poll.
     srp_remote_talker_t remote_talkers[SRP_MAX_REMOTE_TALKERS];

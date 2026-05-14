@@ -327,13 +327,19 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                 break;
 
             if (attr_type == MSRP_ATTR_DOMAIN && attr_len >= 4) {
+                s->rx_domain_count++;
                 s->domain_received = 1;
                 s->rx_sr_class = vp[0];
                 s->rx_sr_prio  = vp[1];
                 s->rx_sr_vid   = srp_get_be16(vp + 2);
             }
+            if (attr_type == MSRP_ATTR_TALKER_FAIL)
+                s->rx_talker_failed_count++;
+            if (attr_type == MSRP_ATTR_LISTENER)
+                s->rx_listener_count++;
 
             if (attr_type == MSRP_ATTR_TALKER_ADV && attr_len >= 25) {
+                s->rx_talker_adv_count++;
                 // TalkerAdvertise FirstValue layout (IEEE 802.1Q-2014 §35):
                 //   +0..7   stream_id (8)
                 //   +8..13  stream_dest_addr (6)
@@ -435,6 +441,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                         }
                     }
                     if (match) {
+                        s->rx_match_count++;
                         if (!s->talker_registered) {
                             printf("[SRP] Talker registered for our stream\n");
                         }
@@ -588,11 +595,17 @@ void srp_poll(srp_state_t *s)
 
         // Periodic status
         if (s->join_count > 0 && (s->join_count % 30) == 0) {
-            printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d\n",
+            printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d "
+                   "rx_attr: tadv=%lu tfail=%lu lst=%lu dom=%lu match=%lu\n",
                    (unsigned long)s->join_count,
                    (unsigned long)s->rx_pdu_count,
                    s->domain_received,
-                   s->talker_registered);
+                   s->talker_registered,
+                   (unsigned long)s->rx_talker_adv_count,
+                   (unsigned long)s->rx_talker_failed_count,
+                   (unsigned long)s->rx_listener_count,
+                   (unsigned long)s->rx_domain_count,
+                   (unsigned long)s->rx_match_count);
         }
     }
 }

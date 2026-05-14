@@ -122,13 +122,19 @@ static uint8_t *msrp_emit_domain(uint8_t *p, uint8_t sr_class, uint8_t sr_prio,
     // ThreePackedEvents: one event (JoinIn), packed as 3pack with padding
     *p++ = MRP_3PACK(MRP_EVT_JOINMT, 0, 0);
 
-    // End of vectors for this attribute — write AttributeListLength
-    uint16_t list_len = (uint16_t)(p - vec_start);
-    srp_put_be16(list_len_ptr, list_len);
-
-    // EndMark for this message
+    // EndMark INSIDE the AttributeList — per IEEE 802.1Q-2018 §10.8.1.5,
+    // AttributeList = VectorAttributes+ + EndMark, and AttributeListLength
+    // MUST include the EndMark. Bug previously: computed list_len before
+    // writing the EndMark → length off by 2 → bridge parsed our PDU,
+    // hit the EndMark at the "next message" position, treated it as PDU
+    // EndMark, and silently dropped every subsequent attribute. Result:
+    // Listener Ready never reached the bridge's MAD → stream never
+    // forwarded to FPGA port. Verified via stream_mcast counter (= 0).
     srp_put_be16(p, 0);
     p += 2;
+
+    uint16_t list_len = (uint16_t)(p - vec_start);
+    srp_put_be16(list_len_ptr, list_len);
 
     return p;
 }

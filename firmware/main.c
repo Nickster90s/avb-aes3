@@ -59,8 +59,14 @@ static uint8_t  rx_last_src[6];
 
 static void dispatch_rx(void)
 {
-    if (!(ethmac_sram_writer_ev_pending_read() & ETHMAC_EV_SRAM_WRITER))
-        return;
+    // Drain ALL pending RX slots in one dispatcher call. nrxslots=2 is
+    // pinned (>2 silently breaks TX — see avb_soc.py:537); under MSRP /
+    // AVDECC / CRF bursts the writer overruns within microseconds if we
+    // service only one slot per call. Symptom: rx_avtp accumulates ~100×
+    // slower than wire rate, talker_last_seen ages out at 30 s, and CRF
+    // audio is never delivered to mcr_process_rx. Mirrors the equivalent
+    // fix in avb_session_mgr2's start_crf_rx_pipeline drain loop.
+    while (ethmac_sram_writer_ev_pending_read() & ETHMAC_EV_SRAM_WRITER) {
 
     uint32_t slot = ethmac_sram_writer_slot_read();
     uint8_t *frame = (uint8_t *)(ETHMAC_BASE + ETHMAC_SLOT_SIZE * slot);
@@ -139,8 +145,12 @@ static void dispatch_rx(void)
         }
     }
 
-    // Acknowledge RX event
+    // Acknowledge RX event — releases this slot back to the MAC and
+    // advances slot_read to the next pending frame (if any). The
+    // while-loop re-checks ev_pending to drain the second buffered slot
+    // in the same call.
     ethmac_sram_writer_ev_pending_write(ETHMAC_EV_SRAM_WRITER);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -73,7 +73,21 @@ static void dispatch_rx(void)
     // for THIS slot's frame.
     main_rx_ts_pop_write(1);
 
-    // Route by ethertype
+    // Route by ethertype. Strip one 802.1Q VLAN tag in place if present —
+    // Auvitran (and most AVB talkers) emit stream frames tagged with VLAN 2
+    // (Class A), so the real AVTP ethertype is at offset 16, not 12. The
+    // existing handlers all parse from offset 14 of `frame`, so we shift
+    // the 4-byte tag out of the way rather than threading a payload_off.
+    if (len >= 18) {
+        uint16_t ethertype_pre = ((uint16_t)frame[12] << 8) | frame[13];
+        if (ethertype_pre == 0x8100) {
+            // Shift the inner ethertype + payload down 4 bytes, leaving
+            // dst/src MAC in place. Net effect: tagged frame becomes the
+            // equivalent untagged frame.
+            memmove(frame + 12, frame + 16, len - 16);
+            len -= 4;
+        }
+    }
     if (len >= 14) {
         uint16_t ethertype = ((uint16_t)frame[12] << 8) | frame[13];
 

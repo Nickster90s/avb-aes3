@@ -524,9 +524,19 @@ void srp_listener_enable(srp_state_t *s, const uint8_t *stream_id, uint8_t enabl
     s->listener_enabled = enable;
     if (enable) {
         memcpy(s->listener_stream_id, stream_id, 8);
-        s->listener_substate = MSRP_LISTENER_ASKFAILED;
+        // Declare Ready immediately, mirroring avb_session_mgr2's
+        // send_ready() at ACMP CONNECT_RX time. AskingFailed = "I want
+        // this stream but cannot reserve" — talkers (Auvitran observed)
+        // interpret it as "no listener" and hold back CRF/AAF. Ready =
+        // "I want it and can receive"; this is the correct initial
+        // substate once ACMP has resolved the stream.
+        s->listener_substate = MSRP_LISTENER_READY;
         s->talker_registered = 0;
-        printf("[SRP] Listener enabled for stream %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+        // Reset last-seen so the talker-age poll grants the talker a
+        // fresh 30 s window before timing out — otherwise the stamp
+        // from a previous listener attachment can be ancient.
+        s->talker_last_seen_ms = gptp_uptime_ms();
+        printf("[SRP] Listener Ready for stream %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
                stream_id[0], stream_id[1], stream_id[2], stream_id[3],
                stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
     } else {

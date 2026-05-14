@@ -800,7 +800,7 @@ def main():
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
         # and pick the seed with the highest eth_tx_clk PASS.
-        builder.build(seed=19)   # eth_tx_clk PASS 127.88 MHz (seed=17 unreliable post-srp-counters)
+        builder.build(seed=79)   # eth_tx_clk PASS 131.75 MHz (seed=19 unreliable post-VLAN-strip)
 
     if args.load:
         prog = soc.platform.create_programmer()

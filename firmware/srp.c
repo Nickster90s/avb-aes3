@@ -120,7 +120,7 @@ static uint8_t *msrp_emit_domain(uint8_t *p, uint8_t sr_class, uint8_t sr_prio,
     p += 2;
 
     // ThreePackedEvents: one event (JoinIn), packed as 3pack with padding
-    *p++ = MRP_3PACK(MRP_EVT_JOININ, 0, 0);
+    *p++ = MRP_3PACK(MRP_EVT_JOINMT, 0, 0);
 
     // End of vectors for this attribute — write AttributeListLength
     uint16_t list_len = (uint16_t)(p - vec_start);
@@ -175,7 +175,7 @@ static uint8_t *msrp_emit_talker_adv(uint8_t *p, const srp_talker_attr_t *t,
     p += 4;
 
     // ThreePackedEvents: JoinIn
-    *p++ = MRP_3PACK(MRP_EVT_JOININ, 0, 0);
+    *p++ = MRP_3PACK(MRP_EVT_JOINMT, 0, 0);
 
     uint16_t list_len = (uint16_t)(p - vec_start);
     srp_put_be16(list_len_ptr, list_len);
@@ -213,7 +213,7 @@ static uint8_t *msrp_emit_listener(uint8_t *p, const uint8_t *stream_id,
     p += 8;
 
     // ThreePackedEvents: JoinIn
-    *p++ = MRP_3PACK(MRP_EVT_JOININ, 0, 0);
+    *p++ = MRP_3PACK(MRP_EVT_JOINMT, 0, 0);
 
     // FourPackedEvents: listener substate
     *p++ = MRP_4PACK(substate, 0, 0, 0);

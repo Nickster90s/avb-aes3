@@ -516,6 +516,17 @@ void gptp_servo_update(gptp_t *g)
         g->freq_integral       = 0;
         g->current_addend_full = g->base_addend_full;
         gptp_set_addend_full(g->current_addend_full);
+        // After stepping the TSU, gptp_uptime_ms() returns values in a
+        // NEW time domain (now reflects the master's clock). Every *_ms
+        // stamp captured before the step is invalid — using them for
+        // "age" calcs against the post-step now_ms underflows or
+        // overflows and immediately fires the sync timeout, throwing us
+        // back to LISTENING and breaking the lock we just established.
+        // Re-stamp anything age-tracked against the new time base.
+        // See [[gptp-time-base-consistency-when-computing-ages]].
+        uint32_t now_ms_post_step = gptp_uptime_ms();
+        g->last_sync_time_ms  = now_ms_post_step;
+        g->last_pdelay_time_ms = now_ms_post_step;
         return;
     }
 

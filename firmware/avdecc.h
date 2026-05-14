@@ -69,6 +69,11 @@
 
 // ADP Listener Capabilities
 #define ADP_LISTENER_CAP_IMPLEMENTED            (1u << 0)
+// MEDIA_CLOCK_SINK (bit 11) is required for CRF listeners. session_mgr2
+// sets only this bit (its listener is CRF-only). Without it, talkers do
+// not deliver CRF streams to us — verified against la_avdecc enum
+// ListenerCapability::MediaClockSink = 1u << 11.
+#define ADP_LISTENER_CAP_MEDIA_CLOCK_SINK       (1u << 11)
 #define ADP_LISTENER_CAP_AUDIO_SINK             (1u << 14)
 
 // ACMP message types

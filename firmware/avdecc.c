@@ -197,8 +197,14 @@ static void adp_send(avdecc_state_t *s, uint8_t msg_type)
     // listener_stream_sinks = N_STREAM_INPUTS (1 CRF + 1 AAF)
     av_put_be16(p + 28, N_STREAM_INPUTS);
 
-    // listener_capabilities
-    uint16_t listener_caps = ADP_LISTENER_CAP_IMPLEMENTED | ADP_LISTENER_CAP_AUDIO_SINK;
+    // listener_capabilities — we have a CRF (Media Clock) listener at
+    // STREAM_INPUT[0] AND an AAF (Audio) listener at STREAM_INPUT[1], so
+    // advertise both sink capabilities. MEDIA_CLOCK_SINK is the critical
+    // one for CRF: talkers (Auvitran) don't route CRF traffic to listeners
+    // that only declare AUDIO_SINK — they look specifically for MediaClockSink.
+    uint16_t listener_caps = ADP_LISTENER_CAP_IMPLEMENTED |
+                             ADP_LISTENER_CAP_MEDIA_CLOCK_SINK |
+                             ADP_LISTENER_CAP_AUDIO_SINK;
     av_put_be16(p + 30, listener_caps);
 
     // controller_capabilities = 0
@@ -664,7 +670,11 @@ static uint32_t build_desc_entity(uint8_t *d, uint16_t idx, avdecc_state_t *s)
     av_put_be16(d + 24, N_STREAM_OUTPUTS);       // talker_stream_sources = 1
     av_put_be16(d + 26, ADP_TALKER_CAP_IMPLEMENTED | ADP_TALKER_CAP_AUDIO_SOURCE);
     av_put_be16(d + 28, N_STREAM_INPUTS);        // listener_stream_sinks = 2
-    av_put_be16(d + 30, ADP_LISTENER_CAP_IMPLEMENTED | ADP_LISTENER_CAP_AUDIO_SINK);
+    // listener_capabilities must match the ADP broadcast. MEDIA_CLOCK_SINK
+    // is required for CRF listeners — see [[adp-listener-capability-media-clock-sink-required-for-crf]]
+    av_put_be16(d + 30, ADP_LISTENER_CAP_IMPLEMENTED |
+                        ADP_LISTENER_CAP_MEDIA_CLOCK_SINK |
+                        ADP_LISTENER_CAP_AUDIO_SINK);
     av_put_be32(d + 36, s->adp_available_index); // available_index
     // association_id (offset 40, 8 bytes) — left as 0 (memset)
     write_name64(d + 48, "AVB-AES3 Endpoint");   // entity_name (inline)

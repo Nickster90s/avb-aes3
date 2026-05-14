@@ -85,6 +85,15 @@ static uint8_t *build_avtp_header(uint8_t *frame, avtp_stream_t *s)
     uint8_t *p = frame;
 
     // --- Ethernet header (14 bytes) ---
+    // TODO(talker-mode): AVB bridges require Class A stream frames to carry
+    // an 802.1Q VLAN tag (TPID 0x8100, PCP=3, VID=2). When we enable the
+    // talker, this needs:
+    //   put_be16(p + 12, 0x8100);
+    //   put_be16(p + 14, (3 << 13) | 2);   // PCP=3, DEI=0, VID=2
+    //   put_be16(p + 16, AVTP_ETHERTYPE);
+    //   p += 18;
+    // Without it the bridge will drop or downshift our stream and listener
+    // jitter buffers underrun. Harmless while we're listener-only.
     memcpy(p, s->dst_mac, 6);          // Destination MAC
     memcpy(p + 6, s->src_mac, 6);      // Source MAC
     put_be16(p + 12, AVTP_ETHERTYPE);  // EtherType = 0x22F0

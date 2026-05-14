@@ -189,6 +189,12 @@ static void aaf_send_packet(aaf_state_t *a)
     uint8_t *frame = aaf_tx_buf_ptr();
 
     // Ethernet header
+    // TODO(talker-mode): AVB bridges require Class A stream frames to carry
+    // an 802.1Q VLAN tag (TPID 0x8100, PCP=3, VID=2). When AAF TX goes live,
+    // insert the 4-byte tag between src_mac and AVTP_ETHERTYPE — otherwise
+    // bridges drop or downshift our stream and downstream listeners
+    // underrun. Same fix needed in avtp.c build_avtp_header(). Harmless
+    // while tx[aaf]=0.
     memcpy(frame,     a->dest_mac, 6);
     memcpy(frame + 6, a->src_mac,  6);
     put_be16(frame + 12, AVTP_ETHERTYPE);

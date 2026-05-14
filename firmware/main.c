@@ -59,14 +59,18 @@ static uint8_t  rx_last_src[6];
 
 static void dispatch_rx(void)
 {
-    // Drain ALL pending RX slots in one dispatcher call. nrxslots=2 is
-    // pinned (>2 silently breaks TX — see avb_soc.py:537); under MSRP /
+    // Drain pending RX slots in one dispatcher call (bounded). nrxslots=2
+    // is pinned (>2 silently breaks TX — see avb_soc.py:537); under MSRP /
     // AVDECC / CRF bursts the writer overruns within microseconds if we
-    // service only one slot per call. Symptom: rx_avtp accumulates ~100×
-    // slower than wire rate, talker_last_seen ages out at 30 s, and CRF
-    // audio is never delivered to mcr_process_rx. Mirrors the equivalent
-    // fix in avb_session_mgr2's start_crf_rx_pipeline drain loop.
-    while (ethmac_sram_writer_ev_pending_read() & ETHMAC_EV_SRAM_WRITER) {
+    // service only one slot per call. But we MUST cap the drain — an
+    // unbounded loop locks the CPU when wire-rate stream traffic exceeds
+    // processing rate, never returning to the main loop. Symptom: UART
+    // stops, Hive loses entity, gPTP servo can't update. 16 frames is
+    // roughly one Class A burst window; main_loop drives dispatch_rx
+    // continuously so any residual frames are picked up next call.
+    int drain_budget = 16;
+    while ((ethmac_sram_writer_ev_pending_read() & ETHMAC_EV_SRAM_WRITER)
+           && (drain_budget-- > 0)) {
 
     uint32_t slot = ethmac_sram_writer_slot_read();
     uint8_t *frame = (uint8_t *)(ETHMAC_BASE + ETHMAC_SLOT_SIZE * slot);

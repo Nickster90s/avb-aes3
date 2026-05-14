@@ -121,6 +121,12 @@ typedef struct {
     uint32_t rx_pdu_count;
     uint32_t talker_last_seen_ms;   // last TalkerAdvertise matching our listener stream
 
+    // MRP applicant state for our Listener attribute. Tracks how many TX
+    // cycles have happened since srp_listener_enable() — mirrors mrpd's
+    // VN→AN→QA transition so the first 2 transmissions emit MRPDU_NEW
+    // (event=0) and later ones switch to JoinMt. See msrp_emit_listener().
+    uint8_t  listener_new_count;
+
     // Per-attribute RX diagnostic counters. Bumped once per vector
     // (FirstValue) processed, NOT once per PDU. Lets the UART stats line
     // distinguish "PDU received but parser dropped attr" from "PDU never

@@ -189,7 +189,8 @@ static uint8_t *msrp_emit_talker_adv(uint8_t *p, const srp_talker_attr_t *t,
 
 // Write a Listener message: AttributeType=3, AttributeLength=8
 static uint8_t *msrp_emit_listener(uint8_t *p, const uint8_t *stream_id,
-                                    uint8_t substate, int leaveall)
+                                    uint8_t substate, int leaveall,
+                                    uint8_t event)
 {
     // AttributeType
     *p++ = MSRP_ATTR_LISTENER;
@@ -212,8 +213,14 @@ static uint8_t *msrp_emit_listener(uint8_t *p, const uint8_t *stream_id,
     memcpy(p, stream_id, 8);
     p += 8;
 
-    // ThreePackedEvents: JoinIn
-    *p++ = MRP_3PACK(MRP_EVT_JOINMT, 0, 0);
+    // ThreePackedEvents: per-call MRP event. mrpd emits MRPDU_NEW (0) for
+    // the first 2 transmissions after S+L (applicant in VN→AN state),
+    // then settles to JoinIn/JoinMt. NEW tells the bridge's registrar
+    // "fresh attribute, allocate state" — JoinMt is a refresh event that
+    // assumes the registrar already knows. Without NEW, the bridge never
+    // establishes our listener registration and never tells the talker
+    // someone wants the stream.
+    *p++ = MRP_3PACK(event, 0, 0);
 
     // FourPackedEvents: listener substate
     *p++ = MRP_4PACK(substate, 0, 0, 0);
@@ -246,10 +253,18 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
         p = msrp_emit_talker_adv(p, &s->talker, leaveall);
     }
 
-    // Listener Ready (if enabled)
+    // Listener Ready (if enabled). For the first 2 transmissions after
+    // srp_listener_enable, emit MRPDU_NEW (event=0) so the bridge's
+    // registrar establishes fresh state for our attribute. After that,
+    // switch to JoinMt — mirrors mrpd's VN→AN→QA applicant transitions.
     if (s->listener_enabled) {
+        uint8_t event = (s->listener_new_count < 2)
+                            ? MRP_EVT_NEW
+                            : MRP_EVT_JOINMT;
         p = msrp_emit_listener(p, s->listener_stream_id,
-                               s->listener_substate, leaveall);
+                               s->listener_substate, leaveall, event);
+        if (s->listener_new_count < 2)
+            s->listener_new_count++;
     }
 
     // Final EndMark (end of MRPDU MessageList)
@@ -536,6 +551,10 @@ void srp_listener_enable(srp_state_t *s, const uint8_t *stream_id, uint8_t enabl
         // fresh 30 s window before timing out — otherwise the stamp
         // from a previous listener attachment can be ancient.
         s->talker_last_seen_ms = gptp_uptime_ms();
+        // Reset the applicant counter so we emit MRPDU_NEW for the next
+        // 2 transmissions, telling the bridge this is a fresh listener
+        // attachment.
+        s->listener_new_count = 0;
         printf("[SRP] Listener Ready for stream %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
                stream_id[0], stream_id[1], stream_id[2], stream_id[3],
                stream_id[4], stream_id[5], stream_id[6], stream_id[7]);

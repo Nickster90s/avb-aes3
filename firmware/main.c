@@ -48,6 +48,13 @@ static uint32_t rx_total, rx_ptp, rx_avtp, rx_msrp, rx_other;
 static uint16_t rx_last_ethertype;
 static uint8_t  rx_last_dst[6];
 static uint8_t  rx_last_src[6];
+// AVB-stream multicast bypass counter — any frame with dst MAC prefix
+// 91:e0:f0:* (the AVB stream multicast range). Independent of ethertype /
+// VLAN / subtype demux, so it catches frames that would otherwise be
+// classified as "other" or get lost in dispatch. If the bridge IS
+// forwarding Auvitran's CRF stream to our port, this counter climbs
+// regardless of whether mcr_process_rx() actually consumes them.
+static uint32_t rx_avb_stream_mcast;
 
 // ---------------------------------------------------------------------------
 // Central Ethernet RX dispatcher
@@ -105,6 +112,16 @@ static void dispatch_rx(void)
         rx_last_ethertype = ethertype;
         memcpy(rx_last_dst, frame, 6);
         memcpy(rx_last_src, frame + 6, 6);
+
+        // AVB stream multicast bypass: count any frame to 91:e0:f0:00:*
+        // — the IEEE 1722 Class A stream-data range. Explicitly EXCLUDES
+        // 91:e0:f0:01:* which is AVDECC control (ADP/MAAP). Without that
+        // narrowing, ADP traffic at ~1 PPS hides whether real stream
+        // frames are arriving.
+        if (frame[0] == 0x91 && frame[1] == 0xe0 && frame[2] == 0xf0 &&
+            frame[3] == 0x00) {
+            rx_avb_stream_mcast++;
+        }
 
         switch (ethertype) {
             case PTP_ETHERTYPE:
@@ -236,8 +253,8 @@ static void check_uart_cmd(void)
             ctrl_reset_write(1);
             break;
         case 'e':
-            printf("\n[RX] total=%u ptp=%u avtp=%u msrp=%u other=%u\n",
-                   rx_total, rx_ptp, rx_avtp, rx_msrp, rx_other);
+            printf("\n[RX] total=%u ptp=%u avtp=%u msrp=%u other=%u stream_mcast=%u\n",
+                   rx_total, rx_ptp, rx_avtp, rx_msrp, rx_other, rx_avb_stream_mcast);
             printf("  last et=%04x dst=%02x:%02x:%02x:%02x:%02x:%02x src=%02x:%02x:%02x:%02x:%02x:%02x\n",
                    rx_last_ethertype,
                    rx_last_dst[0], rx_last_dst[1], rx_last_dst[2],

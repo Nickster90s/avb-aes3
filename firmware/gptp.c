@@ -562,9 +562,28 @@ void gptp_servo_update(gptp_t *g)
 
     g->servo_step_count++;
 
-    // Locked when offset stays within ±1 µs (one Sync interval's worth
-    // of master-to-slave residence; tighter than the previous ±10 µs).
-    g->servo_locked = (offset > -1000 && offset < 1000) ? 1 : 0;
+    // Lock detection with hysteresis (pattern from AES67 ptpv2_servo_median.vhd:621).
+    // Without hysteresis, a single noisy Sync at the boundary flips
+    // servo_locked 1→0→1 and applications (MCR, audio engines) see false
+    // unlocks. Enter lock only after 8 consecutive within-threshold samples;
+    // exit lock only when offset exceeds a larger threshold.
+    // (abs_off computed above for Kp selection — reuse here.)
+    if (!g->servo_locked) {
+        if (abs_off < 500) {
+            if (g->lock_sample_count < 8)
+                g->lock_sample_count++;
+            else
+                g->servo_locked = 1;
+        } else {
+            g->lock_sample_count = 0;
+        }
+    } else {
+        // Locked: only unlock on a clear excursion, not a single noisy sample.
+        if (abs_off > 2000) {
+            g->servo_locked       = 0;
+            g->lock_sample_count  = 0;
+        }
+    }
 
     if ((g->sync_count % 8) == 0) {
         printf("[gPTP] sync=%lu off=%lld ns delay=%lld ns add=%lu/%lu %s\n",

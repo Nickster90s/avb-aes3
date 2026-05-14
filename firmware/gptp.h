@@ -161,6 +161,11 @@ typedef struct {
     // Timing
     uint32_t last_pdelay_time_ms;
     uint32_t last_sync_time_ms;
+    // Hysteresis counter for servo_locked. Increments toward 8 each Sync
+    // where |offset| < 500ns; locks when it hits 8. Reset to 0 if a sample
+    // exceeds the enter-lock threshold while still unlocked. See AES67
+    // ptpv2_servo_median.vhd:621 for the equivalent VHDL pattern.
+    uint8_t  lock_sample_count;
     uint32_t pdelay_interval_ms;      // From logMessageInterval
 
     // Statistics

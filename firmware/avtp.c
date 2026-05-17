@@ -84,20 +84,16 @@ static uint8_t *build_avtp_header(uint8_t *frame, avtp_stream_t *s)
 {
     uint8_t *p = frame;
 
-    // --- Ethernet header (14 bytes) ---
-    // TODO(talker-mode): AVB bridges require Class A stream frames to carry
-    // an 802.1Q VLAN tag (TPID 0x8100, PCP=3, VID=2). When we enable the
-    // talker, this needs:
-    //   put_be16(p + 12, 0x8100);
-    //   put_be16(p + 14, (3 << 13) | 2);   // PCP=3, DEI=0, VID=2
-    //   put_be16(p + 16, AVTP_ETHERTYPE);
-    //   p += 18;
-    // Without it the bridge will drop or downshift our stream and listener
-    // jitter buffers underrun. Harmless while we're listener-only.
-    memcpy(p, s->dst_mac, 6);          // Destination MAC
-    memcpy(p + 6, s->src_mac, 6);      // Source MAC
-    put_be16(p + 12, AVTP_ETHERTYPE);  // EtherType = 0x22F0
-    p += 14;
+    // --- Ethernet header (18 bytes: 14 std + 4 802.1Q VLAN tag) ---
+    // AVB bridges require Class A stream frames to carry an 802.1Q tag
+    // (TPID 0x8100, PCP=3, VID=2) — untagged stream frames get dropped or
+    // downshifted to best-effort.
+    memcpy(p, s->dst_mac, 6);                  // Destination MAC
+    memcpy(p + 6, s->src_mac, 6);              // Source MAC
+    put_be16(p + 12, 0x8100);                  // 802.1Q TPID
+    put_be16(p + 14, (3 << 13) | 2);           // PCP=3, DEI=0, VID=2
+    put_be16(p + 16, AVTP_ETHERTYPE);          // EtherType = 0x22F0
+    p += 18;
 
     // --- AVTP Stream PDU header (24 bytes) ---
     // Byte 0: subtype = 0x00 (IEC 61883/IIDC)
@@ -177,13 +173,13 @@ static void avtp_send_packet(avtp_stream_t *s)
     }
 
     // Write AVTP timestamp into header (bytes 12-15 of AVTP PDU = offset 26 from frame start)
-    put_be32(frame + 14 + 12, avtp_ts);
+    put_be32(frame + 18 + 12, avtp_ts);
 
     // Update sequence number in header
-    frame[14 + 2] = s->tx_seq_num;
+    frame[18 + 2] = s->tx_seq_num;
 
     // Update DBC in CIP1 (offset: 14 eth + 24 avtp + 0 cip1, byte 3 of cip1)
-    frame[14 + 24 + 3] = s->tx_dbc;
+    frame[18 + 24 + 3] = s->tx_dbc;
 
     // Pack AM824 audio samples from ring buffer
     uint32_t available = audio_ring_count(s->tx_ring);

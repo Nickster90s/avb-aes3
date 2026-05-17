@@ -52,9 +52,9 @@
 #define AVTP_FRAME_PAYLOAD_LEN  (AVTP_STREAM_HDR_LEN + AVTP_STREAM_DATA_LEN)
 // = 24 + 56 = 80 bytes
 
-// Total Ethernet frame length
-#define AVTP_FRAME_LEN          (14 + AVTP_FRAME_PAYLOAD_LEN)
-// = 14 + 80 = 94 bytes
+// Total Ethernet frame length: 18 = 14 std + 4 byte 802.1Q VLAN tag (Class A)
+#define AVTP_FRAME_LEN          (18 + AVTP_FRAME_PAYLOAD_LEN)
+// = 18 + 80 = 98 bytes
 
 // Presentation time offset from capture (in nanoseconds)
 // Class A: max transit time 2 ms, typical 1-2 ms

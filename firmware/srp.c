@@ -180,15 +180,16 @@ static uint8_t *msrp_emit_talker_adv(uint8_t *p, const srp_talker_attr_t *t,
     srp_put_be32(p, t->accumulated_latency_ns);
     p += 4;
 
-    // ThreePackedEvents: JoinIn
+    // ThreePackedEvents: JoinMt
     *p++ = MRP_3PACK(MRP_EVT_JOINMT, 0, 0);
+
+    // EndMark INSIDE AttributeList — AttrListLen must include it
+    // (see [[msrp-attrlistlen-must-include-the-inner-endmark]]).
+    srp_put_be16(p, 0);
+    p += 2;
 
     uint16_t list_len = (uint16_t)(p - vec_start);
     srp_put_be16(list_len_ptr, list_len);
-
-    // EndMark
-    srp_put_be16(p, 0);
-    p += 2;
 
     return p;
 }

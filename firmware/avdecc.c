@@ -1255,10 +1255,27 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         if (!expect) {
             st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
         } else {
+            // Be permissive on Listener-side STREAM_INPUT — talkers (Auvitran
+            // observed) send SET_STREAM_FORMAT before starting their stream,
+            // and a strict byte-exact mismatch reply makes them refuse to
+            // stream. The actual format is constrained by the wire content
+            // (CRF/AAF subtype + parameters); the listener has no real
+            // freedom to "set" it anyway. Accept and log for STREAM_INPUT;
+            // strict check only on STREAM_OUTPUT (we control that one).
             int diff = 0;
             for (int i = 0; i < 8; i++)
                 diff |= want[i] ^ expect[i];
-            st = diff ? AECP_STATUS_BAD_ARGUMENTS : AECP_STATUS_SUCCESS;
+            if (dt == AEM_DESC_STREAM_INPUT) {
+                st = AECP_STATUS_SUCCESS;
+                if (diff) {
+                    printf("[AVDECC] SET_STREAM_FORMAT INPUT[%u] format diff "
+                           "%02x%02x%02x%02x%02x%02x%02x%02x → accepted anyway\n",
+                           di, want[0], want[1], want[2], want[3],
+                           want[4], want[5], want[6], want[7]);
+                }
+            } else {
+                st = diff ? AECP_STATUS_BAD_ARGUMENTS : AECP_STATUS_SUCCESS;
+            }
         }
 
         uint8_t *tf = avdecc_tx_buf();

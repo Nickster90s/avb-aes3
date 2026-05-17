@@ -39,7 +39,7 @@ static inline void put_be32(uint8_t *p, uint32_t v) {
 #define AAF_STREAM_HDR_LEN  24
 #define AAF_PACKET_PAYLOAD  (AAF_STREAM_HDR_LEN + \
                              AAF_SAMPLES_PER_PACKET * AAF_CHANNELS * AAF_BYTES_PER_SAMPLE)
-#define AAF_FRAME_LEN       (14 + AAF_PACKET_PAYLOAD)   // 14 + 24 + 192 = 230
+#define AAF_FRAME_LEN       (18 + AAF_PACKET_PAYLOAD)   // 14 eth + 4 vlan + AVTP+payload
 
 static uint32_t aaf_txslot;
 static uint8_t *aaf_tx_buf_ptr(void) {
@@ -188,18 +188,17 @@ static void aaf_send_packet(aaf_state_t *a)
 {
     uint8_t *frame = aaf_tx_buf_ptr();
 
-    // Ethernet header
-    // TODO(talker-mode): AVB bridges require Class A stream frames to carry
-    // an 802.1Q VLAN tag (TPID 0x8100, PCP=3, VID=2). When AAF TX goes live,
-    // insert the 4-byte tag between src_mac and AVTP_ETHERTYPE — otherwise
-    // bridges drop or downshift our stream and downstream listeners
-    // underrun. Same fix needed in avtp.c build_avtp_header(). Harmless
-    // while tx[aaf]=0.
+    // Ethernet header with 802.1Q VLAN tag for AVB Class A streams.
+    // TPID 0x8100, PCP=3 (Class A priority), DEI=0, VID=2 (default AVB VID).
+    // Bridges enforce this tag — untagged stream frames get dropped or
+    // downshifted to best-effort, which underruns downstream listeners.
     memcpy(frame,     a->dest_mac, 6);
     memcpy(frame + 6, a->src_mac,  6);
-    put_be16(frame + 12, AVTP_ETHERTYPE);
+    put_be16(frame + 12, 0x8100);              // 802.1Q TPID
+    put_be16(frame + 14, (3 << 13) | 2);       // PCP=3 (Class A), DEI=0, VID=2
+    put_be16(frame + 16, AVTP_ETHERTYPE);      // 0x22F0
 
-    uint8_t *pdu = frame + 14;
+    uint8_t *pdu = frame + 18;
     pdu[0] = AVTP_SUBTYPE_AAF;        // cd=0, subtype=0x02
     pdu[1] = 0x81;                     // sv=1, mr=0, tv=1 (timestamp valid)
     pdu[2] = a->tx_seq;

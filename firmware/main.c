@@ -319,15 +319,42 @@ static void check_uart_cmd(void)
                    aaf.tx_seq,
                    (unsigned long)aaf.last_presentation_ts);
             break;
+        case 't': {
+            // Diagnostic: force-enable AAF TX without waiting for Hive
+            // CONNECT_TX_COMMAND. Sets a hardcoded dest_mac + stream_id
+            // so the talker emits VLAN-tagged Class A AAF frames we can
+            // catch with tcpdump on Linux. For wire-level TX path test.
+            static const uint8_t dummy_dest[6] = {0x91, 0xe0, 0xf0, 0x00, 0xfe, 0x42};
+            uint8_t dummy_sid[8];
+            memcpy(dummy_sid, mac_addr, 6);
+            dummy_sid[6] = 0x00; dummy_sid[7] = 0x01;
+            aaf_bind(&aaf, dummy_sid);
+            memcpy(aaf.dest_mac, dummy_dest, 6);
+            aaf_tx_enable(&aaf, 1);
+            srp_talker_set(&srp, dummy_sid, dummy_dest,
+                           1500 /* max_frame_size */);
+            srp_talker_enable(&srp, 1);
+            printf("[DIAG] AAF TX force-enabled → dest=91:e0:f0:00:fe:42 "
+                   "sid=%02x:%02x:%02x:%02x:%02x:%02x:00:01\n",
+                   mac_addr[0], mac_addr[1], mac_addr[2],
+                   mac_addr[3], mac_addr[4], mac_addr[5]);
+            break;
+        }
+        case 'T':
+            aaf_tx_enable(&aaf, 0);
+            srp_talker_enable(&srp, 0);
+            printf("[DIAG] AAF TX force-disabled\n");
+            break;
         case 'h':
         case '?':
             printf("\n  s   status (gPTP / AVTP / AES3 / SRP / AVDECC / I2S)\n"
                      "  m   MCR servo state (CRF lock, NCO increment, offset)\n"
                      "  a   AAF stream state (RX/TX counts, jitter buffer level)\n"
                      "  e   RX ethertype counters + LiteEth heartbeat\n"
+                     "  t   force-enable AAF TX (diagnostic, bypasses AVDECC)\n"
+                     "  T   force-disable AAF TX\n"
                      "  r   reboot\n"
-                     "  h   help\n"
-                     "AAF talker/listener are driven by AVDECC, no manual toggle.\n");
+                     "  h   help\n");
             break;
     }
 }

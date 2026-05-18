@@ -102,10 +102,15 @@ static void mvrp_send_join_vid(srp_state_t *s, uint16_t vid, uint8_t event)
     *p++ = 0;
 
     // Message: AttrType=1 (VID), AttrLen=2
-    *p++ = 1;
-    *p++ = 2;
-    uint8_t *list_len_ptr = p; p += 2;
-    uint8_t *vec_start = p;
+    // NOTE: MVRP does NOT include AttributeListLength here — unlike
+    // MSRP/MMRP. Verified by decoding real bridge MVRP frames on the
+    // wire: `00 01 02 [vec_hdr][FirstValue][3pack] ... 00 00`.
+    // Open-AVB mvrp.c (mvrp_emit_vidvectors line 672) writes only
+    // AttributeType+AttributeLength then VectorAttributes directly.
+    // Adding a 2-byte list_len here would make the frame malformed
+    // and bridges would silently drop it — no VLAN registration.
+    *p++ = 1;   // AttributeType = MVRP_VID_TYPE
+    *p++ = 2;   // AttributeLength = 2 bytes (VID FirstValue size)
 
     // VectorHeader: numValues=1, LeaveAll=0
     srp_put_be16(p, 1); p += 2;
@@ -114,13 +119,8 @@ static void mvrp_send_join_vid(srp_state_t *s, uint16_t vid, uint8_t event)
     // 3-pack event
     *p++ = MRP_3PACK(event, 0, 0);
 
-    // Inner EndMark
-    srp_put_be16(p, 0); p += 2;
-
-    // AttrListLen = bytes from vec_start to here (incl EndMark)
-    srp_put_be16(list_len_ptr, (uint16_t)(p - vec_start));
-
-    // PDU EndMark
+    // EndMark — terminates the VectorAttribute list, also serves as
+    // the PDU EndMark since we only emit one Message per PDU.
     srp_put_be16(p, 0); p += 2;
 
     uint32_t len = (uint32_t)(p - frame);

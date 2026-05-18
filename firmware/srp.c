@@ -686,14 +686,12 @@ void srp_poll(srp_state_t *s)
     if (elapsed_join >= MRP_JOIN_PERIOD_MS) {
         srp_send_declarations(s, leaveall);
 
-        // Also emit one MVRP frame this cycle (VLAN 2 registration).
-        // First 2 cycles use NEW so the bridge's MVRP registrar
-        // allocates fresh state; afterwards JoinMt for refresh.
-        uint8_t mvrp_evt = (s->mvrp_new_count < 2)
-                               ? MRP_EVT_NEW : MRP_EVT_JOINMT;
-        mvrp_send_join_vid(s, SR_CLASS_A_VID, mvrp_evt);
-        if (s->mvrp_new_count < 2)
-            s->mvrp_new_count++;
+        // BISECT: MVRP TX temporarily disabled to isolate avtp=0
+        // regression. Re-enable below when bisect identifies issue.
+        // uint8_t mvrp_evt = (s->mvrp_new_count < 2)
+        //                        ? MRP_EVT_NEW : MRP_EVT_JOINMT;
+        // mvrp_send_join_vid(s, SR_CLASS_A_VID, mvrp_evt);
+        // if (s->mvrp_new_count < 2) s->mvrp_new_count++;
 
         s->last_join_ms = now_ms;
 

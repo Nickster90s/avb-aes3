@@ -126,6 +126,9 @@ typedef struct {
     // VN→AN→QA transition so the first 2 transmissions emit MRPDU_NEW
     // (event=0) and later ones switch to JoinMt. See msrp_emit_listener().
     uint8_t  listener_new_count;
+    // Same idea for MVRP VID registration — first 2 cycles emit NEW(0)
+    // to register our port for VLAN 2 at the bridge; then JoinMt for refresh.
+    uint8_t  mvrp_new_count;
 
     // Per-attribute RX diagnostic counters. Bumped once per vector
     // (FirstValue) processed, NOT once per PDU. Lets the UART stats line

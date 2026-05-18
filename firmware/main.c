@@ -75,7 +75,10 @@ static void dispatch_rx(void)
     // stops, Hive loses entity, gPTP servo can't update. 16 frames is
     // roughly one Class A burst window; main_loop drives dispatch_rx
     // continuously so any residual frames are picked up next call.
-    int drain_budget = 16;
+    // Bumped 16 → 32 because the MVRP fast-drop adds drain pressure when
+    // the bridge proxies MVRP state at ~570 PPS — 16 frames/call left
+    // little budget for real AVTP/MSRP work and avtp counter went to 0.
+    int drain_budget = 32;
     while ((ethmac_sram_writer_ev_pending_read() & ETHMAC_EV_SRAM_WRITER)
            && (drain_budget-- > 0)) {
 
@@ -121,6 +124,21 @@ static void dispatch_rx(void)
         if (frame[0] == 0x91 && frame[1] == 0xe0 && frame[2] == 0xf0 &&
             frame[3] == 0x00) {
             rx_avb_stream_mcast++;
+        }
+
+        // Fast-drop MVRP/MMRP traffic — when avb-mrpd is running on the
+        // bridge / Linux host, the bridge proxies *every* MVRP state
+        // change to all its ports, which floods our RX (~570 PPS in
+        // observed bench traffic). They go to rx_other and starve the
+        // slot buffer, killing AVTP / SRP delivery (avtp=0, large
+        // writer_errors). We don't run an MVRP/MMRP state machine — our
+        // mvrp_send_join_vid() in srp.c is fire-and-forget. Count and
+        // drop here so they don't burn dispatch budget.
+        if (ethertype == 0x88F5 ||   // MVRP
+            ethertype == 0x88F6) {   // MMRP
+            rx_other++;
+            ethmac_sram_writer_ev_pending_write(ETHMAC_EV_SRAM_WRITER);
+            continue;  // continue the drain loop
         }
 
         switch (ethertype) {

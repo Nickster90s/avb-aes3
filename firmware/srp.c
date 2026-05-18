@@ -71,6 +71,64 @@ static void srp_eth_send(uint32_t len)
 }
 
 // ---------------------------------------------------------------------------
+// MVRP PDU builder — registers our port for VLAN 2 (Class A) at the bridge.
+// Many AVB bridges gate forwarding of VLAN-tagged stream traffic on MVRP
+// port membership: without this, the bridge proxies our MSRP attributes
+// but won't actually forward stream data multicast (91:e0:f0:00:*) to our
+// port. Open-AVB simple_listener does this via mrp_join_vlan() →
+// "V++:I=0002" → mrpd → wire MVRP. session_mgr2.cpp:657 calls it too.
+//
+// MVRP wire format (IEEE 802.1Q-2018 §11.2):
+//   dst MAC = 01:80:c2:00:00:21 (Customer Bridge Group)
+//   ethertype = 0x88F5 (untagged)
+//   ProtocolVersion=0 | AttrType=1(VID) AttrLen=2 AttrListLen vec_hdr
+//   FirstValue=VID(2) 3-pack EndMark | PDU-EndMark
+// ---------------------------------------------------------------------------
+
+#define MVRP_ETHERTYPE 0x88F5
+static const uint8_t MVRP_MCAST[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x21};
+
+static void mvrp_send_join_vid(srp_state_t *s, uint16_t vid, uint8_t event)
+{
+    uint8_t *frame = srp_tx_buf();
+    uint8_t *p = frame;
+
+    // Ethernet header
+    memcpy(p, MVRP_MCAST, 6);    p += 6;
+    memcpy(p, s->src_mac, 6);    p += 6;
+    srp_put_be16(p, MVRP_ETHERTYPE); p += 2;
+
+    // MVRP ProtocolVersion
+    *p++ = 0;
+
+    // Message: AttrType=1 (VID), AttrLen=2
+    *p++ = 1;
+    *p++ = 2;
+    uint8_t *list_len_ptr = p; p += 2;
+    uint8_t *vec_start = p;
+
+    // VectorHeader: numValues=1, LeaveAll=0
+    srp_put_be16(p, 1); p += 2;
+    // FirstValue: VID (2 bytes)
+    srp_put_be16(p, vid); p += 2;
+    // 3-pack event
+    *p++ = MRP_3PACK(event, 0, 0);
+
+    // Inner EndMark
+    srp_put_be16(p, 0); p += 2;
+
+    // AttrListLen = bytes from vec_start to here (incl EndMark)
+    srp_put_be16(list_len_ptr, (uint16_t)(p - vec_start));
+
+    // PDU EndMark
+    srp_put_be16(p, 0); p += 2;
+
+    uint32_t len = (uint32_t)(p - frame);
+    if (len < 64) { memset(p, 0, 64 - len); len = 64; }
+    srp_eth_send(len);
+}
+
+// ---------------------------------------------------------------------------
 // MSRP PDU builder
 // ---------------------------------------------------------------------------
 
@@ -627,6 +685,16 @@ void srp_poll(srp_state_t *s)
     // Join timer — send declarations periodically
     if (elapsed_join >= MRP_JOIN_PERIOD_MS) {
         srp_send_declarations(s, leaveall);
+
+        // Also emit one MVRP frame this cycle (VLAN 2 registration).
+        // First 2 cycles use NEW so the bridge's MVRP registrar
+        // allocates fresh state; afterwards JoinMt for refresh.
+        uint8_t mvrp_evt = (s->mvrp_new_count < 2)
+                               ? MRP_EVT_NEW : MRP_EVT_JOINMT;
+        mvrp_send_join_vid(s, SR_CLASS_A_VID, mvrp_evt);
+        if (s->mvrp_new_count < 2)
+            s->mvrp_new_count++;
+
         s->last_join_ms = now_ms;
 
         // Periodic status

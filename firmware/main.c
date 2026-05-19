@@ -246,11 +246,13 @@ static void check_uart_cmd(void)
                    (unsigned long)aes3.tx_sample_count,
                    (unsigned long)aes3.rx_overrun_count,
                    (unsigned long)aes3.tx_underrun_count);
-            printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d\n",
+            printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d bridge_class=%u prio=%u vid=%u talker_prio_byte=0x%02x\n",
                    (unsigned long)srp.join_count,
                    (unsigned long)srp.rx_pdu_count,
                    srp.domain_received,
-                   srp.talker_registered);
+                   srp.talker_registered,
+                   srp.rx_sr_class, srp.rx_sr_prio, srp.rx_sr_vid,
+                   srp.talker.priority_and_rank);
             printf("[AVDECC] adp=%lu acmp=%lu/%lu aecp=%lu/%lu "
                    "tx[aaf]=%d rx[crf]=%d rx[aaf]=%d clk_src=%u\n",
                    (unsigned long)avdecc.adp_tx_count,
@@ -637,6 +639,7 @@ int main(void)
     avdecc_init(&avdecc, mac_addr);
     avdecc_set_gptp(&gptp);   // surface GM identity in ADP/AVB_INTERFACE
     avdecc_set_mcr(&mcr);     // CLOCK_DOMAIN lock follows MCR when source=1
+    avdecc_set_srp(&srp);     // GET_AVB_INFO emits matching msrp_mapping
     avdecc_set_talker_stream(&avdecc, TALKER_UID_AAF, aaf.stream_id, aaf.dest_mac);
     avdecc.on_talker_connect    = on_talker_connect;
     avdecc.on_talker_disconnect = on_talker_disconnect;

@@ -129,6 +129,12 @@ typedef struct {
     // Same idea for MVRP VID registration — first 2 cycles emit NEW(0)
     // to register our port for VLAN 2 at the bridge; then JoinMt for refresh.
     uint8_t  mvrp_new_count;
+    // Same idea for TalkerAdvertise + Domain. Without an initial MRPDU_NEW
+    // the bridge's MSRP registrar never moves into the registered state
+    // for our talker stream, so listeners get rejected even though the
+    // wire-side advertise looks correct.
+    uint8_t  talker_new_count;
+    uint8_t  domain_new_count;
 
     // Per-attribute RX diagnostic counters. Bumped once per vector
     // (FirstValue) processed, NOT once per PDU. Lets the UART stats line

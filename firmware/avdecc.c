@@ -29,6 +29,15 @@ static const gptp_t *g_gptp = NULL;
 // so the Hive indicator turns green only when CRF actually flows.
 static const mcr_state_t *g_mcr = NULL;
 
+// Backreference to SRP module — GET_AVB_INFO RESPONSE must declare an
+// msrp_mapping (traffic_class / priority / vlan_id) that matches what we
+// emit on MSRP TalkerAdvertise. If avdecc says one priority and MSRP says
+// another, the listener (Auvitran) reports MSRP failure 0x13 "SR Class
+// Priority Mismatch" and the bridge refuses the reservation.
+#include "srp.h"
+static const srp_state_t *g_srp = NULL;
+void avdecc_set_srp(const srp_state_t *s) { g_srp = s; }
+
 // Vendor's Entity Model ID (EUI-64) — IDENTIFIES THE PRODUCT MODEL, not
 // the specific device. All units running this firmware must report the
 // same value; per-device uniqueness is the entity_id (MAC-derived).
@@ -1373,10 +1382,21 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         if (g_gptp && g_gptp->mean_path_delay_ns > 0 && g_gptp->mean_path_delay_ns < 100000)
             flags |= 0x01;                    // AS_CAPABLE
         tp[41] = flags;
-        av_put_be16(tp + 42, 0);              // msrp_mappings_count = 0
-        // CDL = AECPDU - 12 = (4 + 8 + 8 + 2 + 2 + 20) - 12 = 32
-        aecp_set_status_cdl(tp, st, 32);
-        avdecc_eth_send(64);                  // 14 + 44 = 58, pad to 64
+        // msrp_mappings_count = 1 — Class A. Source values from SRP if we've
+        // heard a Domain advertise from the bridge, else 802.1Q defaults.
+        // The mapping MUST match what we emit on MSRP TalkerAdvertise —
+        // discrepancy = listener reports failure 0x13 SR Class Priority
+        // Mismatch (IEEE 802.1Q-2018 §35.2.2.10.5).
+        uint8_t  map_class = (g_srp && g_srp->domain_received) ? g_srp->rx_sr_class : 6;
+        uint8_t  map_prio  = (g_srp && g_srp->domain_received) ? g_srp->rx_sr_prio  : 3;
+        uint16_t map_vid   = (g_srp && g_srp->domain_received) ? g_srp->rx_sr_vid   : 2;
+        av_put_be16(tp + 42, 1);
+        tp[44] = map_class;
+        tp[45] = map_prio;
+        av_put_be16(tp + 46, map_vid);
+        // CDL = AECPDU - 12 = (4 + 8 + 8 + 2 + 2 + 24) - 12 = 36
+        aecp_set_status_cdl(tp, st, 36);
+        avdecc_eth_send(68);                  // 14 + 48 = 62, pad to 68
         s->aecp_tx_count++;
         break;
     }

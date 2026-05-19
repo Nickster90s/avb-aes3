@@ -152,7 +152,7 @@ static uint8_t *msrp_frame_begin(uint8_t *frame, const uint8_t *src_mac)
 // FirstValue = {SRclassID, SRclassPriority, SRclassVID(2 bytes)}
 // One vector with one JoinIn event.
 static uint8_t *msrp_emit_domain(uint8_t *p, uint8_t sr_class, uint8_t sr_prio,
-                                  uint16_t sr_vid, int leaveall)
+                                  uint16_t sr_vid, int leaveall, uint8_t event)
 {
     // AttributeType
     *p++ = MSRP_ATTR_DOMAIN;
@@ -177,8 +177,9 @@ static uint8_t *msrp_emit_domain(uint8_t *p, uint8_t sr_class, uint8_t sr_prio,
     srp_put_be16(p, sr_vid);
     p += 2;
 
-    // ThreePackedEvents: one event (JoinIn), packed as 3pack with padding
-    *p++ = MRP_3PACK(MRP_EVT_JOINMT, 0, 0);
+    // ThreePackedEvents — caller passes MRP_EVT_NEW for first 2 cycles
+    // after attach (drives bridge registrar VN→AN→QA), JoinMt otherwise.
+    *p++ = MRP_3PACK(event, 0, 0);
 
     // EndMark INSIDE the AttributeList — per IEEE 802.1Q-2018 §10.8.1.5,
     // AttributeList = VectorAttributes+ + EndMark, and AttributeListLength
@@ -199,7 +200,7 @@ static uint8_t *msrp_emit_domain(uint8_t *p, uint8_t sr_class, uint8_t sr_prio,
 
 // Write a TalkerAdvertise message: AttributeType=1, AttributeLength=25
 static uint8_t *msrp_emit_talker_adv(uint8_t *p, const srp_talker_attr_t *t,
-                                      int leaveall)
+                                      int leaveall, uint8_t event)
 {
     // AttributeType
     *p++ = MSRP_ATTR_TALKER_ADV;
@@ -238,8 +239,10 @@ static uint8_t *msrp_emit_talker_adv(uint8_t *p, const srp_talker_attr_t *t,
     srp_put_be32(p, t->accumulated_latency_ns);
     p += 4;
 
-    // ThreePackedEvents: JoinMt
-    *p++ = MRP_3PACK(MRP_EVT_JOINMT, 0, 0);
+    // ThreePackedEvents — caller passes MRP_EVT_NEW for the first 2
+    // cycles after talker_enable so the bridge's registrar initialises;
+    // JoinMt for steady-state refresh.
+    *p++ = MRP_3PACK(event, 0, 0);
 
     // EndMark INSIDE AttributeList — AttrListLen must include it
     // (see [[msrp-attrlistlen-must-include-the-inner-endmark]]).
@@ -309,13 +312,36 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
     uint8_t *frame = srp_tx_buf();
     uint8_t *p = msrp_frame_begin(frame, s->src_mac);
 
-    // Always declare Domain (SR Class A)
-    p = msrp_emit_domain(p, SR_CLASS_A, SR_CLASS_A_PRIO,
-                         SR_CLASS_A_VID, leaveall);
+    // Use the bridge-advertised SR class / priority / VID if we've heard
+    // one (mandatory for interop — the bridge may map Class A to a non-3
+    // priority on our port and reject reservations as code 0x13 "SR class
+    // priority mismatch" if we keep declaring the default). Falls back to
+    // 802.1Q defaults until first Domain RX arrives.
+    uint8_t  dom_class = s->domain_received ? s->rx_sr_class : SR_CLASS_A;
+    uint8_t  dom_prio  = s->domain_received ? s->rx_sr_prio  : SR_CLASS_A_PRIO;
+    uint16_t dom_vid   = s->domain_received ? s->rx_sr_vid   : SR_CLASS_A_VID;
+
+    // Domain — emit MRPDU_NEW(0) for the first 2 cycles (VN→AN→QA);
+    // refresh-only events never initialise the bridge's registrar.
+    uint8_t dom_event = (s->domain_new_count < 2) ? MRP_EVT_NEW : MRP_EVT_JOINMT;
+    p = msrp_emit_domain(p, dom_class, dom_prio, dom_vid, leaveall, dom_event);
+    if (s->domain_new_count < 2)
+        s->domain_new_count++;
 
     // Talker Advertise (if enabled)
     if (s->talker_enabled) {
-        p = msrp_emit_talker_adv(p, &s->talker, leaveall);
+        // Keep our talker's priority_and_rank synced with the bridge's
+        // advertised priority — protects against per-port priority remap
+        // that triggers "SR Class Priority Mismatch" (0x13) at downstream
+        // listeners.
+        s->talker.priority_and_rank = (uint8_t)((dom_prio << 5) | (1 << 4));
+        s->talker.vlan_id = dom_vid;
+
+        uint8_t tk_event = (s->talker_new_count < 2)
+                               ? MRP_EVT_NEW : MRP_EVT_JOINMT;
+        p = msrp_emit_talker_adv(p, &s->talker, leaveall, tk_event);
+        if (s->talker_new_count < 2)
+            s->talker_new_count++;
     }
 
     // Listener Ready (if enabled). For the first 2 transmissions after
@@ -593,6 +619,9 @@ void srp_talker_enable(srp_state_t *s, uint8_t enable)
 {
     s->talker_enabled = enable;
     if (enable) {
+        // Reset MRPDU_NEW counter so the next 2 advertises emit NEW(0)
+        // and force the bridge's registrar into the registered state.
+        s->talker_new_count = 0;
         printf("[SRP] Talker Advertise enabled\n");
     } else {
         printf("[SRP] Talker Advertise disabled\n");

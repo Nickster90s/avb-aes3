@@ -356,6 +356,12 @@ void avdecc_set_gptp(const gptp_t *g);
 // gptp.servo_locked.
 void avdecc_set_mcr(const mcr_state_t *m);
 
+// Plumb SRP so GET_AVB_INFO can emit a matching msrp_mapping. Without
+// this the listener sees Mappings_count=0, falls back to its own defaults,
+// and may report failure 0x13 if they disagree with our actual MSRP TX.
+struct srp_state;
+void avdecc_set_srp(const struct srp_state *s);
+
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).
 void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len);

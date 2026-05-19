@@ -158,6 +158,39 @@ typedef struct {
     uint8_t  servo_locked;
     uint32_t servo_step_count;
 
+    // Rolling 30-sec offset stats — accumulated every sync, snapshotted
+    // every 30000 ms into off_avg_*_last so the 's' UART command can
+    // print "avg off over last 30s = X ns" without doing math in the
+    // critical path. Replaces the periodic [gPTP] sync= line that used
+    // to flood UART TX and starve the input handler.
+    int64_t  off_sum_ns_win;       // signed sum of offsets in current window
+    int64_t  off_abs_sum_ns_win;   // sum of |offset| (gives jitter view)
+    uint32_t off_count_win;        // samples in current window
+    uint32_t off_win_start_ms;     // gptp_uptime_ms() at window start
+    int64_t  off_avg_ns_last;      // signed average of last completed window
+    int64_t  off_abs_avg_ns_last;  // jitter average of last completed window
+    uint32_t off_avg_count_last;   // sample count of last completed window
+
+    // neighborRateRatio tracking (802.1AS-2020 §11.2.19). After two
+    // successful PDelay_Resp/FUP exchanges, ratio_num/ratio_den expresses
+    // peer-clock-rate / our-clock-rate. Kept as ppb delta from 1.0 so a
+    // perfect-match link reads 0; ±100 ppb is typical for crystal pairs.
+    // Used to scale (t4-t1) into peer's time domain before computing mpd:
+    //   mpd = ((t4-t1) * nrr − (t3-t2)) / 2
+    int64_t  prev_t3_ns;
+    int64_t  prev_t4_ns;
+    int32_t  nrr_ppb;              // (peer_rate / our_rate − 1) × 1e9
+    uint32_t pdelay_pair_count;    // increments when both prev_t3 + curr seen
+    uint32_t pdelay_outlier_count; // PDelay sample rejected (delay > thresh)
+
+    // Median-of-5 filter for offset_from_master_ns (mirrors AES67
+    // ptpv2_servo_median.vhd:114 sample_buffer_t). A single noisy Sync at
+    // the boundary would otherwise flip the PI servo's output by tens of
+    // ppb; the median holds the line until the noise sample ages out.
+    int64_t  off_median_buf[5];
+    uint8_t  off_median_idx;       // circular write pointer
+    uint8_t  off_median_filled;    // 0..5 — count of samples written
+
     // Timing
     uint32_t last_pdelay_time_ms;
     uint32_t last_sync_time_ms;

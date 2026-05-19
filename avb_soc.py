@@ -773,6 +773,16 @@ def main():
         integrated_sram_size     = 0x10000,  # 64 KB SRAM (RW data + stack)
         integrated_rom_size      = 0x18000,  # 96 KB ROM
         uart_name                = "serial",
+        # 1 Mbaud + 64-byte HW FIFO. 115200/16 was the LiteX default and
+        # at that rate periodic prints (gPTP dump + SRP poll + AVDECC etc)
+        # stacked up faster than the main loop could drain the 128-byte
+        # software ring, so each `s` command blocked for tens of ms. CH347
+        # accepts up to ~9 Mbps over USB; 1 Mbaud is the sweet spot — 8.7×
+        # less per-char wait, comfortable margin, every stty/picocom build
+        # supports it. The bigger FIFO (16 → 64) also lets a full periodic
+        # print fit without ever blocking the main loop.
+        uart_baudrate            = 1_000_000,
+        uart_fifo_depth          = 64,
     )
     if args.firmware:
         # Pre-load the firmware ourselves so SoCCore doesn't shrink the ROM

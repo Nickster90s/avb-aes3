@@ -212,6 +212,14 @@ static void check_uart_cmd(void)
                    (unsigned long)(gptp.current_addend_full >> 20),
                    (unsigned long)(gptp.current_addend_full & 0xFFFFFu),
                    gptp.servo_locked);
+            printf("  30s avg: off=%lld ns |off|=%lld ns (n=%lu)\n",
+                   (long long)gptp.off_avg_ns_last,
+                   (long long)gptp.off_abs_avg_ns_last,
+                   (unsigned long)gptp.off_avg_count_last);
+            printf("  nrr=%ld ppb pdelay_outliers=%lu pairs=%lu\n",
+                   (long)gptp.nrr_ppb,
+                   (unsigned long)gptp.pdelay_outlier_count,
+                   (unsigned long)gptp.pdelay_pair_count);
             printf("  gm: id=%02x%02x%02x%02x%02x%02x%02x%02x p1=%u cc=%u p2=%u valid=%u\n",
                    gptp.gm_clock_id[0], gptp.gm_clock_id[1], gptp.gm_clock_id[2], gptp.gm_clock_id[3],
                    gptp.gm_clock_id[4], gptp.gm_clock_id[5], gptp.gm_clock_id[6], gptp.gm_clock_id[7],

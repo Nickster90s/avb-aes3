@@ -372,15 +372,36 @@ static void process_follow_up(gptp_t *g, const uint8_t *ptp, uint32_t ptp_len)
     // SFD and our sys-domain mac.core.source latch is constant for a given
     // P&R but varies build-to-build; the PI servo's integrator absorbs it
     // as a steady-state addend offset, which is the right place for it.
-    g->offset_from_master_ns = rx_ns - orig_ns - corr_ns - g->mean_path_delay_ns;
+    int64_t raw_offset = rx_ns - orig_ns - corr_ns - g->mean_path_delay_ns;
+
+    // (4) Median-of-5 filter (mirrors AES67 ptpv2_servo_median.vhd:114).
+    // A single outlier Sync — caused by a bridge buffering burst — should
+    // not perturb the servo. We sort a 5-element circular buffer and feed
+    // the middle value to the PI loop; outliers stay in the buffer for 5
+    // cycles then age out without ever touching the NCO.
+    g->off_median_buf[g->off_median_idx] = raw_offset;
+    g->off_median_idx = (g->off_median_idx + 1) % 5;
+    if (g->off_median_filled < 5) g->off_median_filled++;
+
+    int64_t sorted[5];
+    int n = g->off_median_filled;
+    for (int i = 0; i < n; i++) sorted[i] = g->off_median_buf[i];
+    for (int i = 1; i < n; i++) {
+        int64_t v = sorted[i];
+        int j = i;
+        while (j > 0 && sorted[j-1] > v) { sorted[j] = sorted[j-1]; j--; }
+        sorted[j] = v;
+    }
+    g->offset_from_master_ns = sorted[n / 2];
 
     g->sync_received = 0;
     g->sync_count++;
 
-    // Debug: every 256th sync, dump the four offset components in hex pairs.
-    // picolibc's %lld truncates int64 to low-32-signed, so use 64-bit hex.
+    // Debug: every 2048th sync (~4 min @ 8Hz), dump four offset components.
+    // Was every 256 (~32s) but the 160-char line blocks the main loop for
+    // ~14 ms each — visible as keystroke-response lag spikes on UART.
     static uint32_t dump_count = 0;
-    if ((dump_count++ & 0xFF) == 0) {
+    if ((dump_count++ & 0x7FF) == 0) {
         uint64_t urx   = (uint64_t)rx_ns;
         uint64_t uorig = (uint64_t)orig_ns;
         uint64_t uoff  = (uint64_t)g->offset_from_master_ns;
@@ -445,19 +466,53 @@ static void process_pdelay_resp_fup(gptp_t *g, const uint8_t *ptp, uint32_t ptp_
     g->pdelay_t3 = get_ptp_ts(ptp + PTP_HEADER_LEN);
     g->pdelay_fup_received = 1;
 
-    // Compute mean path delay:
-    // meanPathDelay = ((t4 - t1) - (t3 - t2)) / 2
-    int64_t round_trip = gptp_ts_diff_ns(g->pdelay_t4, g->pdelay_t1);
-    int64_t responder  = gptp_ts_diff_ns(g->pdelay_t3, g->pdelay_t2);
-    int64_t delay = (round_trip - responder) / 2;
+    int64_t t1_ns = gptp_ts_diff_ns(g->pdelay_t1, (ptp_timestamp_t){0, 0});
+    int64_t t2_ns = gptp_ts_diff_ns(g->pdelay_t2, (ptp_timestamp_t){0, 0});
+    int64_t t3_ns = gptp_ts_diff_ns(g->pdelay_t3, (ptp_timestamp_t){0, 0});
+    int64_t t4_ns = gptp_ts_diff_ns(g->pdelay_t4, (ptp_timestamp_t){0, 0});
 
-    // Sanity check — reject negative or unreasonably large delays
-    if (delay >= 0 && delay < 1000000000LL) {
-        // Simple exponential smoothing
+    // (3) neighborRateRatio — peer-rate / our-rate. 802.1AS §11.2.19.
+    // Need two consecutive PDelay exchanges. Smoothed (EWMA 7/8) to absorb
+    // single-cycle jitter; rejected when delta_t4 is tiny (clock didn't move).
+    if (g->pdelay_pair_count > 0) {
+        int64_t dt3 = t3_ns - g->prev_t3_ns;
+        int64_t dt4 = t4_ns - g->prev_t4_ns;
+        if (dt4 > 100000) {            // ≥ 100 µs between samples
+            int64_t nrr_num   = (dt3 - dt4) * 1000000000LL;
+            int32_t nrr_inst  = (int32_t)(nrr_num / dt4);
+            // Clamp to ±10 000 ppb; anything wider is garbage, drop sample
+            if (nrr_inst > -10000 && nrr_inst < 10000) {
+                g->nrr_ppb = (g->nrr_ppb * 7 + nrr_inst) / 8;
+            }
+        }
+    }
+    g->prev_t3_ns = t3_ns;
+    g->prev_t4_ns = t4_ns;
+    g->pdelay_pair_count++;
+
+    // meanPathDelay = ((t4 - t1) * (1 + nrr) − (t3 - t2)) / 2
+    // We scale (t4-t1) by (1 + nrr_ppb/1e9). For ±100 ppb and 250 ns RT, the
+    // correction is sub-fs — but the formula is needed once cables get long
+    // or once crystals drift apart on a hot rack.
+    int64_t round_trip   = t4_ns - t1_ns;
+    int64_t rt_corrected = round_trip + (round_trip * g->nrr_ppb) / 1000000000LL;
+    int64_t responder    = t3_ns - t2_ns;
+    int64_t delay        = (rt_corrected - responder) / 2;
+
+    // (1) Reject outliers above 20 µs. ptp4l's default is 800 ns but that
+    // assumes hardware timestamping at the PHY; this LiteEth/CDC-MAC stamps
+    // at the soft-MAC FIFO output, which adds a ~8.7 µs RX bias on top of
+    // the wire propagation. Real samples land in the 5–12 µs range; > 20 µs
+    // means a bridge-queue hiccup. The bias itself is symmetric across our
+    // t1/t4 stamps and is absorbed by the PI integrator at the servo, so the
+    // raw delay number is only used for the (small) Sync offset correction.
+    if (delay >= 0 && delay < 20000) {
         if (g->mean_path_delay_ns == 0)
             g->mean_path_delay_ns = delay;
         else
             g->mean_path_delay_ns = (g->mean_path_delay_ns * 7 + delay) / 8;
+    } else {
+        g->pdelay_outlier_count++;
     }
 
     g->pdelay_lost_count = 0;
@@ -472,10 +527,11 @@ void gptp_servo_update(gptp_t *g)
 {
     int64_t offset = g->offset_from_master_ns;
 
-    // Show offset+addend in hex periodically so we can read true int64s
-    // (picolibc's %lld truncates to int32 for large magnitudes).
+    // Show offset+addend in hex every 2048th servo call (~4 min). Was 256
+    // — but the ~80-char print blocks the main loop for ~7 ms and stacks
+    // up with the dump print one line above. Available on demand via 's'.
     static uint32_t dbg_count = 0;
-    if ((dbg_count++ & 0xFF) == 0) {
+    if ((dbg_count++ & 0x7FF) == 0) {
         printf("[gPTP] dbg off=0x%08lx_%08lx add=0x%08lx_%08lx int=0x%08lx_%08lx\n",
                (unsigned long)((uint64_t)offset >> 32),
                (unsigned long)((uint64_t)offset & 0xFFFFFFFF),
@@ -562,12 +618,8 @@ void gptp_servo_update(gptp_t *g)
 
     g->servo_step_count++;
 
-    // Lock detection with hysteresis (pattern from AES67 ptpv2_servo_median.vhd:621).
-    // Without hysteresis, a single noisy Sync at the boundary flips
-    // servo_locked 1→0→1 and applications (MCR, audio engines) see false
-    // unlocks. Enter lock only after 8 consecutive within-threshold samples;
-    // exit lock only when offset exceeds a larger threshold.
-    // (abs_off computed above for Kp selection — reuse here.)
+    uint8_t prev_locked = g->servo_locked;
+
     if (!g->servo_locked) {
         if (abs_off < 500) {
             if (g->lock_sample_count < 8)
@@ -578,21 +630,42 @@ void gptp_servo_update(gptp_t *g)
             g->lock_sample_count = 0;
         }
     } else {
-        // Locked: only unlock on a clear excursion, not a single noisy sample.
         if (abs_off > 2000) {
             g->servo_locked       = 0;
             g->lock_sample_count  = 0;
         }
     }
 
-    if ((g->sync_count % 8) == 0) {
-        printf("[gPTP] sync=%lu off=%lld ns delay=%lld ns add=%lu/%lu %s\n",
+    if (g->servo_locked != prev_locked) {
+        printf("[gPTP] %s sync=%lu off=%lld ns delay=%lld ns add=%lu/%lu\n",
+               g->servo_locked ? "LOCKED" : "UNLOCKED",
                (unsigned long)g->sync_count,
                (long long)offset,
                (long long)g->mean_path_delay_ns,
                (unsigned long)(g->current_addend_full >> 20),
-               (unsigned long)(g->current_addend_full & 0xFFFFFu),
-               g->servo_locked ? "LOCKED" : "");
+               (unsigned long)(g->current_addend_full & 0xFFFFFu));
+    }
+
+    // Rolling 30-sec window for 's' status command (see gptp.h fields).
+    // Sample every sync regardless of lock state so 's' can show jitter
+    // both before and after lock.
+    uint32_t now_ms = gptp_uptime_ms();
+    if (g->off_win_start_ms == 0) {
+        g->off_win_start_ms = now_ms;
+    }
+    g->off_sum_ns_win     += offset;
+    g->off_abs_sum_ns_win += abs_off;
+    g->off_count_win++;
+    if ((now_ms - g->off_win_start_ms) >= 30000) {
+        if (g->off_count_win > 0) {
+            g->off_avg_ns_last     = g->off_sum_ns_win     / (int64_t)g->off_count_win;
+            g->off_abs_avg_ns_last = g->off_abs_sum_ns_win / (int64_t)g->off_count_win;
+            g->off_avg_count_last  = g->off_count_win;
+        }
+        g->off_sum_ns_win     = 0;
+        g->off_abs_sum_ns_win = 0;
+        g->off_count_win      = 0;
+        g->off_win_start_ms   = now_ms;
     }
 }
 
@@ -612,6 +685,16 @@ void gptp_process_rx(gptp_t *g, const uint8_t *frame, uint32_t len)
 
     const uint8_t *ptp = frame + ETH_HEADER_LEN;
     uint32_t ptp_len = len - ETH_HEADER_LEN;
+
+    // (2) gPTP marker per 802.1AS §10.5.2.2.1 — high nibble of byte 0 is
+    // transportSpecific and MUST be 0x1 for gPTP. ptp4l in non-gPTP mode
+    // and IEEE-1588 boundary clocks set 0x0, so reject those — otherwise
+    // we'd sample timestamps from a clock that doesn't share our PDelay
+    // peer and silently corrupt offset_from_master_ns.
+    if ((ptp[PTP_OFF_MSG_TYPE] >> 4) != 0x1) {
+        g->rx_other_count++;
+        return;
+    }
 
     uint8_t msg_type = ptp[PTP_OFF_MSG_TYPE] & 0x0F;
     uint8_t domain   = ptp[PTP_OFF_DOMAIN];

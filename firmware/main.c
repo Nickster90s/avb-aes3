@@ -48,6 +48,18 @@ static uint32_t rx_total, rx_ptp, rx_avtp, rx_msrp, rx_other;
 static uint16_t rx_last_ethertype;
 static uint8_t  rx_last_dst[6];
 static uint8_t  rx_last_src[6];
+// Pending FAST_CONNECT bindings — forward-declared here so the UART
+// 'D' (force-clear) command can also clear them. Full definition is
+// below near on_listener_connect.
+typedef struct {
+    uint8_t  active;
+    uint8_t  uid;
+    uint8_t  dest_mac[6];
+    uint8_t  talker_entity_id[8];
+    uint16_t talker_uid;
+} pending_bind_t;
+static pending_bind_t pending_listeners[2];
+
 // AVB-stream multicast bypass counter — any frame with dst MAC prefix
 // 91:e0:f0:* (the AVB stream multicast range). Independent of ethertype /
 // VLAN / subtype demux, so it catches frames that would otherwise be
@@ -55,6 +67,11 @@ static uint8_t  rx_last_src[6];
 // forwarding Auvitran's CRF stream to our port, this counter climbs
 // regardless of whether mcr_process_rx() actually consumes them.
 static uint32_t rx_avb_stream_mcast;
+// Per-subtype counters for AVTP RX. Diagnoses "MCR rx=0 but stream_mcast>0"
+// — distinguishes "no CRF frames arriving" from "CRF arriving but mcr
+// rejects on stream_id mismatch". Sampled in the 's' status print.
+static uint32_t rx_avtp_crf, rx_avtp_aaf;
+static uint8_t  rx_crf_last_sid[8];   // last CRF stream_id we saw on the wire
 
 // ---------------------------------------------------------------------------
 // Central Ethernet RX dispatcher
@@ -154,9 +171,13 @@ static void dispatch_rx(void)
                             avdecc_process_rx(&avdecc, frame, len);
                             break;
                         case AVTP_SUBTYPE_CRF:
+                            rx_avtp_crf++;
+                            if (len >= 14 + 12)
+                                memcpy(rx_crf_last_sid, frame + 14 + 4, 8);
                             mcr_process_rx(&mcr, frame, len);
                             break;
                         case AVTP_SUBTYPE_AAF:
+                            rx_avtp_aaf++;
                             aaf_process_rx(&aaf, frame, len);
                             break;
                         case AVTP_SUBTYPE_61883_IIDC:
@@ -277,6 +298,16 @@ static void check_uart_cmd(void)
         case 'e':
             printf("\n[RX] total=%u ptp=%u avtp=%u msrp=%u other=%u stream_mcast=%u\n",
                    rx_total, rx_ptp, rx_avtp, rx_msrp, rx_other, rx_avb_stream_mcast);
+            printf("  avtp subtypes: crf=%u aaf=%u (mcr.rx_other=%lu)\n",
+                   rx_avtp_crf, rx_avtp_aaf, (unsigned long)mcr.rx_other_count);
+            printf("  last CRF sid=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+                   rx_crf_last_sid[0], rx_crf_last_sid[1], rx_crf_last_sid[2],
+                   rx_crf_last_sid[3], rx_crf_last_sid[4], rx_crf_last_sid[5],
+                   rx_crf_last_sid[6], rx_crf_last_sid[7]);
+            printf("  mcr bound sid=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+                   mcr.stream_id[0], mcr.stream_id[1], mcr.stream_id[2],
+                   mcr.stream_id[3], mcr.stream_id[4], mcr.stream_id[5],
+                   mcr.stream_id[6], mcr.stream_id[7]);
             printf("  last et=%04x dst=%02x:%02x:%02x:%02x:%02x:%02x src=%02x:%02x:%02x:%02x:%02x:%02x\n",
                    rx_last_ethertype,
                    rx_last_dst[0], rx_last_dst[1], rx_last_dst[2],
@@ -367,6 +398,29 @@ static void check_uart_cmd(void)
             srp_talker_enable(&srp, 0);
             printf("[DIAG] AAF TX force-disabled\n");
             break;
+        case 'D':
+            // Force-clear local listener bindings — useful when Hive's
+            // saved state replays a stale FAST_CONNECT to a stream_id
+            // that no longer exists on the network. Sends MSRP Listener
+            // Leave for whatever we were registered to, then unbinds
+            // mcr+aaf and clears the AVDECC listener slots so the next
+            // Hive CONNECT_RX rebinds fresh.
+            if (mcr.bound) {
+                srp_listener_enable(&srp, mcr.stream_id, 0);
+                mcr_unbind(&mcr);
+            }
+            if (aaf.bound) {
+                srp_listener_enable(&srp, aaf.stream_id, 0);
+                aaf_unbind(&aaf);
+            }
+            memset(&avdecc.listeners[LISTENER_UID_CRF], 0,
+                   sizeof(avdecc.listeners[LISTENER_UID_CRF]));
+            memset(&avdecc.listeners[LISTENER_UID_AAF], 0,
+                   sizeof(avdecc.listeners[LISTENER_UID_AAF]));
+            for (size_t i = 0; i < sizeof(pending_listeners)/sizeof(pending_listeners[0]); i++)
+                pending_listeners[i].active = 0;
+            printf("[DIAG] Listener bindings force-cleared (mcr + aaf + avdecc slots)\n");
+            break;
         case 'h':
         case '?':
             printf("\n  s   status (gPTP / AVTP / AES3 / SRP / AVDECC / I2S)\n"
@@ -375,6 +429,7 @@ static void check_uart_cmd(void)
                      "  e   RX ethertype counters + LiteEth heartbeat\n"
                      "  t   force-enable AAF TX (diagnostic, bypasses AVDECC)\n"
                      "  T   force-disable AAF TX\n"
+                     "  D   force-clear all listener bindings (clears stale FAST_CONNECT)\n"
                      "  r   reboot\n"
                      "  h   help\n");
             break;
@@ -389,15 +444,7 @@ static void check_uart_cmd(void)
 // filtering AVTP packets by it.
 // ---------------------------------------------------------------------------
 
-typedef struct {
-    uint8_t  active;             // 1 = waiting for SRP TalkerAdvertise
-    uint8_t  uid;                // listener_unique_id (CRF or AAF)
-    uint8_t  dest_mac[6];        // saved-state dest_mac (may be all-zero)
-    uint8_t  talker_entity_id[8];// saved-state talker_eid (may be all-zero)
-    uint16_t talker_uid;
-} pending_bind_t;
-
-static pending_bind_t pending_listeners[2];   // one slot per listener
+// pending_bind_t + pending_listeners[] are forward-declared at top of file.
 
 static int stream_id_is_zero(const uint8_t *sid)
 {

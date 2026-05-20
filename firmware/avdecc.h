@@ -304,6 +304,7 @@ typedef struct {
     // ADP state
     uint32_t adp_available_index;   // Increments each advertisement
     uint32_t last_adp_ms;
+    uint8_t  boot_announce_done;    // first poll: send DEPARTING then AVAILABLE
 
     // Per-stream connection state (sized by descriptor counts in avdecc.c)
     avdecc_talker_stream_t   talkers  [AVDECC_MAX_TALKERS];

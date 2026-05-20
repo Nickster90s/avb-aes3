@@ -2168,6 +2168,18 @@ void avdecc_poll(avdecc_state_t *s)
         elapsed = ADP_ADVERTISE_PERIOD_MS;
 
     if (elapsed >= ADP_ADVERTISE_PERIOD_MS) {
+        // On the first ADP send after boot, fire ENTITY_DEPARTING first
+        // to invalidate any cached descriptors a controller (Hive)
+        // might still hold from the previous session. Then immediately
+        // send AVAILABLE — Hive sees DEPARTING, drops its cache, then
+        // sees AVAILABLE and re-enumerates fresh. Without this, after
+        // a reload Hive keeps stale descriptors and the matrix dots
+        // for our streams stay invisible until the user manually
+        // refreshes the entity.
+        if (!s->boot_announce_done) {
+            adp_send(s, ADP_MSG_ENTITY_DEPARTING);
+            s->boot_announce_done = 1;
+        }
         adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
         s->last_adp_ms = now_ms;
     }

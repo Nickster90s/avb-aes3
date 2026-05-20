@@ -404,11 +404,6 @@ static void acmp_handle_connect_tx(avdecc_state_t *s, const uint8_t *pdu)
     t->listener_uid = luid;
     t->connected = 1;
     t->connection_count++;
-    // Immediately re-advertise so Hive sees the state change without
-    // waiting for the next 2s periodic ADP. Without this, the matrix
-    // dot for a freshly-connected stream stays invisible until the
-    // user manually refreshes the entity in Hive.
-    adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
 
     printf("[AVDECC] CONNECT_TX uid=%u <- listener "
            "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -430,7 +425,6 @@ static void acmp_handle_disconnect_tx(avdecc_state_t *s, const uint8_t *pdu)
         t->connected = 0;
         if (t->connection_count > 0) t->connection_count--;
         if (s->on_talker_disconnect) s->on_talker_disconnect(tuid);
-        adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
     }
     printf("[AVDECC] DISCONNECT_TX uid=%u\n", tuid);
     acmp_send_response(s, ACMP_MSG_DISCONNECT_TX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
@@ -541,7 +535,6 @@ static void acmp_handle_connect_tx_response(avdecc_state_t *s, const uint8_t *pd
             l->connected = 1;
             l->connection_count++;
             l->stream_vlan_id = resolved_vlan;
-            adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
 
             if (s->on_listener_connect)
                 s->on_listener_connect(r->listener_uid,
@@ -629,7 +622,6 @@ static void acmp_handle_connect_rx(avdecc_state_t *s, const uint8_t *pdu)
     memcpy(l->dest_mac, dest_mac, 6);
     l->connected = 1;
     l->connection_count++;
-    adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
 
     printf("[AVDECC] CONNECT_RX uid=%u talker=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x[%u] "
            "stream=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x dest=%02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -655,7 +647,6 @@ static void acmp_handle_disconnect_rx(avdecc_state_t *s, const uint8_t *pdu)
         l->connected = 0;
         if (l->connection_count > 0) l->connection_count--;
         if (s->on_listener_disconnect) s->on_listener_disconnect(luid);
-        adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
     }
     printf("[AVDECC] DISCONNECT_RX uid=%u\n", luid);
     acmp_send_response(s, ACMP_MSG_DISCONNECT_RX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
@@ -1964,6 +1955,12 @@ void avdecc_init(avdecc_state_t *s, const uint8_t *mac_addr)
 {
     memset(s, 0, sizeof(*s));
 
+    // 0xFF sentinel — track_clock_lock adopts the first sample as the
+    // baseline without bumping LOCKED/UNLOCKED. Default-0 from memset
+    // would bump on the gPTP→locked transition (acceptable) but also
+    // bump on a SET_CLOCK_SOURCE flip where new source hasn't locked.
+    s->clock_last_locked = 0xFF;
+
     memcpy(s->src_mac, mac_addr, 6);
 
     // Entity ID is an EUI-64 (per IEEE 1722.1 §6.2.1.1). Derive it from
@@ -2101,23 +2098,13 @@ static void track_clock_lock(avdecc_state_t *s)
         if (g_gptp) cur = g_gptp->servo_locked ? 1 : 0;
     }
 
-    // Detect clock-source change: the old source's lock state is no
-    // longer relevant. Re-baseline last_locked to the NEW source's
-    // current state without bumping LOCKED/UNLOCKED — otherwise a
-    // source flip from gPTP-locked → MCR-unlocked logs a phantom
-    // UNLOCKED event and Hive trips Milan 1.3 §5.3.11.2 "Invalid
-    // LOCKED / UNLOCKED counters value" (e.g. 0/1).
-    static uint8_t last_src = 0xFF;
-    if (s->current_clock_source != last_src) {
+    // clock_last_locked sentinel 0xFF means "no baseline yet — adopt
+    // cur as baseline without bumping a counter". SET_CLOCK_SOURCE
+    // writes 0xFF after a source switch so we re-baseline cleanly
+    // and never bump a phantom UNLOCKED for the brief moment the new
+    // source's servo is still establishing lock.
+    if (s->clock_last_locked == 0xFF) {
         s->clock_last_locked = cur;
-        last_src = s->current_clock_source;
-        // Bump LOCKED if the new source starts already locked so the
-        // counter invariant LOCKED >= UNLOCKED holds from the moment
-        // of the swap onward.
-        if (cur) {
-            s->clock_locked_count++;
-            push_unsol_clock_counters(s);
-        }
         return;
     }
 

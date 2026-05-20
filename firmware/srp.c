@@ -720,12 +720,18 @@ void srp_poll(srp_state_t *s)
     if (elapsed_join >= MRP_JOIN_PERIOD_MS) {
         srp_send_declarations(s, leaveall);
 
-        // BISECT: MVRP TX temporarily disabled to isolate avtp=0
-        // regression. Re-enable below when bisect identifies issue.
-        // uint8_t mvrp_evt = (s->mvrp_new_count < 2)
-        //                        ? MRP_EVT_NEW : MRP_EVT_JOINMT;
-        // mvrp_send_join_vid(s, SR_CLASS_A_VID, mvrp_evt);
-        // if (s->mvrp_new_count < 2) s->mvrp_new_count++;
+        // MVRP TX — registers our port on VLAN 2 (Class A) at the
+        // bridge. Without this, the bridge has no record that our
+        // port wants VLAN-2 traffic; it accepts our Listener Ready
+        // but cannot forward Auvitran's stream to us, and reports
+        // back to the talker as TalkerFailed. avb_session works
+        // because Linux's kernel handles MVRP automatically; the
+        // FPGA must do it itself. Pattern: NEW for the first 2
+        // cycles (VN→AN→QA), then JoinMt for refresh.
+        uint8_t mvrp_evt = (s->mvrp_new_count < 2)
+                               ? MRP_EVT_NEW : MRP_EVT_JOINMT;
+        mvrp_send_join_vid(s, SR_CLASS_A_VID, mvrp_evt);
+        if (s->mvrp_new_count < 2) s->mvrp_new_count++;
 
         s->last_join_ms = now_ms;
 

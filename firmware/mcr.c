@@ -179,22 +179,34 @@ void mcr_servo_update(mcr_state_t *m)
     mcr_increment_write(m->current_increment);
 
     // Lock hysteresis (matches pattern from gPTP servo). Enter LOCKED
-    // only after 8 consecutive deltas with |delta| < 100ns; exit only
-    // when a single delta exceeds 500ns. Single-sample ±200ns flapped
-    // ~600 times per patch (Class A jitter routinely brushes it).
-    #define MCR_LOCK_ENTER_NS  100
-    #define MCR_LOCK_EXIT_NS   500
-    #define MCR_LOCK_STREAK    8
+    // after 8 consecutive |delta| < 200ns; exit only after 4 consecutive
+    // |delta| > 2000ns. Earlier "exit on any single spike > 500ns"
+    // flapped ~450/session because Class A bridge jitter routinely
+    // brushes the spec's 800ns recommendation (and TSU FIFO bias on
+    // this board pushes it further). gPTP's lock criterion uses
+    // the same 2µs exit threshold — see [[gptp-lock-needs-hysteresis]].
+    #define MCR_LOCK_ENTER_NS    200
+    #define MCR_LOCK_EXIT_NS    2000
+    #define MCR_LOCK_ENTER_STREAK  8
+    #define MCR_LOCK_EXIT_STREAK   4
     int64_t abs_delta = (delta < 0) ? -delta : delta;
     if (m->servo_locked) {
         if (abs_delta > MCR_LOCK_EXIT_NS) {
-            m->servo_locked = 0;
-            m->lock_streak  = 0;
+            if (m->lock_streak < MCR_LOCK_EXIT_STREAK) m->lock_streak++;
+            if (m->lock_streak >= MCR_LOCK_EXIT_STREAK) {
+                m->servo_locked = 0;
+                m->lock_streak  = 0;
+            }
+        } else {
+            m->lock_streak = 0;     // reset exit streak on good sample
         }
     } else {
         if (abs_delta < MCR_LOCK_ENTER_NS) {
-            if (m->lock_streak < MCR_LOCK_STREAK) m->lock_streak++;
-            if (m->lock_streak >= MCR_LOCK_STREAK) m->servo_locked = 1;
+            if (m->lock_streak < MCR_LOCK_ENTER_STREAK) m->lock_streak++;
+            if (m->lock_streak >= MCR_LOCK_ENTER_STREAK) {
+                m->servo_locked = 1;
+                m->lock_streak  = 0;
+            }
         } else {
             m->lock_streak = 0;
         }

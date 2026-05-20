@@ -260,10 +260,21 @@ void aaf_tx_poll(aaf_state_t *a)
     if (!a->tx_enabled) return;
 
     // Pace packets to one per AAF_SAMPLES_PER_PACKET MCR ticks (8000 Hz).
+    // DRAIN any backlog in this call — the main loop runs at ~50Hz under
+    // load (heavy MSRP/AECP traffic + printf), so a single-packet-per-poll
+    // emits at main-loop rate (50 fps) instead of 8000 fps. Listeners
+    // (Auvitran) see a starved stream and restart probing. Cap the
+    // drain to keep the CPU available for RX dispatch.
     uint32_t now_cnt = mcr_sample_count_read();
     uint32_t elapsed = now_cnt - a->tx_last_sample_count;
     if (elapsed < AAF_SAMPLES_PER_PACKET) return;
-    a->tx_last_sample_count += AAF_SAMPLES_PER_PACKET;
+    int drain_cap = 16;
+    while (elapsed >= AAF_SAMPLES_PER_PACKET && drain_cap-- > 0) {
+        a->tx_last_sample_count += AAF_SAMPLES_PER_PACKET;
+        aaf_send_packet(a);
+        elapsed -= AAF_SAMPLES_PER_PACKET;
+    }
+    return;
 
     aaf_send_packet(a);
 }

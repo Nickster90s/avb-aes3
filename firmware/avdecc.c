@@ -335,18 +335,46 @@ static void acmp_send_response(avdecc_state_t *s, uint8_t msg_type, uint8_t stat
             avdecc_talker_stream_t *t = &s->talkers[tuid];
             memcpy(p + ACMP_OFF_STREAM_ID, t->stream_id, 8);
             memcpy(p + ACMP_OFF_STREAM_DEST_MAC, t->dest_mac, 6);
-            av_put_be16(p + ACMP_OFF_CONN_COUNT, t->connection_count);
+            // Milan 1.3 §5.5.4.3: the talker MUST advertise
+            // connection_count = 0 in GET_TX_STATE_RESPONSE (the spec
+            // wants this field reserved for the listener-side count).
+            // Hive logs a Milan compliance error if we report nonzero.
+            uint16_t cc = (msg_type == ACMP_MSG_GET_TX_STATE_RESPONSE)
+                            ? 0 : t->connection_count;
+            av_put_be16(p + ACMP_OFF_CONN_COUNT, cc);
         }
     }
 
-    // Fill in connection info for listener responses (by listener_unique_id)
+    // Fill in connection info for listener responses (by listener_unique_id).
+    // Previously we only wrote connection_count — for GET_RX_STATE_RESPONSE
+    // that left talker_eid/stream_id/dest_mac/vlan_id all zero, so Hive read
+    // the response as "no connection" and showed the input as "running" even
+    // when a CONNECT_RX had succeeded. Per IEEE 1722.1-2013 §8.2.2.6, the
+    // response must echo the connection state: talker IDs, stream ID, dest
+    // MAC, VLAN, flags (FAST_CONNECT/SAVED_STATE/CONNECTED/STREAMING).
     if (msg_type == ACMP_MSG_CONNECT_RX_RESPONSE ||
         msg_type == ACMP_MSG_GET_RX_STATE_RESPONSE ||
         msg_type == ACMP_MSG_DISCONNECT_RX_RESPONSE) {
         uint16_t luid = av_get_be16(p + ACMP_OFF_LISTENER_UID);
         if (luid < AVDECC_MAX_LISTENERS) {
-            av_put_be16(p + ACMP_OFF_CONN_COUNT,
-                        s->listeners[luid].connection_count);
+            const avdecc_listener_stream_t *l = &s->listeners[luid];
+            av_put_be16(p + ACMP_OFF_CONN_COUNT, l->connection_count);
+            if (l->connected) {
+                memcpy(p + ACMP_OFF_TALKER_ID,       l->talker_id, 8);
+                av_put_be16(p + ACMP_OFF_TALKER_UID, l->talker_uid);
+                memcpy(p + ACMP_OFF_STREAM_ID,       l->stream_id, 8);
+                memcpy(p + ACMP_OFF_STREAM_DEST_MAC, l->dest_mac, 6);
+                uint16_t vid = (l->stream_vlan_id != 0)
+                                 ? l->stream_vlan_id : 2;
+                av_put_be16(p + ACMP_OFF_VLAN_ID, vid);
+                // ACMP has no explicit "connected" bit — a non-zero
+                // talker_eid in the response IS the indication. We set
+                // FAST_CONNECT + SAVED_STATE so a controller restart
+                // (Hive) re-reads our persisted binding as fast-connect.
+                av_put_be16(p + ACMP_OFF_FLAGS,
+                            (uint16_t)(ACMP_FLAG_FAST_CONNECT |
+                                       ACMP_FLAG_SAVED_STATE));
+            }
         }
     }
 
@@ -576,7 +604,17 @@ static void acmp_handle_connect_rx(avdecc_state_t *s, const uint8_t *pdu)
         return;
     }
 
-    // Path A — fast connect
+    // Path A — fast connect.
+    // Reject the bind if talker_id is all-zero: Hive logs
+    // "Listener StreamState notification advertises being connected
+    //  but with no Talker Identification" otherwise. A zero talker_id
+    // here means the controller didn't fill it AND we couldn't resolve
+    // (talker_known check above already routed real cases to slow-path).
+    if (!talker_known) {
+        acmp_send_response(s, ACMP_MSG_CONNECT_RX_RESPONSE,
+                           ACMP_STATUS_TALKER_UNKNOWN_ID, pdu);
+        return;
+    }
     avdecc_listener_stream_t *l = &s->listeners[luid];
     memcpy(l->talker_id, talker_id, 8);
     l->talker_uid = tuid;
@@ -1606,8 +1644,11 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
                 int has_talker = 0;
                 for (int i = 0; i < 8; i++)
                     if (l->talker_id[i]) { has_talker = 1; break; }
-                if (has_talker)
-                    info_flags |= STREAM_INFO_FLAG_CONNECTED;
+                if (has_talker) {
+                    info_flags |= STREAM_INFO_FLAG_CONNECTED
+                                | STREAM_INFO_FLAG_FAST_CONNECT
+                                | STREAM_INFO_FLAG_SAVED_STATE;
+                }
             }
         } else {
             // Unknown descriptor — respond NO_SUCH_DESCRIPTOR with bare echo (56-byte Milan layout)
@@ -1703,6 +1744,79 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         s->aecp_tx_count++;
         printf("[AVDECC] SET_CLOCK_SOURCE -> %u (status=%u)\n",
                s->current_clock_source, st);
+        break;
+    }
+
+    case AEM_CMD_GET_NAME: {
+        // IEEE 1722.1-2013 §7.4.18. COMMAND payload (8 B): dt, di, ni, ci.
+        // RESPONSE payload (72 B): dt, di, ni, ci + name (64 B utf-8 nul-pad).
+        //
+        // We don't expose multiple name slots — name_index 0 returns the
+        // descriptor's primary object_name; any other ni returns empty +
+        // SUCCESS rather than NO_SUCH_DESCRIPTOR so Hive's enumeration
+        // doesn't downgrade Milan compliance.
+        if (pdu_len < 32) return;
+        uint16_t dt = av_get_be16(pdu + 24);
+        uint16_t di = av_get_be16(pdu + 26);
+        uint16_t ni = av_get_be16(pdu + 28);
+        uint16_t ci = av_get_be16(pdu + 30);
+
+        const char *name = "";
+        uint8_t st = AECP_STATUS_SUCCESS;
+        switch (dt) {
+            case AEM_DESC_ENTITY:
+                if (di == 0 && ni == 0)      name = "AVB-AES3 Endpoint";
+                else if (di == 0 && ni == 1) name = "";   // group_name
+                else                          st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+                break;
+            case AEM_DESC_CONFIGURATION:
+                if (di == 0 && ni == 0) name = "Default";
+                else                    st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+                break;
+            case AEM_DESC_AUDIO_UNIT:
+                if (di == 0 && ni == 0) name = "Audio Unit";
+                else                    st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+                break;
+            case AEM_DESC_STREAM_INPUT:
+                if (di < N_STREAM_INPUTS && ni == 0) {
+                    name = (di == 0) ? "Media Clock Input" : "Audio Input";
+                } else st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+                break;
+            case AEM_DESC_STREAM_OUTPUT:
+                if (di < N_STREAM_OUTPUTS && ni == 0) name = "Audio Output";
+                else                                  st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+                break;
+            case AEM_DESC_AVB_INTERFACE:
+                if (di == 0 && ni == 0) name = "Ethernet";
+                else                    st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+                break;
+            case AEM_DESC_CLOCK_SOURCE:
+                if (di < N_CLOCK_SOURCES && ni == 0)
+                    name = (di == 0) ? "Internal" : "Media Clock";
+                else
+                    st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+                break;
+            case AEM_DESC_CLOCK_DOMAIN:
+                if (di == 0 && ni == 0) name = "Clock Domain";
+                else                    st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+                break;
+            default:
+                st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+                break;
+        }
+        (void)ci;   // configuration_index — only one config, value ignored
+
+        uint8_t *tf = avdecc_tx_buf();
+        uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+        av_put_be16(tp + 24, dt);
+        av_put_be16(tp + 26, di);
+        av_put_be16(tp + 28, ni);
+        av_put_be16(tp + 30, ci);
+        write_name64(tp + 32, name);
+        // CDL = AECPDU - 12 = (4 + 8 + 8 + 2 + 2 + 72) - 12 = 84
+        aecp_set_status_cdl(tp, st, 84);
+        avdecc_eth_send(110);                 // 14 + 96 = 110 bytes
+        s->aecp_tx_count++;
         break;
     }
 

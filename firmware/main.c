@@ -622,7 +622,13 @@ int main(void)
         // stream_id = MAC + 0x00 0x01 (matches avtp_set_stream_id default).
         uint8_t aaf_stream_id[8] = {0,0,0,0,0,0, 0x00, 0x01};
         memcpy(aaf_stream_id, mac_addr, 6);
-        static const uint8_t aaf_mcast[] = {0x91, 0xE0, 0xF0, 0x00, 0xFE, 0x00};
+        // Derive dest_mac from MAC bytes 4..5 so we don't collide with another
+        // AVB talker on the same network. A hardcoded 91:E0:F0:00:FE:00 makes
+        // every FPGA build advertise the same address — bridges respond with
+        // MSRP Failure 0x05 (Stream Destination Address In Use) the moment a
+        // second talker shows up. The 91:E0:F0:00:FE:xx slice is the Milan
+        // locally-administered range (IEEE 1722-2016 Annex B.1).
+        uint8_t aaf_mcast[6] = {0x91, 0xE0, 0xF0, 0x00, 0xFE, mac_addr[5]};
         aaf_init(&aaf, mac_addr, aaf_stream_id, aaf_mcast);
     }
 

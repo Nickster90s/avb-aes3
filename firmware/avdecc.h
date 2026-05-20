@@ -149,6 +149,7 @@
 #define AEM_CMD_SET_STREAM_FORMAT               0x0008
 #define AEM_CMD_GET_STREAM_FORMAT               0x0009
 #define AEM_CMD_GET_STREAM_INFO                 0x000F
+#define AEM_CMD_GET_NAME                        0x0019
 #define AEM_CMD_SET_CLOCK_SOURCE                0x0016
 #define AEM_CMD_GET_CLOCK_SOURCE                0x0017
 #define AEM_CMD_REGISTER_UNSOLICITED            0x0024
@@ -173,6 +174,13 @@
 #define STREAM_INFO_FLAG_CONNECTED                 0x02000000UL
 #define STREAM_INFO_FLAG_STREAMING_WAIT            0x00008000UL
 #define STREAM_INFO_FLAG_CLASS_B                   0x00004000UL
+// Per IEEE 1722.1-2013 §7.4.16.4 low byte — set by listeners on a
+// CONNECT_RX so a controller restart can re-bind via FAST_CONNECT.
+// Without these flags Hive treats the connection as "current session
+// only" and shows the input as "running" after a Hive reload.
+#define STREAM_INFO_FLAG_SRP_REGISTRATION_FAILED   0x00000040UL
+#define STREAM_INFO_FLAG_SAVED_STATE               0x00000004UL
+#define STREAM_INFO_FLAG_FAST_CONNECT              0x00000002UL
 
 // AEM descriptor types (IEEE 1722.1-2013 Table 7.1, cross-checked with
 // jdksavdecc-c/include/jdksavdecc_aem_descriptor.h)
@@ -359,8 +367,8 @@ void avdecc_set_mcr(const mcr_state_t *m);
 // Plumb SRP so GET_AVB_INFO can emit a matching msrp_mapping. Without
 // this the listener sees Mappings_count=0, falls back to its own defaults,
 // and may report failure 0x13 if they disagree with our actual MSRP TX.
-struct srp_state;
-void avdecc_set_srp(const struct srp_state *s);
+#include "srp.h"
+void avdecc_set_srp(const srp_state_t *s);
 
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).

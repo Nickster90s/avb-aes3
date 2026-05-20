@@ -293,12 +293,17 @@ static uint8_t *msrp_emit_listener(uint8_t *p, const uint8_t *stream_id,
     // FourPackedEvents: listener substate
     *p++ = MRP_4PACK(substate, 0, 0, 0);
 
-    uint16_t list_len = (uint16_t)(p - vec_start);
-    srp_put_be16(list_len_ptr, list_len);
-
-    // EndMark
+    // EndMark INSIDE AttributeList. AttributeListLength MUST include this
+    // EndMark — see [[msrp-attrlistlen-includes-endmark]]. Without it the
+    // bridge reads our list as 2 bytes short, mistakes the inner EndMark
+    // for the PDU EndMark, and never registers our Listener — Auvitran
+    // stays in probing "Registering" and CRF never streams to us.
+    // Domain + TalkerAdv emitters already do this; Listener was the bug.
     srp_put_be16(p, 0);
     p += 2;
+
+    uint16_t list_len = (uint16_t)(p - vec_start);
+    srp_put_be16(list_len_ptr, list_len);
 
     return p;
 }

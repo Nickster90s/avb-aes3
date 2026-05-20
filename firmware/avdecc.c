@@ -1485,7 +1485,14 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
             }
             break;
         case AEM_DESC_STREAM_INPUT:
-            if (di < N_STREAM_INPUTS) valid = 0x00000FFF;
+            if (di < N_STREAM_INPUTS && di < AVDECC_MAX_LISTENERS) {
+                valid = 0x00000FFF;
+                counters[0] = s->stream_media_locked  [di];
+                counters[1] = s->stream_media_unlocked[di];
+                // 2..10 left zero (no STREAM_INTERRUPTED / SEQ_NUM_MISMATCH
+                // / TIMESTAMP_* tracking yet)
+                counters[11] = s->stream_frames_rx    [di];
+            }
             break;
         case AEM_DESC_STREAM_OUTPUT:
             if (di < N_STREAM_OUTPUTS) valid = 0x0000001F;
@@ -1995,11 +2002,12 @@ void avdecc_depart(avdecc_state_t *s)
 // Poll — periodic ADP advertisement
 // ---------------------------------------------------------------------------
 
-// Send an unsolicited GET_COUNTERS_RESPONSE for CLOCK_DOMAIN 0 to every
-// registered controller. U flag (bit 15 of cmd_type) tells Hive this is
-// a push, not a reply to a command — sequence_id comes from our own
-// monotonic counter, not from a request.
-static void push_unsol_clock_counters(avdecc_state_t *s)
+// Send an unsolicited GET_COUNTERS_RESPONSE for (dt, di) to every
+// registered controller. U flag (bit 15 of cmd_type) tells Hive this
+// is a push — sequence_id comes from our own monotonic counter.
+// Caller supplies the valid-bitmap and the up-to-32 counter values.
+static void push_unsol_counters(avdecc_state_t *s, uint16_t dt, uint16_t di,
+                                 uint32_t valid, const uint32_t *counters)
 {
     for (int i = 0; i < AVDECC_MAX_UNSOL_CTRL; i++) {
         if (!s->unsol_ctrl[i].active) continue;
@@ -2015,20 +2023,52 @@ static void push_unsol_clock_counters(avdecc_state_t *s)
         memcpy(p + AECP_OFF_TARGET_ID,     s->entity_id, 8);
         memcpy(p + AECP_OFF_CONTROLLER_ID, s->unsol_ctrl[i].controller_eid, 8);
         av_put_be16(p + AECP_OFF_SEQ_ID,   s->unsol_seq_id++);
-        // U flag set: high bit of command_type (IEEE 1722.1-2013 §9.2.1.1.5)
         av_put_be16(p + AECP_OFF_CMD_TYPE, 0x8000 | AEM_CMD_GET_COUNTERS);
 
-        av_put_be16(p + 24, AEM_DESC_CLOCK_DOMAIN);
-        av_put_be16(p + 26, 0);
-        av_put_be32(p + 28, 0x00000003);          // LOCKED + UNLOCKED valid
-        memset      (p + 32, 0, 128);
-        av_put_be32(p + 32, s->clock_locked_count);
-        av_put_be32(p + 36, s->clock_unlocked_count);
+        av_put_be16(p + 24, dt);
+        av_put_be16(p + 26, di);
+        av_put_be32(p + 28, valid);
+        for (int j = 0; j < 32; j++)
+            av_put_be32(p + 32 + j * 4, counters[j]);
         aecp_set_status_cdl(p, AECP_STATUS_SUCCESS, 148);
 
         avdecc_eth_send(14 + 24 + 136);
         s->aecp_tx_count++;
     }
+}
+
+static void push_unsol_clock_counters(avdecc_state_t *s)
+{
+    uint32_t c[32] = {0};
+    c[0] = s->clock_locked_count;
+    c[1] = s->clock_unlocked_count;
+    push_unsol_counters(s, AEM_DESC_CLOCK_DOMAIN, 0, 0x00000003, c);
+}
+
+static void push_unsol_stream_counters(avdecc_state_t *s, uint16_t uid)
+{
+    if (uid >= AVDECC_MAX_LISTENERS) return;
+    uint32_t c[32] = {0};
+    c[0]  = s->stream_media_locked  [uid];
+    c[1]  = s->stream_media_unlocked[uid];
+    c[11] = s->stream_frames_rx     [uid];
+    push_unsol_counters(s, AEM_DESC_STREAM_INPUT, uid, 0x00000FFF, c);
+}
+
+void avdecc_listener_lock_changed(avdecc_state_t *s, uint16_t uid, uint8_t locked)
+{
+    if (uid >= AVDECC_MAX_LISTENERS) return;
+    if (locked == s->stream_last_locked[uid]) return;
+    if (locked) s->stream_media_locked  [uid]++;
+    else        s->stream_media_unlocked[uid]++;
+    s->stream_last_locked[uid] = locked;
+    push_unsol_stream_counters(s, uid);
+}
+
+void avdecc_listener_frame_rx(avdecc_state_t *s, uint16_t uid)
+{
+    if (uid >= AVDECC_MAX_LISTENERS) return;
+    s->stream_frames_rx[uid]++;
 }
 
 // Track lock transitions for CLOCK_DOMAIN counters. Source depends on

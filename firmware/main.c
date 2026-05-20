@@ -660,6 +660,27 @@ int main(void)
         avtp_poll(&avtp);
         aes3_poll(&aes3, &tx_audio_ring, &rx_audio_ring);
         srp_poll(&srp);
+
+        // Track per-stream MEDIA_LOCKED for Hive's listener indicators.
+        // CRF (uid 0) follows the MCR servo; AAF (uid 1) follows
+        // aaf.rx_count crossing zero. Both call into avdecc, which
+        // pushes unsolicited GET_COUNTERS_RESPONSE on transitions.
+        {
+            static uint8_t prev_aaf_locked = 0;
+            uint8_t aaf_now = (aaf.bound && aaf.rx_count > 0) ? 1 : 0;
+            if (aaf_now != prev_aaf_locked) {
+                avdecc_listener_lock_changed(&avdecc, LISTENER_UID_AAF, aaf_now);
+                prev_aaf_locked = aaf_now;
+            }
+            avdecc_listener_lock_changed(&avdecc, LISTENER_UID_CRF,
+                                          mcr.servo_locked ? 1 : 0);
+
+            // FRAMES_RX is a polled counter — mirror the underlying
+            // counter (no per-frame hook needed).
+            avdecc.stream_frames_rx[LISTENER_UID_CRF] = mcr.rx_count;
+            avdecc.stream_frames_rx[LISTENER_UID_AAF] = aaf.rx_count;
+        }
+
         // Sync AAF VLAN-PCP/VID with bridge-advertised SR domain on every
         // change (no-op once converged). If we keep emitting PCP=3/VID=2
         // while the bridge maps Class A to a different priority, listeners

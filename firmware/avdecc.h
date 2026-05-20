@@ -170,8 +170,12 @@
 #define STREAM_INFO_FLAG_MSRP_ACC_LATENCY_VALID    0x20000000UL
 #define STREAM_INFO_FLAG_STREAM_DEST_MAC_VALID     0x10000000UL
 #define STREAM_INFO_FLAG_MSRP_FAILURE_VALID        0x08000000UL
-#define STREAM_INFO_FLAG_STREAM_VLAN_ID_VALID      0x04000000UL
-#define STREAM_INFO_FLAG_CONNECTED                 0x02000000UL
+// Per la_avdecc protocolAemEnums.hpp StreamInfoFlags — values were
+// previously swapped, making our talker advertise CONNECTED with
+// VLAN_ID bit clear. Hive then showed "Stream Vlan ID No Value" even
+// though we always emit the VLAN tag on the wire (PCP=3 VID=2).
+#define STREAM_INFO_FLAG_STREAM_VLAN_ID_VALID      0x02000000UL
+#define STREAM_INFO_FLAG_CONNECTED                 0x04000000UL
 #define STREAM_INFO_FLAG_STREAMING_WAIT            0x00008000UL
 #define STREAM_INFO_FLAG_CLASS_B                   0x00004000UL
 // Per IEEE 1722.1-2013 §7.4.16.4 low byte — set by listeners on a
@@ -335,6 +339,15 @@ typedef struct {
     uint32_t clock_unlocked_count;
     uint8_t  clock_last_locked;     // last sampled gptp.servo_locked
 
+    // STREAM_INPUT counters (Milan §5.3.12). Per-listener MEDIA_LOCKED /
+    // MEDIA_UNLOCKED transitions + FRAMES_RX. Hive reads these to flip
+    // the listener indicator green and report "Media Locked N" — stays
+    // 0 if we never increment, even when AVTP is actually streaming.
+    uint32_t stream_media_locked  [AVDECC_MAX_LISTENERS];
+    uint32_t stream_media_unlocked[AVDECC_MAX_LISTENERS];
+    uint32_t stream_frames_rx     [AVDECC_MAX_LISTENERS];
+    uint8_t  stream_last_locked   [AVDECC_MAX_LISTENERS];
+
     // ACMP slow-path resolve state. One per listener UID.
     avdecc_resolve_t resolves[AVDECC_MAX_LISTENERS];
     uint16_t next_acmp_seq;         // free-running counter for our outgoing ACMP commands
@@ -383,6 +396,16 @@ void avdecc_set_mcr(const mcr_state_t *m);
 // and may report failure 0x13 if they disagree with our actual MSRP TX.
 #include "srp.h"
 void avdecc_set_srp(const srp_state_t *s);
+
+// Tracker called by the listener data path: notify when a stream input's
+// media-lock state changes (CRF: MCR servo_locked transition; AAF: first
+// frame after rebind). On transition we bump MEDIA_LOCKED/UNLOCKED and
+// push an unsolicited GET_COUNTERS_RESPONSE so Hive flips green without
+// manual refresh — the missing piece for Milan probing → Completed.
+void avdecc_listener_lock_changed(avdecc_state_t *s, uint16_t uid, uint8_t locked);
+// Notify on every received AVTP frame for FRAMES_RX bookkeeping. Cheap
+// — increments only; no unsolicited push (Hive polls counter values).
+void avdecc_listener_frame_rx   (avdecc_state_t *s, uint16_t uid);
 
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).

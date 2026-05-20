@@ -369,6 +369,15 @@ static void check_uart_cmd(void)
                    (unsigned long)mcr.current_increment,
                    (unsigned long)mcr_sample_count_read(),
                    (unsigned long)mcr_phase_read());
+            printf("  delta stats (n=%lu): max|d|=%ld ns avg|d|=%ld ns streak=%u\n",
+                   (unsigned long)mcr.delta_window_count,
+                   (long)mcr.delta_max_abs,
+                   (long)(mcr.delta_window_count ? mcr.delta_sum_abs / mcr.delta_window_count : 0),
+                   mcr.lock_streak);
+            // Reset window after print so next sample starts fresh
+            mcr.delta_max_abs     = 0;
+            mcr.delta_sum_abs     = 0;
+            mcr.delta_window_count = 0;
             break;
         case 'a':
             printf("\n[AAF] bound=%d rx_en=%d tx_en=%d\n"

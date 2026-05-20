@@ -178,18 +178,25 @@ void mcr_servo_update(mcr_state_t *m)
     // Write to NCO CSR
     mcr_increment_write(m->current_increment);
 
-    // Lock hysteresis (matches pattern from gPTP servo). Enter LOCKED
-    // after 8 consecutive |delta| < 200ns; exit only after 4 consecutive
-    // |delta| > 2000ns. Earlier "exit on any single spike > 500ns"
-    // flapped ~450/session because Class A bridge jitter routinely
-    // brushes the spec's 800ns recommendation (and TSU FIFO bias on
-    // this board pushes it further). gPTP's lock criterion uses
-    // the same 2µs exit threshold — see [[gptp-lock-needs-hysteresis]].
-    #define MCR_LOCK_ENTER_NS    200
-    #define MCR_LOCK_EXIT_NS    2000
+    // Lock hysteresis. Enter LOCKED after 8 consecutive |delta| < 2us;
+    // exit only after 4 consecutive |delta| > 10us. Class A bridge
+    // jitter through a loaded switch (with our own AAF TX flooding it)
+    // can hit 1-5us regularly. Tighter thresholds (200ns enter, 2us
+    // exit) had MCR never enter LOCKED at all in practice because the
+    // 8-streak <200ns condition was never met. The PI servo is
+    // tracking frequency, not phase — so a wide entrance threshold is
+    // fine; the audio clock is still being recovered correctly even
+    // when individual deltas are noisy.
+    #define MCR_LOCK_ENTER_NS    2000
+    #define MCR_LOCK_EXIT_NS    10000
     #define MCR_LOCK_ENTER_STREAK  8
     #define MCR_LOCK_EXIT_STREAK   4
     int64_t abs_delta = (delta < 0) ? -delta : delta;
+
+    // Roll a 500-sample (1s at 500fps) stats window for diagnostics.
+    if (abs_delta > m->delta_max_abs) m->delta_max_abs = abs_delta;
+    m->delta_sum_abs += abs_delta;
+    m->delta_window_count++;
     if (m->servo_locked) {
         if (abs_delta > MCR_LOCK_EXIT_NS) {
             if (m->lock_streak < MCR_LOCK_EXIT_STREAK) m->lock_streak++;

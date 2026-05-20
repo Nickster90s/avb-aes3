@@ -67,6 +67,13 @@ typedef struct {
     // packet-to-packet jitter routinely hits ±200ns even when locked.
     uint8_t  lock_streak;
     uint32_t servo_step_count;
+    // Diagnostic — rolling stats of |delta| over the last
+    // MCR_DELTA_STAT_WINDOW samples, so we can see whether the
+    // hysteresis thresholds are realistic for the network jitter
+    // we're actually seeing.
+    int64_t  delta_max_abs;       // max |delta| in current window
+    int64_t  delta_sum_abs;       // sum of |delta| in current window
+    uint32_t delta_window_count;  // samples in current window
 
     // Counters (debug)
     uint32_t rx_count;          // CRF packets matching our stream_id

@@ -1568,6 +1568,11 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         if (cmd_type == AEM_CMD_REGISTER_UNSOLICITED) {
             int use = (slot >= 0) ? slot : free_slot;
             if (use >= 0) {
+                // Reset sequence_id when a NEW controller registers
+                // (not when an existing one re-registers — Hive expects
+                // continuity across the original session).
+                if (use == free_slot)
+                    s->unsol_ctrl[use].unsol_seq_id = 0;
                 s->unsol_ctrl[use].active = 1;
                 memcpy(s->unsol_ctrl[use].controller_eid, ctrl_eid, 8);
                 memcpy(s->unsol_ctrl[use].mac, ctrl_mac, 6);
@@ -2022,7 +2027,7 @@ static void push_unsol_counters(avdecc_state_t *s, uint16_t dt, uint16_t di,
         p[1] = AECP_MSG_AEM_RESPONSE;
         memcpy(p + AECP_OFF_TARGET_ID,     s->entity_id, 8);
         memcpy(p + AECP_OFF_CONTROLLER_ID, s->unsol_ctrl[i].controller_eid, 8);
-        av_put_be16(p + AECP_OFF_SEQ_ID,   s->unsol_seq_id++);
+        av_put_be16(p + AECP_OFF_SEQ_ID,   s->unsol_ctrl[i].unsol_seq_id++);
         av_put_be16(p + AECP_OFF_CMD_TYPE, 0x8000 | AEM_CMD_GET_COUNTERS);
 
         av_put_be16(p + 24, dt);

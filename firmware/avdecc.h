@@ -363,8 +363,13 @@ typedef struct {
         uint8_t  active;
         uint8_t  controller_eid[8];
         uint8_t  mac[6];
+        // Per-controller monotonic sequence_id. IEEE 1722.1-2013
+        // §7.4.37: each registered controller's unsolicited stream
+        // must be contiguous. A single global counter shared across
+        // controllers makes Hive log "Unsolicited notification lost
+        // detected" because it sees gaps from pushes to other ctrls.
+        uint16_t unsol_seq_id;
     } unsol_ctrl[AVDECC_MAX_UNSOL_CTRL];
-    uint16_t unsol_seq_id;          // monotonic seq for unsolicited pushes
 } avdecc_state_t;
 
 // ---------------------------------------------------------------------------

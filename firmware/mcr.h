@@ -52,6 +52,12 @@ typedef struct {
     uint32_t base_increment;    // Nominal NCO inc; set at init from sys_clk_freq + fs
     uint32_t current_increment; // Last value written to NCO CSR
     uint8_t  servo_locked;
+    // Hysteresis state — enter LOCKED only after MCR_LOCK_STREAK
+    // consecutive deltas below MCR_LOCK_ENTER_NS; exit only when a
+    // delta exceeds MCR_LOCK_EXIT_NS. Single-sample threshold caused
+    // 596 lock/unlock transitions per patch session because Class A
+    // packet-to-packet jitter routinely hits ±200ns even when locked.
+    uint8_t  lock_streak;
     uint32_t servo_step_count;
 
     // Counters (debug)

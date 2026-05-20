@@ -178,6 +178,26 @@ void mcr_servo_update(mcr_state_t *m)
     // Write to NCO CSR
     mcr_increment_write(m->current_increment);
 
-    m->servo_locked = (delta > -200 && delta < 200) ? 1 : 0;
+    // Lock hysteresis (matches pattern from gPTP servo). Enter LOCKED
+    // only after 8 consecutive deltas with |delta| < 100ns; exit only
+    // when a single delta exceeds 500ns. Single-sample ±200ns flapped
+    // ~600 times per patch (Class A jitter routinely brushes it).
+    #define MCR_LOCK_ENTER_NS  100
+    #define MCR_LOCK_EXIT_NS   500
+    #define MCR_LOCK_STREAK    8
+    int64_t abs_delta = (delta < 0) ? -delta : delta;
+    if (m->servo_locked) {
+        if (abs_delta > MCR_LOCK_EXIT_NS) {
+            m->servo_locked = 0;
+            m->lock_streak  = 0;
+        }
+    } else {
+        if (abs_delta < MCR_LOCK_ENTER_NS) {
+            if (m->lock_streak < MCR_LOCK_STREAK) m->lock_streak++;
+            if (m->lock_streak >= MCR_LOCK_STREAK) m->servo_locked = 1;
+        } else {
+            m->lock_streak = 0;
+        }
+    }
     m->servo_step_count++;
 }

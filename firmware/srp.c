@@ -327,8 +327,12 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
     uint16_t dom_vid   = s->domain_received ? s->rx_sr_vid   : SR_CLASS_A_VID;
 
     // Domain — emit MRPDU_NEW(0) for the first 2 cycles (VN→AN→QA);
-    // refresh-only events never initialise the bridge's registrar.
-    uint8_t dom_event = (s->domain_new_count < 2) ? MRP_EVT_NEW : MRP_EVT_JOINMT;
+    // then JoinIn(1) for steady state. mrpd encodes the QA-state
+    // action as JoinIn (registrar==IN); using JoinMt(3) instead tells
+    // bridges "registrar is empty" and they keep the reservation in
+    // half-allocated state, replying upstream with MSRP TalkerFailed.
+    // See [[msrp-joinmt-vs-joinin]].
+    uint8_t dom_event = (s->domain_new_count < 2) ? MRP_EVT_NEW : MRP_EVT_JOININ;
     p = msrp_emit_domain(p, dom_class, dom_prio, dom_vid, leaveall, dom_event);
     if (s->domain_new_count < 2)
         s->domain_new_count++;
@@ -343,7 +347,7 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
         s->talker.vlan_id = dom_vid;
 
         uint8_t tk_event = (s->talker_new_count < 2)
-                               ? MRP_EVT_NEW : MRP_EVT_JOINMT;
+                               ? MRP_EVT_NEW : MRP_EVT_JOININ;
         p = msrp_emit_talker_adv(p, &s->talker, leaveall, tk_event);
         if (s->talker_new_count < 2)
             s->talker_new_count++;
@@ -356,7 +360,7 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
     if (s->listener_enabled) {
         uint8_t event = (s->listener_new_count < 2)
                             ? MRP_EVT_NEW
-                            : MRP_EVT_JOINMT;
+                            : MRP_EVT_JOININ;
         p = msrp_emit_listener(p, s->listener_stream_id,
                                s->listener_substate, leaveall, event);
         if (s->listener_new_count < 2)
@@ -444,8 +448,44 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                 s->rx_sr_prio  = vp[1];
                 s->rx_sr_vid   = srp_get_be16(vp + 2);
             }
-            if (attr_type == MSRP_ATTR_TALKER_FAIL)
+            if (attr_type == MSRP_ATTR_TALKER_FAIL) {
                 s->rx_talker_failed_count++;
+                // TalkerFailed FirstValue is 34 bytes:
+                //   +0..24  same as TalkerAdv (StreamID, DestAddr,
+                //           VID, MaxFrameSize, MaxIntervalFrames,
+                //           PriorityAndRank, AccumulatedLatency)
+                //  +25..32  failure_bridge_id (8)
+                //  +33      failure_code (1) — see IEEE 802.1Q-2018
+                //           Table 35-6
+                // Rate-limit print to once per unique (stream_id,code)
+                // observed since boot so we don't flood UART when the
+                // bridge keeps re-asserting the same failure.
+                if (attr_len >= 34) {
+                    static uint8_t  last_sid[8];
+                    static uint8_t  last_code;
+                    static uint8_t  printed_once;
+                    const uint8_t *sid  = vp;
+                    uint8_t code        = vp[33];
+                    int same = printed_once && code == last_code;
+                    if (same) {
+                        for (int j = 0; j < 8; j++)
+                            if (sid[j] != last_sid[j]) { same = 0; break; }
+                    }
+                    if (!same) {
+                        printf("[SRP-RX] TalkerFailed sid=%02x:%02x:%02x:%02x:"
+                               "%02x:%02x:%02x:%02x bridge=%02x:%02x:%02x:%02x:"
+                               "%02x:%02x:%02x:%02x code=0x%02x\n",
+                               sid[0], sid[1], sid[2], sid[3],
+                               sid[4], sid[5], sid[6], sid[7],
+                               vp[25], vp[26], vp[27], vp[28],
+                               vp[29], vp[30], vp[31], vp[32],
+                               (unsigned)code);
+                        memcpy(last_sid, sid, 8);
+                        last_code   = code;
+                        printed_once = 1;
+                    }
+                }
+            }
             if (attr_type == MSRP_ATTR_LISTENER)
                 s->rx_listener_count++;
 
@@ -729,7 +769,7 @@ void srp_poll(srp_state_t *s)
         // FPGA must do it itself. Pattern: NEW for the first 2
         // cycles (VN→AN→QA), then JoinMt for refresh.
         uint8_t mvrp_evt = (s->mvrp_new_count < 2)
-                               ? MRP_EVT_NEW : MRP_EVT_JOINMT;
+                               ? MRP_EVT_NEW : MRP_EVT_JOININ;
         mvrp_send_join_vid(s, SR_CLASS_A_VID, mvrp_evt);
         if (s->mvrp_new_count < 2) s->mvrp_new_count++;
 

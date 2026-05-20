@@ -99,8 +99,21 @@ static void dispatch_rx(void)
            && (drain_budget-- > 0)) {
 
     uint32_t slot = ethmac_sram_writer_slot_read();
-    uint8_t *frame = (uint8_t *)(ETHMAC_BASE + ETHMAC_SLOT_SIZE * slot);
+    uint8_t *slot_ptr = (uint8_t *)(ETHMAC_BASE + ETHMAC_SLOT_SIZE * slot);
     uint32_t len = ethmac_sram_writer_length_read();
+
+    // Copy the slot into a writable RAM scratch — the LiteEth RX SRAM
+    // is read-only from the CPU bus, so the in-place VLAN-strip
+    // memmove below silently no-ops on the slot itself. Symptom seen
+    // on the wire: bridge forwards 91:e0:f0:00:* CRF frames to us
+    // tagged with VLAN 2, our strip "succeeds" in code but ethertype
+    // is still 0x8100 when read back → frame is dispatched as "other"
+    // and mcr_process_rx never sees it (mcr.rx_count stays 0). 1600
+    // bytes covers a max-MTU AVTP+VLAN frame.
+    static uint8_t scratch[1600];
+    if (len > sizeof(scratch)) len = sizeof(scratch);
+    memcpy(scratch, slot_ptr, len);
+    uint8_t *frame = scratch;
 
     // Advance the RX-timestamp ring in lock-step with slot consumption.
     // The gateware pushes one entry per committed frame; we pop one per

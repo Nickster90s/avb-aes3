@@ -2091,6 +2091,27 @@ static void track_clock_lock(avdecc_state_t *s)
     } else {
         if (g_gptp) cur = g_gptp->servo_locked ? 1 : 0;
     }
+
+    // Detect clock-source change: the old source's lock state is no
+    // longer relevant. Re-baseline last_locked to the NEW source's
+    // current state without bumping LOCKED/UNLOCKED — otherwise a
+    // source flip from gPTP-locked → MCR-unlocked logs a phantom
+    // UNLOCKED event and Hive trips Milan 1.3 §5.3.11.2 "Invalid
+    // LOCKED / UNLOCKED counters value" (e.g. 0/1).
+    static uint8_t last_src = 0xFF;
+    if (s->current_clock_source != last_src) {
+        s->clock_last_locked = cur;
+        last_src = s->current_clock_source;
+        // Bump LOCKED if the new source starts already locked so the
+        // counter invariant LOCKED >= UNLOCKED holds from the moment
+        // of the swap onward.
+        if (cur) {
+            s->clock_locked_count++;
+            push_unsol_clock_counters(s);
+        }
+        return;
+    }
+
     if (cur != s->clock_last_locked) {
         if (cur) s->clock_locked_count++;
         else     s->clock_unlocked_count++;

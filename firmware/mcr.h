@@ -20,10 +20,18 @@
 // consecutive CRF packets (delta_offset = rate error in ns/packet).
 // Integral of delta_offset = total accumulated phase = absolute offset
 // drift, so PI-on-delta drives offset → constant in the locked state.
+// PI gains. delta is rate-error per packet in ns (packet interval
+// ≈ 2 ms for CRF at 48 kHz/96-intvl). NCO base_increment is
+// (fs / sys_clk_freq) * 2^32 ≈ 4.12M for 48 kHz on 50 MHz. To
+// correct delta ns over one 2 ms interval, the NCO needs
+// delta * 2.06e-3 units of correction (≈ delta / 512). Our prior
+// gain of 1/1 over-corrected by ~500×, which made the loop ring
+// and breach the 500ns lock-hysteresis exit threshold ~50 times
+// per second.
 #define MCR_KP_NUM            1
-#define MCR_KP_DEN            1
+#define MCR_KP_DEN            128
 #define MCR_KI_NUM            1
-#define MCR_KI_DEN            32
+#define MCR_KI_DEN            8192
 #define MCR_INTEGRAL_CLAMP    1000000        // ±1 ms worth of phase
 #define MCR_INCREMENT_MAX_DELTA  (1 << 24)   // ~4 Mppm guard against wild swings
 

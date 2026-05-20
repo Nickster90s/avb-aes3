@@ -62,6 +62,14 @@ typedef struct {
     // Trigger anchor — MCR sample_count value at the last TX. We send the
     // next packet when (mcr_sample_count - tx_last_sample) ≥ samples/pkt.
     uint32_t tx_last_sample_count;
+
+    // VLAN-PCP and VID used in the 802.1Q tag of outgoing AAF frames.
+    // Defaults to Class A (PCP=3, VID=2); updated to follow the bridge's
+    // MSRP Domain advertisement via aaf_set_vlan() so we match the
+    // priority Auvitran's port expects — otherwise listeners reply with
+    // MSRP failure 0x13 (SR Class Priority Mismatch).
+    uint8_t  tx_pcp;
+    uint16_t tx_vid;
 } aaf_state_t;
 
 void aaf_init       (aaf_state_t *a, const uint8_t *mac_addr,
@@ -70,6 +78,9 @@ void aaf_bind       (aaf_state_t *a, const uint8_t *stream_id);
 void aaf_unbind     (aaf_state_t *a);
 void aaf_process_rx (aaf_state_t *a, const uint8_t *frame, uint32_t len);
 void aaf_tx_enable  (aaf_state_t *a, uint8_t enable);
+// Update VLAN PCP/VID used in outgoing AAF frames. Call when MSRP Domain
+// RX gives us a non-default mapping (per [[msrp-class-priority-mismatch]]).
+void aaf_set_vlan   (aaf_state_t *a, uint8_t pcp, uint16_t vid);
 // Producer-side push of one sample block (one sample per channel).
 // Called by the audio source — for end-to-end test this can be the
 // RX-side pop wired through (loopback) or a tone generator.

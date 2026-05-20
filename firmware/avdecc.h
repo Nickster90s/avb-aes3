@@ -338,6 +338,20 @@ typedef struct {
     // ACMP slow-path resolve state. One per listener UID.
     avdecc_resolve_t resolves[AVDECC_MAX_LISTENERS];
     uint16_t next_acmp_seq;         // free-running counter for our outgoing ACMP commands
+
+    // Registered unsolicited-notification controllers (IEEE 1722.1-2013
+    // §7.4.37). REGISTER_UNSOLICITED_NOTIFICATION adds a (controller_eid,
+    // src_mac) tuple; on state changes (clock lock flip, listener
+    // connect/disconnect) we push an AEM response with the U flag set
+    // to each tuple. Without this Hive only refreshes UI on manual
+    // re-discover — CLOCK_DOMAIN stays yellow until the user clicks.
+    #define AVDECC_MAX_UNSOL_CTRL  4
+    struct {
+        uint8_t  active;
+        uint8_t  controller_eid[8];
+        uint8_t  mac[6];
+    } unsol_ctrl[AVDECC_MAX_UNSOL_CTRL];
+    uint16_t unsol_seq_id;          // monotonic seq for unsolicited pushes
 } avdecc_state_t;
 
 // ---------------------------------------------------------------------------

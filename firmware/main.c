@@ -660,6 +660,22 @@ int main(void)
         avtp_poll(&avtp);
         aes3_poll(&aes3, &tx_audio_ring, &rx_audio_ring);
         srp_poll(&srp);
+        // Sync AAF VLAN-PCP/VID with bridge-advertised SR domain on every
+        // change (no-op once converged). If we keep emitting PCP=3/VID=2
+        // while the bridge maps Class A to a different priority, listeners
+        // (Auvitran) reject with MSRP failure 0x13 (SR Class Priority
+        // Mismatch). Skip until we've heard a Domain to avoid bouncing.
+        if (srp.domain_received) {
+            static uint8_t  last_prio = 0xFF;
+            static uint16_t last_vid  = 0xFFFF;
+            if (srp.rx_sr_prio != last_prio || srp.rx_sr_vid != last_vid) {
+                aaf_set_vlan(&aaf, srp.rx_sr_prio, srp.rx_sr_vid);
+                last_prio = srp.rx_sr_prio;
+                last_vid  = srp.rx_sr_vid;
+                printf("[main] AAF VLAN sync: PCP=%u VID=%u\n",
+                       (unsigned)srp.rx_sr_prio, (unsigned)srp.rx_sr_vid);
+            }
+        }
         avdecc_poll(&avdecc);
         mcr_servo_update(&mcr);
         // Audio routing: drain AAF RX (8ch INT_32BIT) into:

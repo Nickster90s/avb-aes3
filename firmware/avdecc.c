@@ -1542,13 +1542,32 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
     case AEM_CMD_REGISTER_UNSOLICITED:
     case AEM_CMD_DEREGISTER_UNSOLICITED: {
         // IEEE 1722.1-2013 §7.4.37/38 + Milan 1.3 §5.4.2.21 mandatory.
-        // Both commands have an empty payload; respond SUCCESS with empty
-        // payload. Full implementation would track (controller_entity_id,
-        // src MAC) tuples and push unsolicited AEM responses on state
-        // changes (e.g. clock_source changed, stream connected). For now
-        // we acknowledge — Hive considers the command supported and stops
-        // flagging it as missing; entities that never change state need
-        // no actual unsolicited push.
+        // Track (controller_entity_id, src_mac) so subsequent state
+        // changes (clock lock, listener connect/disconnect) push an
+        // unsolicited AEM response to each registered controller.
+        const uint8_t *ctrl_eid = pdu + AECP_OFF_CONTROLLER_ID;
+        const uint8_t *ctrl_mac = frame + 6;        // sender MAC
+        int slot = -1, free_slot = -1;
+        for (int i = 0; i < AVDECC_MAX_UNSOL_CTRL; i++) {
+            if (s->unsol_ctrl[i].active) {
+                int eq = 1;
+                for (int j = 0; j < 8; j++)
+                    if (s->unsol_ctrl[i].controller_eid[j] != ctrl_eid[j]) { eq = 0; break; }
+                if (eq) { slot = i; break; }
+            } else if (free_slot < 0) {
+                free_slot = i;
+            }
+        }
+        if (cmd_type == AEM_CMD_REGISTER_UNSOLICITED) {
+            int use = (slot >= 0) ? slot : free_slot;
+            if (use >= 0) {
+                s->unsol_ctrl[use].active = 1;
+                memcpy(s->unsol_ctrl[use].controller_eid, ctrl_eid, 8);
+                memcpy(s->unsol_ctrl[use].mac, ctrl_mac, 6);
+            }
+        } else if (slot >= 0) {
+            s->unsol_ctrl[slot].active = 0;
+        }
         uint8_t *tf = avdecc_tx_buf();
         uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
         aecp_set_status_cdl(tp, AECP_STATUS_SUCCESS, 12);   // header only
@@ -1976,13 +1995,49 @@ void avdecc_depart(avdecc_state_t *s)
 // Poll — periodic ADP advertisement
 // ---------------------------------------------------------------------------
 
+// Send an unsolicited GET_COUNTERS_RESPONSE for CLOCK_DOMAIN 0 to every
+// registered controller. U flag (bit 15 of cmd_type) tells Hive this is
+// a push, not a reply to a command — sequence_id comes from our own
+// monotonic counter, not from a request.
+static void push_unsol_clock_counters(avdecc_state_t *s)
+{
+    for (int i = 0; i < AVDECC_MAX_UNSOL_CTRL; i++) {
+        if (!s->unsol_ctrl[i].active) continue;
+
+        uint8_t *frame = avdecc_tx_buf();
+        memcpy(frame, s->unsol_ctrl[i].mac, 6);              // dst = controller
+        memcpy(frame + 6, s->src_mac, 6);
+        av_put_be16(frame + 12, AVDECC_ETHERTYPE);
+
+        uint8_t *p = frame + 14;
+        p[0] = AVTP_SUBTYPE_AECP;
+        p[1] = AECP_MSG_AEM_RESPONSE;
+        memcpy(p + AECP_OFF_TARGET_ID,     s->entity_id, 8);
+        memcpy(p + AECP_OFF_CONTROLLER_ID, s->unsol_ctrl[i].controller_eid, 8);
+        av_put_be16(p + AECP_OFF_SEQ_ID,   s->unsol_seq_id++);
+        // U flag set: high bit of command_type (IEEE 1722.1-2013 §9.2.1.1.5)
+        av_put_be16(p + AECP_OFF_CMD_TYPE, 0x8000 | AEM_CMD_GET_COUNTERS);
+
+        av_put_be16(p + 24, AEM_DESC_CLOCK_DOMAIN);
+        av_put_be16(p + 26, 0);
+        av_put_be32(p + 28, 0x00000003);          // LOCKED + UNLOCKED valid
+        memset      (p + 32, 0, 128);
+        av_put_be32(p + 32, s->clock_locked_count);
+        av_put_be32(p + 36, s->clock_unlocked_count);
+        aecp_set_status_cdl(p, AECP_STATUS_SUCCESS, 148);
+
+        avdecc_eth_send(14 + 24 + 136);
+        s->aecp_tx_count++;
+    }
+}
+
 // Track lock transitions for CLOCK_DOMAIN counters. Source depends on
 // current_clock_source: 0 = Internal (gPTP-locked oscillator) → follow
 // gptp.servo_locked; 1 = Media Clock (CRF) → follow mcr.servo_locked.
 // This is critical: with clock_source=1 and no CRF patched, mcr never
 // locks and the indicator must NOT go green just because gPTP is locked.
-// Resets on source switch (transition_count carries over but
-// "last_locked" gets re-read from the new source).
+// On every transition we also push an unsolicited GET_COUNTERS_RESPONSE
+// so Hive flips the indicator without waiting for a manual refresh.
 static void track_clock_lock(avdecc_state_t *s)
 {
     uint8_t cur = 0;
@@ -1995,6 +2050,7 @@ static void track_clock_lock(avdecc_state_t *s)
         if (cur) s->clock_locked_count++;
         else     s->clock_unlocked_count++;
         s->clock_last_locked = cur;
+        push_unsol_clock_counters(s);
     }
 }
 

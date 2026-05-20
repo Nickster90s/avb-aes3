@@ -61,7 +61,15 @@ void aaf_init(aaf_state_t *a, const uint8_t *mac_addr,
     memcpy(a->src_mac,   mac_addr,  6);
     memcpy(a->dest_mac,  dest_mac,  6);
     memcpy(a->stream_id, stream_id, 8);
+    a->tx_pcp = 3;          // Class A default (overridden by aaf_set_vlan)
+    a->tx_vid = 2;
     aaf_txslot = 0;
+}
+
+void aaf_set_vlan(aaf_state_t *a, uint8_t pcp, uint16_t vid)
+{
+    a->tx_pcp = pcp & 0x07;
+    a->tx_vid = vid & 0x0FFF;
 }
 
 void aaf_bind(aaf_state_t *a, const uint8_t *stream_id)
@@ -189,13 +197,16 @@ static void aaf_send_packet(aaf_state_t *a)
     uint8_t *frame = aaf_tx_buf_ptr();
 
     // Ethernet header with 802.1Q VLAN tag for AVB Class A streams.
-    // TPID 0x8100, PCP=3 (Class A priority), DEI=0, VID=2 (default AVB VID).
+    // TPID 0x8100, PCP/VID follow SRP-learned mapping (aaf_set_vlan).
     // Bridges enforce this tag — untagged stream frames get dropped or
     // downshifted to best-effort, which underruns downstream listeners.
+    // A PCP mismatch vs the bridge's Class A priority triggers
+    // MSRP failure 0x13 (SR Class Priority Mismatch) at the listener.
     memcpy(frame,     a->dest_mac, 6);
     memcpy(frame + 6, a->src_mac,  6);
     put_be16(frame + 12, 0x8100);              // 802.1Q TPID
-    put_be16(frame + 14, (3 << 13) | 2);       // PCP=3 (Class A), DEI=0, VID=2
+    put_be16(frame + 14, ((uint16_t)(a->tx_pcp & 0x07) << 13) |
+                          (a->tx_vid & 0x0FFF));
     put_be16(frame + 16, AVTP_ETHERTYPE);      // 0x22F0
 
     uint8_t *pdu = frame + 18;

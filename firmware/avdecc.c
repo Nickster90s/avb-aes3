@@ -2020,6 +2020,14 @@ void avdecc_depart(avdecc_state_t *s)
 static void push_unsol_counters(avdecc_state_t *s, uint16_t dt, uint16_t di,
                                  uint32_t valid, const uint32_t *counters)
 {
+    // KILL SWITCH — earlier attempts at unsolicited counter pushes
+    // flooded the bridge (one bug fired 590 pushes/s × N controllers,
+    // bringing the AVB network down). Until we have proper
+    // rate-limiting + verified state-change detection, suppress all
+    // unsolicited pushes. Controllers (Hive) get fresh state via
+    // periodic GET_COUNTERS polls — slower UI update but no flood.
+    (void)s; (void)dt; (void)di; (void)valid; (void)counters;
+#if 0
     for (int i = 0; i < AVDECC_MAX_UNSOL_CTRL; i++) {
         if (!s->unsol_ctrl[i].active) continue;
 
@@ -2046,6 +2054,7 @@ static void push_unsol_counters(avdecc_state_t *s, uint16_t dt, uint16_t di,
         avdecc_eth_send(14 + 24 + 136);
         s->aecp_tx_count++;
     }
+#endif
 }
 
 static void push_unsol_clock_counters(avdecc_state_t *s)
@@ -2155,18 +2164,6 @@ void avdecc_poll(avdecc_state_t *s)
         elapsed = ADP_ADVERTISE_PERIOD_MS;
 
     if (elapsed >= ADP_ADVERTISE_PERIOD_MS) {
-        // On the first ADP send after boot, fire ENTITY_DEPARTING first
-        // to invalidate any cached descriptors a controller (Hive)
-        // might still hold from the previous session. Then immediately
-        // send AVAILABLE — Hive sees DEPARTING, drops its cache, then
-        // sees AVAILABLE and re-enumerates fresh. Without this, after
-        // a reload Hive keeps stale descriptors and the matrix dots
-        // for our streams stay invisible until the user manually
-        // refreshes the entity.
-        if (!s->boot_announce_done) {
-            adp_send(s, ADP_MSG_ENTITY_DEPARTING);
-            s->boot_announce_done = 1;
-        }
         adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
         s->last_adp_ms = now_ms;
     }

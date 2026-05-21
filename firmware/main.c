@@ -85,6 +85,42 @@ static uint32_t rx_avb_stream_mcast;
 static uint32_t rx_avtp_crf, rx_avtp_aaf;
 static uint8_t  rx_crf_last_sid[8];   // last CRF stream_id we saw on the wire
 
+// Benchmark / rate-window state for the 'b' UART command. Lets us
+// compare Stage-0 (firmware-on-audio) numbers against each later
+// migration stage to prove the gateware work paid off.
+typedef struct {
+    uint32_t window_start_ms;
+    // Snapshots taken at window start.
+    uint32_t s_writer_errors;
+    uint32_t s_rx_avtp_aaf;
+    uint32_t s_rx_avtp_crf;
+    uint32_t s_dac_samples;
+    uint32_t s_dac_underruns;
+    uint32_t s_aecp_rx;
+    uint32_t s_aecp_tx;
+    uint32_t s_sync_rx;
+    uint32_t s_pdresp_rx;
+    // Main-loop iteration timing (in TSU ns; resolution = ns).
+    uint32_t last_iter_ns;
+    uint32_t max_iter_ns;
+    uint64_t sum_iter_ns;
+    uint32_t iter_count;
+    // Last computed rates (per-second).
+    uint32_t r_writer_errors;
+    uint32_t r_aaf;
+    uint32_t r_crf;
+    uint32_t r_dac_samples;
+    uint32_t r_dac_underruns;
+    uint32_t r_aecp_rx;
+    uint32_t r_aecp_tx;
+    uint32_t r_sync_rx;
+    uint32_t r_pdresp_rx;
+    uint32_t r_iter_per_sec;
+    uint32_t r_iter_avg_ns;
+    uint32_t r_iter_max_ns;
+} bench_t;
+static bench_t bench;
+
 // ---------------------------------------------------------------------------
 // Central Ethernet RX dispatcher
 // ---------------------------------------------------------------------------
@@ -245,6 +281,61 @@ static void dispatch_rx(void)
 // ---------------------------------------------------------------------------
 // UART debug commands
 // ---------------------------------------------------------------------------
+
+// Bench tick — called once per main-loop iteration. Tracks max/avg
+// iteration time (in TSU ns) and rolls a 1-second rate window for
+// the counters that matter when comparing this Stage-0 firmware-on-
+// audio baseline against later gateware-offload stages.
+static void bench_tick(void)
+{
+    uint32_t now_ns = tsu_nanoseconds_read();
+    if (bench.last_iter_ns) {
+        // Modular arithmetic: TSU ns wraps at 1e9, so a single iter
+        // crossing the second boundary shows as a huge negative dt.
+        // Cap to 0 in that case (this iter "took no time" by this
+        // measure — acceptable for the bench).
+        int32_t dt = (int32_t)(now_ns - bench.last_iter_ns);
+        if (dt < 0) dt += 1000000000;
+        if ((uint32_t)dt > bench.max_iter_ns) bench.max_iter_ns = dt;
+        bench.sum_iter_ns += (uint32_t)dt;
+        bench.iter_count++;
+    }
+    bench.last_iter_ns = now_ns;
+
+    uint32_t now_ms = gptp_uptime_ms();
+    uint32_t elapsed = now_ms - bench.window_start_ms;
+    if (elapsed > 2000000000u) elapsed = 0;   // wrap guard
+    if (elapsed < 1000) return;
+
+    bench.r_writer_errors   = ethmac_sram_writer_errors_read() - bench.s_writer_errors;
+    bench.r_aaf             = rx_avtp_aaf  - bench.s_rx_avtp_aaf;
+    bench.r_crf             = rx_avtp_crf  - bench.s_rx_avtp_crf;
+    bench.r_dac_samples     = dac_sample_count   - bench.s_dac_samples;
+    bench.r_dac_underruns   = dac_underrun_count - bench.s_dac_underruns;
+    bench.r_aecp_rx         = avdecc.aecp_rx_count - bench.s_aecp_rx;
+    bench.r_aecp_tx         = avdecc.aecp_tx_count - bench.s_aecp_tx;
+    bench.r_sync_rx         = gptp.rx_sync_count - bench.s_sync_rx;
+    bench.r_pdresp_rx       = gptp.rx_pdelay_resp_count - bench.s_pdresp_rx;
+    bench.r_iter_per_sec    = bench.iter_count;
+    bench.r_iter_max_ns     = bench.max_iter_ns;
+    bench.r_iter_avg_ns     = bench.iter_count
+                                ? (uint32_t)(bench.sum_iter_ns / bench.iter_count) : 0;
+
+    // Re-snapshot for next window.
+    bench.s_writer_errors  = ethmac_sram_writer_errors_read();
+    bench.s_rx_avtp_aaf    = rx_avtp_aaf;
+    bench.s_rx_avtp_crf    = rx_avtp_crf;
+    bench.s_dac_samples    = dac_sample_count;
+    bench.s_dac_underruns  = dac_underrun_count;
+    bench.s_aecp_rx        = avdecc.aecp_rx_count;
+    bench.s_aecp_tx        = avdecc.aecp_tx_count;
+    bench.s_sync_rx        = gptp.rx_sync_count;
+    bench.s_pdresp_rx      = gptp.rx_pdelay_resp_count;
+    bench.window_start_ms  = now_ms;
+    bench.iter_count       = 0;
+    bench.sum_iter_ns      = 0;
+    bench.max_iter_ns      = 0;
+}
 
 static void check_uart_cmd(void)
 {
@@ -448,6 +539,30 @@ static void check_uart_cmd(void)
                    dac_test_tone == 2 ? "SILENCE (zeros L=R)" :
                                         "OFF (AAF audio)");
             break;
+        case 'b':
+            // Per-second windowed rates — Stage-0 baseline for the
+            // firmware-on-audio architecture. Each subsequent
+            // gateware-offload stage should drive aaf/writer_errors
+            // toward 0 and iter_per_sec up.
+            printf("\n[BENCH] 1s window rates\n"
+                   "  main_loop: %lu iter/s  avg %lu ns  max %lu ns\n"
+                   "  RX:        %lu writer_err/s  %lu aaf/s  %lu crf/s\n"
+                   "  AVDECC:    %lu aecp_rx/s  %lu aecp_tx/s\n"
+                   "  gPTP:      %lu sync_rx/s  %lu pdresp_rx/s\n"
+                   "  DAC:       %lu samples/s  %lu underruns/s\n",
+                   (unsigned long)bench.r_iter_per_sec,
+                   (unsigned long)bench.r_iter_avg_ns,
+                   (unsigned long)bench.r_iter_max_ns,
+                   (unsigned long)bench.r_writer_errors,
+                   (unsigned long)bench.r_aaf,
+                   (unsigned long)bench.r_crf,
+                   (unsigned long)bench.r_aecp_rx,
+                   (unsigned long)bench.r_aecp_tx,
+                   (unsigned long)bench.r_sync_rx,
+                   (unsigned long)bench.r_pdresp_rx,
+                   (unsigned long)bench.r_dac_samples,
+                   (unsigned long)bench.r_dac_underruns);
+            break;
         case 'D':
             // Force-clear local listener bindings — useful when Hive's
             // saved state replays a stale FAST_CONNECT to a stream_id
@@ -477,6 +592,7 @@ static void check_uart_cmd(void)
                      "  m   MCR servo state (CRF lock, NCO increment, offset)\n"
                      "  a   AAF stream state (RX/TX counts, jitter buffer level)\n"
                      "  e   RX ethertype counters + LiteEth heartbeat\n"
+                     "  b   1-second rate window (Stage-0 baseline metrics)\n"
                      "  t   force-enable AAF TX (diagnostic, bypasses AVDECC)\n"
                      "  T   force-disable AAF TX\n"
                      "  p   toggle DAC test tone (1 kHz square, L=R)\n"
@@ -765,6 +881,7 @@ int main(void)
     printf("[main] Press 'h' for commands.\n\n");
 
     while (1) {
+        bench_tick();
         dispatch_rx();
         gptp_poll(&gptp);
         avtp_poll(&avtp);

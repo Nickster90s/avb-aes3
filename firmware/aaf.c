@@ -143,6 +143,13 @@ void aaf_process_rx(aaf_state_t *a, const uint8_t *frame, uint32_t len)
     a->rx_have_last_seq = 1;
 
     a->last_presentation_ts = be32(pdu + 12);
+    a->rx_count++;
+
+    // Fast path: skip the 8ch × 6-sample audio copy unless a consumer
+    // has opted in. Under 8000 fps AAF flood the per-packet
+    // memory writes were starving gPTP RX → Pdelay timeout → lost lock
+    // and Hive saw the entity go empty under refresh load.
+    if (!a->rx_audio_capture) return;
 
     uint8_t  format    = pdu[16];
     uint16_t nsr_ch    = be16(pdu + 17);
@@ -178,7 +185,6 @@ void aaf_process_rx(aaf_state_t *a, const uint8_t *frame, uint32_t len)
         wr++;
     }
     a->rx_write_idx = wr;
-    a->rx_count++;
 }
 
 int aaf_rx_pop(aaf_state_t *a, int32_t *out)

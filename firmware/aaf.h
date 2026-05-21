@@ -37,6 +37,13 @@ typedef struct {
 
     // ---- RX path ----
     uint8_t  rx_enabled;
+    // When 0, aaf_process_rx counts the frame + tracks header/seq but
+    // SKIPS the per-channel audio copy into rx_buf. With 8000 fps AAF
+    // flooding the dispatcher, the 8ch × 6-sample × 4-byte copy + the
+    // downstream consumer path was starving gPTP RX (writer_errors
+    // 1.6M+, gPTP locked=0). Enable only when a real consumer (AES3
+    // TX once locked, or a real-time pipe) is actually pulling data.
+    uint8_t  rx_audio_capture;
     uint32_t rx_count;
     uint32_t rx_other_count;
     uint32_t format_errors;

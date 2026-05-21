@@ -805,7 +805,7 @@ def main():
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
         # and pick the seed with the highest eth_tx_clk PASS.
-        builder.build(seed=23)   # eth_tx_clk historically PASS at 137.89 MHz; trying after full clean wiped seed=4 placement
+        builder.build(seed=43)   # eth_tx_clk PASS 154.92 MHz (2026-05-21 sweep on Stage-0-baseline netlist)
 
     if args.load:
         prog = soc.platform.create_programmer()

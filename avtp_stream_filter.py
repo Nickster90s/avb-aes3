@@ -26,7 +26,7 @@ AVTP_SUBTYPE_AAF = 0x02
 AVTP_SUBTYPE_CRF = 0x04
 
 
-class AVTPStreamFilter(Module):
+class AVTPStreamFilter(Module, AutoCSR):
     """Tags each LiteEth RX frame with `match_slot` if it's a configured
     AVTP stream (matched on dst_mac + stream_id + cd=0 AVTP data subtype).
 
@@ -52,18 +52,50 @@ class AVTPStreamFilter(Module):
             ("last_be", dw // 8),
         ])
 
-        # Per-slot configuration — driven from CSRs by the SoC wrapper.
-        # dst_mac is 48 bits, stream_id 64 bits. enabled gates the slot.
-        self.slot_enabled   = Array(Signal()      for _ in range(n_slots))
-        self.slot_dst_mac   = Array(Signal(48)    for _ in range(n_slots))
-        self.slot_stream_id = Array(Signal(64)    for _ in range(n_slots))
+        # Per-slot configuration. CSRStorage is capped at 32-bit so dst_mac
+        # (48) is split hi(16)+lo(32) and stream_id (64) hi(32)+lo(32).
+        # Each CSR must be a NAMED attribute (self.slot0_enabled etc.) so
+        # AutoCSR's __dict__ scan picks it up — list-stored CSRs are
+        # invisible to the LiteX builder.
+        for i in range(n_slots):
+            setattr(self, f"slot{i}_enabled",
+                CSRStorage(1, name=f"slot{i}_enabled",
+                    description=f"AVTP filter slot {i}: 1 = match this slot."))
+            setattr(self, f"slot{i}_dst_mac_hi",
+                CSRStorage(16, name=f"slot{i}_dst_mac_hi",
+                    description=f"AVTP filter slot {i}: dst_mac bits[47:32]."))
+            setattr(self, f"slot{i}_dst_mac_lo",
+                CSRStorage(32, name=f"slot{i}_dst_mac_lo",
+                    description=f"AVTP filter slot {i}: dst_mac bits[31:0]."))
+            setattr(self, f"slot{i}_stream_id_hi",
+                CSRStorage(32, name=f"slot{i}_stream_id_hi",
+                    description=f"AVTP filter slot {i}: stream_id bits[63:32]."))
+            setattr(self, f"slot{i}_stream_id_lo",
+                CSRStorage(32, name=f"slot{i}_stream_id_lo",
+                    description=f"AVTP filter slot {i}: stream_id bits[31:0]."))
+            setattr(self, f"slot{i}_match_count",
+                CSRStatus(32, name=f"slot{i}_match_count",
+                    description=f"AVTP filter slot {i}: total frames matched."))
+
+        # Recombine into the 48/64-bit signals the matching FSM uses.
+        self.slot_enabled = Array(
+            getattr(self, f"slot{i}_enabled").storage for i in range(n_slots))
+        self.slot_dst_mac = Array(
+            Cat(getattr(self, f"slot{i}_dst_mac_lo").storage,
+                getattr(self, f"slot{i}_dst_mac_hi").storage) for i in range(n_slots))
+        self.slot_stream_id = Array(
+            Cat(getattr(self, f"slot{i}_stream_id_lo").storage,
+                getattr(self, f"slot{i}_stream_id_hi").storage) for i in range(n_slots))
 
         # Outputs: pulse for one cycle at end of frame.
         self.eof          = Signal()                      # any frame end
         self.match_valid  = Signal()                      # eof AND a slot matched
         self.match_slot   = Signal(max=max(n_slots, 2))   # which slot matched
-        # Per-slot match counters (read by SoC wrapper through a CSR).
+        # Per-slot match counters wired through to the CSRStatus.
         self.match_count  = Array(Signal(32) for _ in range(n_slots))
+        for i in range(n_slots):
+            self.comb += getattr(self, f"slot{i}_match_count").status.eq(
+                self.match_count[i])
 
         # ---------------------------------------------------------------
         # Header buffer: 32 bytes = 8 × 32-bit beats.
@@ -76,138 +108,131 @@ class AVTPStreamFilter(Module):
         hdr_words = Array(Signal(32) for _ in range(HDR_BEATS))
         beat_idx  = Signal(max=HDR_BEATS + 1)
 
-        # Capture first HDR_BEATS beats into hdr_words. Discard extra
-        # beats (frame body). We still need to ride out the frame to see
-        # `last` so we can emit the match pulse.
-        self.sync += [
-            self.eof.eq(0),
-            self.match_valid.eq(0),
-        ]
+        # ---------------------------------------------------------------
+        # PIPELINED match path (3 stages from EOF to match output).
+        # ---------------------------------------------------------------
+        # The previous flat combinational design did:
+        #   hdr_words → VLAN-aware byte extract → 64+48 bit compare ×4 slots
+        # all in a single cycle, which on XC7A50T+openXC7 forced eth_tx_clk
+        # below 125 MHz (best observed: 121 MHz across 12 seeds). Splitting
+        # into 3 short stages reclaims the timing margin.
+        #
+        # Stage A: capture beats into hdr_words (already done above).
+        # Stage B: on EOF, latch (dst_mac, sid, subtype, eof_b) — pipelines
+        #          the VLAN-aware byte extraction.
+        # Stage C: compare against each slot, latch slot_match[].
+        # Stage D: emit match_valid + match_slot + bump counters.
+        # ---------------------------------------------------------------
 
+        # Capture first HDR_BEATS beats into hdr_words. Frame body bytes
+        # past HDR_BYTES are ignored; we ride out the frame to see `last`.
         self.sync += If(self.sink.valid & self.sink.ready,
             If(beat_idx != HDR_BEATS,
                 hdr_words[beat_idx].eq(self.sink.data),
                 beat_idx.eq(beat_idx + 1),
             ),
         )
-        # Always ready to receive — we don't apply backpressure to the MAC.
         self.comb += self.sink.ready.eq(1)
 
-        # ---------------------------------------------------------------
-        # Helpers: extract a byte at byte-offset `off` from hdr_words[].
-        # ---------------------------------------------------------------
         def byte_at(off):
             """Return Signal(8) holding the wire-byte at offset `off`.
 
             Wire-byte 0 of beat N is the MSB of hdr_words[N] (data[31:24])
             because LiteEth presents frames big-endian within the 32-bit
-            word."""
+            word. `off` is a Python int so the slice is fixed at elab
+            time — no runtime mux."""
             w = off // 4
             shift = 24 - 8 * (off % 4)
             return hdr_words[w][shift:shift + 8]
 
-        # ---------------------------------------------------------------
-        # End-of-frame edge: emit match decision.
-        # ---------------------------------------------------------------
-        self.sync += If(self.sink.valid & self.sink.ready & self.sink.last,
-            beat_idx.eq(0),
-            self.eof.eq(1),
-
-            # Probe the captured header. Detect VLAN tag at offset 12-13:
-            # if 0x8100, the AVTP header starts at offset 18; otherwise 14.
-            #
-            # Build the candidate match key (dst_mac, stream_id) and check
-            # against each slot.
+        # ---- Stage B: latch keys on EOF ----------------------------------
+        # `frame_done` pulses for one cycle when the MAC accepts the last
+        # beat of a frame. We sample the header registers on that edge.
+        frame_done = Signal()
+        self.comb += frame_done.eq(
+            self.sink.valid & self.sink.ready & self.sink.last
         )
 
-        # ---------------------------------------------------------------
-        # Match comb logic (evaluated continuously, sampled at EOF).
-        # ---------------------------------------------------------------
-        vlan_present = Signal()
-        self.comb += vlan_present.eq(
-            (byte_at(12) == 0x81) & (byte_at(13) == 0x00)
+        # VLAN tag at frame offset 12..13 = 0x8100. Selects AVTP base 14
+        # (no VLAN) vs 18 (VLAN-tagged).
+        vlan_present_b = Signal()
+        subtype_b      = Signal(8)
+        dst_mac_b      = Signal(48)
+        sid_b          = Signal(64)
+        eof_b          = Signal()
+
+        # Combinational extractors fed into the Stage B registers.
+        vlan_comb = (byte_at(12) == 0x81) & (byte_at(13) == 0x00)
+        subtype_comb = Mux(vlan_comb, byte_at(18), byte_at(14))
+        # stream_id is 8 bytes starting at AVTP header offset +4 → frame
+        # bytes 18..25 (untagged) or 22..29 (VLAN-tagged). MSB at lowest
+        # offset, so to build the integer we Cat() LSB-byte first.
+        def sid_byte(i):
+            return Mux(vlan_comb, byte_at(22 + i), byte_at(18 + i))
+        sid_comb = Cat(
+            sid_byte(7), sid_byte(6), sid_byte(5), sid_byte(4),
+            sid_byte(3), sid_byte(2), sid_byte(1), sid_byte(0),
         )
-
-        # AVTP header offset in the buffer.
-        # Without VLAN: AVTP at byte 14, subtype at 14, stream_id at 18.
-        # With VLAN:    AVTP at byte 18, subtype at 18, stream_id at 22.
-        # Use Mux to select.
-        subtype = Signal(8)
-        self.comb += subtype.eq(
-            Mux(vlan_present, byte_at(18), byte_at(14))
-        )
-
-        # Build a Signal(64) holding the candidate stream_id, byte-MSB-first.
-        sid = Signal(64)
-        self.comb += sid.eq(Cat(
-            # Migen Cat() is LSB-first; we want byte_at(off+7) at LSB so
-            # that the resulting integer matches the wire-byte order.
-            Mux(vlan_present, byte_at(25), byte_at(21)),  # stream_id[0]  → bits 7..0
-            Mux(vlan_present, byte_at(24), byte_at(20)),
-            Mux(vlan_present, byte_at(23), byte_at(19)),
-            Mux(vlan_present, byte_at(22), byte_at(18)),
-            Mux(vlan_present, byte_at(21), byte_at(17)),  # ← stream_id last 4 bytes...
-            # Wait — stream_id starts at AVTP byte 4. AVTP starts at frame
-            # byte 14 or 18. So stream_id wire bytes are at frame offsets
-            # 18..25 (no VLAN) or 22..29 (with VLAN). The Mux above had
-            # them shifted by 4 (offset 18→22, 19→23, etc.). Re-derive.
-        ))
-
-        # The Cat above was confused. Redo cleanly: stream_id byte 0 (MSB)
-        # is at frame_off (18 no-vlan / 22 vlan), through byte 7 (LSB) at
-        # frame_off+7.
-        def stream_id_byte(i):
-            off = Mux(vlan_present, 22 + i, 18 + i)
-            # We can't use a runtime Mux as an index into hdr_words. So
-            # express both options and Mux the byte:
-            return Mux(vlan_present, byte_at(22 + i), byte_at(18 + i))
-
-        self.comb += sid.eq(Cat(
-            stream_id_byte(7), stream_id_byte(6), stream_id_byte(5),
-            stream_id_byte(4), stream_id_byte(3), stream_id_byte(2),
-            stream_id_byte(1), stream_id_byte(0),
-        ))
-
-        # dst_mac: always at frame bytes 0..5.
-        dst_mac = Signal(48)
-        self.comb += dst_mac.eq(Cat(
+        dst_mac_comb = Cat(
             byte_at(5), byte_at(4), byte_at(3),
             byte_at(2), byte_at(1), byte_at(0),
-        ))
-
-        # Check each slot for a match. Combinational because we sample
-        # at eof and the buffer is stable at that point.
-        slot_match = Signal(n_slots)
-        for i in range(n_slots):
-            self.comb += slot_match[i].eq(
-                self.slot_enabled[i]
-                & (self.slot_dst_mac[i]   == dst_mac)
-                & (self.slot_stream_id[i] == sid)
-                & ((subtype == AVTP_SUBTYPE_AAF) | (subtype == AVTP_SUBTYPE_CRF))
-            )
-
-        # Emit match_valid + match_slot one cycle after eof. We use a
-        # registered comparison so timing is closed at sim/hw boundary.
-        eof_reg = Signal()
-        self.sync += eof_reg.eq(self.eof)
-        self.sync += If(eof_reg,
-            # priority-encoded slot index (first match wins)
-            self.match_valid.eq(slot_match != 0),
-            self.match_slot.eq(0),
         )
-        # Priority decode without a loop variable bug — use Migen Case.
-        case_dict = {}
-        for i in range(n_slots):
-            case_dict[1 << i] = self.match_slot.eq(i)
-        # The match_slot setter above sets default 0; this Case overrides
-        # when exactly one bit is set. For multi-bit matches (shouldn't
-        # happen with valid config), the lowest index wins via the
-        # cascaded Case ordering.
-        self.sync += If(eof_reg, Case(slot_match, case_dict))
 
-        # Bump per-slot match counter (one cycle after eof).
+        self.sync += [
+            eof_b.eq(frame_done),
+            If(frame_done,
+                vlan_present_b.eq(vlan_comb),
+                subtype_b.eq(subtype_comb),
+                dst_mac_b.eq(dst_mac_comb),
+                sid_b.eq(sid_comb),
+                beat_idx.eq(0),
+            ),
+        ]
+
+        # ---- Stage C: per-slot compare registered ------------------------
+        # 4 × {48-bit mac == + 64-bit sid == + subtype ∈ {AAF,CRF}} but
+        # now the inputs (dst_mac_b/sid_b/subtype_b) are already
+        # registered, so the compare tree is the only logic in this cycle.
+        slot_match_c = Signal(n_slots)
+        eof_c        = Signal()
+        subtype_is_data = (
+            (subtype_b == AVTP_SUBTYPE_AAF) | (subtype_b == AVTP_SUBTYPE_CRF)
+        )
         for i in range(n_slots):
-            self.sync += If(eof_reg & slot_match[i],
+            self.sync += If(eof_b,
+                slot_match_c[i].eq(
+                    self.slot_enabled[i]
+                    & (self.slot_dst_mac[i]   == dst_mac_b)
+                    & (self.slot_stream_id[i] == sid_b)
+                    & subtype_is_data
+                ),
+            )
+        self.sync += eof_c.eq(eof_b)
+
+        # ---- Stage D: emit match + bump counters -------------------------
+        # Default-low outputs so they pulse cleanly.
+        self.sync += [
+            self.eof.eq(0),
+            self.match_valid.eq(0),
+        ]
+        # match_valid pulses 3 cycles after frame_done (B→C→D). Mirror eof
+        # at the output port for downstream consumers that don't care
+        # about match info (e.g. observers counting every frame).
+        self.sync += [
+            If(eof_c,
+                self.eof.eq(1),
+                self.match_valid.eq(slot_match_c != 0),
+                self.match_slot.eq(0),
+            ),
+        ]
+        # Priority decode (first match wins). slot_match_c is registered
+        # so the Case here is fed from flops, not raw comb.
+        case_dict = {1 << i: self.match_slot.eq(i) for i in range(n_slots)}
+        self.sync += If(eof_c, Case(slot_match_c, case_dict))
+
+        # Bump per-slot match counter on Stage D edge.
+        for i in range(n_slots):
+            self.sync += If(eof_c & slot_match_c[i],
                 self.match_count[i].eq(self.match_count[i] + 1),
             )
 

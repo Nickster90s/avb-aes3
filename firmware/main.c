@@ -47,6 +47,13 @@ static audio_ring_t rx_audio_ring;
 static uint32_t dac_sample_count;
 static uint32_t dac_underrun_count;
 static uint32_t dac_last_sample_tick;
+// Diagnostic DAC test mode — cycles via UART 'p':
+//   0 = OFF       — DAC writer reads from AAF jitter buffer (normal)
+//   1 = TONE      — 1 kHz square wave (±0.5 FS) on both L and R
+//   2 = SILENCE   — explicit zeros on both L and R (verifies the
+//                   noise/buzz on R is not coming from our data path)
+static uint8_t  dac_test_tone;
+static uint32_t dac_tone_phase;
 
 // RX EtherType counters for link-debug
 static uint32_t rx_total, rx_ptp, rx_avtp, rx_msrp, rx_other;
@@ -112,56 +119,61 @@ static void dispatch_rx(void)
     uint8_t *slot_ptr = (uint8_t *)(ETHMAC_BASE + ETHMAC_SLOT_SIZE * slot);
     uint32_t len = ethmac_sram_writer_length_read();
 
-    // Copy the slot into a writable RAM scratch — the LiteEth RX SRAM
-    // is read-only from the CPU bus, so the in-place VLAN-strip
-    // memmove below silently no-ops on the slot itself. Symptom seen
-    // on the wire: bridge forwards 91:e0:f0:00:* CRF frames to us
-    // tagged with VLAN 2, our strip "succeeds" in code but ethertype
-    // is still 0x8100 when read back → frame is dispatched as "other"
-    // and mcr_process_rx never sees it (mcr.rx_count stays 0). 1600
-    // bytes covers a max-MTU AVTP+VLAN frame.
-    static uint8_t scratch[1600];
-    if (len > sizeof(scratch)) len = sizeof(scratch);
-    memcpy(scratch, slot_ptr, len);
-    uint8_t *frame = scratch;
-
     // Advance the RX-timestamp ring in lock-step with slot consumption.
-    // The gateware pushes one entry per committed frame; we pop one per
-    // dispatched slot regardless of ethertype. After this write, any
-    // gptp_read_rx_timestamp() within this dispatch returns the value
-    // for THIS slot's frame.
     main_rx_ts_pop_write(1);
 
-    // Route by ethertype. Strip one 802.1Q VLAN tag in place if present —
-    // Auvitran (and most AVB talkers) emit stream frames tagged with VLAN 2
-    // (Class A), so the real AVTP ethertype is at offset 16, not 12. The
-    // existing handlers all parse from offset 14 of `frame`, so we shift
-    // the 4-byte tag out of the way rather than threading a payload_off.
+    // Peek directly into the LiteEth slot to determine ethertype and
+    // (for AVTP) subtype. Slot SRAM is read-only from CPU but READS
+    // are fine. We use this to fast-path AVTP stream data (AAF, CRF —
+    // 8k+1k fps) by passing the slot pointer (offset-shifted for VLAN)
+    // straight to the handler. The previous full-frame scratch memcpy
+    // was burning ~30 µs/frame × 9000 fps ≈ 27% CPU on slow Wishbone
+    // reads of bytes we then re-read in the handlers.
+    //
+    // Everything else (gPTP, AVDECC, SRP) still gets the memcpy + VLAN
+    // strip because AVDECC needs src MAC at frame[6..11] for response
+    // routing and we can't shift the pointer without breaking that.
+    uint32_t v = 0;
     if (len >= 18) {
-        uint16_t ethertype_pre = ((uint16_t)frame[12] << 8) | frame[13];
-        if (ethertype_pre == 0x8100) {
-            // Shift the inner ethertype + payload down 4 bytes, leaving
-            // dst/src MAC in place. Net effect: tagged frame becomes the
-            // equivalent untagged frame.
-            memmove(frame + 12, frame + 16, len - 16);
+        uint16_t et_pre = ((uint16_t)slot_ptr[12] << 8) | slot_ptr[13];
+        if (et_pre == 0x8100) v = 4;
+    }
+    uint16_t et_peek = (len >= 14u + v)
+        ? (((uint16_t)slot_ptr[12 + v] << 8) | slot_ptr[13 + v]) : 0;
+    uint8_t  st_peek = (et_peek == AVTP_ETHERTYPE && len >= 15u + v)
+        ? slot_ptr[14 + v] : 0xFF;
+    int is_avtp_data = (st_peek == AVTP_SUBTYPE_AAF ||
+                        st_peek == AVTP_SUBTYPE_CRF);
+
+    const uint8_t *frame;
+    if (is_avtp_data) {
+        // Fast path. AAF/CRF handlers only read from frame+14 onward.
+        frame = slot_ptr + v;
+        len  -= v;
+    } else {
+        static uint8_t scratch[1600];
+        if (len > sizeof(scratch)) len = sizeof(scratch);
+        memcpy(scratch, slot_ptr, len);
+        if (v) {
+            memmove(scratch + 12, scratch + 16, len - 16);
             len -= 4;
         }
+        frame = scratch;
     }
+
     if (len >= 14) {
         uint16_t ethertype = ((uint16_t)frame[12] << 8) | frame[13];
 
         rx_total++;
         rx_last_ethertype = ethertype;
-        memcpy(rx_last_dst, frame, 6);
-        memcpy(rx_last_src, frame + 6, 6);
+        // Read MAC fields from slot_ptr (NOT frame) — frame may be the
+        // VLAN-shifted slot pointer where [0..5]/[6..11] are inside the
+        // tag, not the real MAC fields.
+        memcpy(rx_last_dst, slot_ptr, 6);
+        memcpy(rx_last_src, slot_ptr + 6, 6);
 
-        // AVB stream multicast bypass: count any frame to 91:e0:f0:00:*
-        // — the IEEE 1722 Class A stream-data range. Explicitly EXCLUDES
-        // 91:e0:f0:01:* which is AVDECC control (ADP/MAAP). Without that
-        // narrowing, ADP traffic at ~1 PPS hides whether real stream
-        // frames are arriving.
-        if (frame[0] == 0x91 && frame[1] == 0xe0 && frame[2] == 0xf0 &&
-            frame[3] == 0x00) {
+        if (slot_ptr[0] == 0x91 && slot_ptr[1] == 0xe0 &&
+            slot_ptr[2] == 0xf0 && slot_ptr[3] == 0x00) {
             rx_avb_stream_mcast++;
         }
 
@@ -428,6 +440,14 @@ static void check_uart_cmd(void)
             srp_talker_enable(&srp, 0);
             printf("[DIAG] AAF TX force-disabled\n");
             break;
+        case 'p':
+            dac_test_tone = (dac_test_tone + 1) % 3;
+            dac_tone_phase = 0;
+            printf("[DIAG] DAC test mode: %s\n",
+                   dac_test_tone == 1 ? "TONE (1 kHz square L=R)" :
+                   dac_test_tone == 2 ? "SILENCE (zeros L=R)" :
+                                        "OFF (AAF audio)");
+            break;
         case 'D':
             // Force-clear local listener bindings — useful when Hive's
             // saved state replays a stale FAST_CONNECT to a stream_id
@@ -459,6 +479,7 @@ static void check_uart_cmd(void)
                      "  e   RX ethertype counters + LiteEth heartbeat\n"
                      "  t   force-enable AAF TX (diagnostic, bypasses AVDECC)\n"
                      "  T   force-disable AAF TX\n"
+                     "  p   toggle DAC test tone (1 kHz square, L=R)\n"
                      "  D   force-clear all listener bindings (clears stale FAST_CONNECT)\n"
                      "  r   reboot\n"
                      "  h   help\n");
@@ -790,29 +811,57 @@ int main(void)
 
         // DAC writer: pace AAF RX ch 0/1 → I2S TX at the audio sample
         // rate. mcr_sample_count ticks at fs (48 kHz) — driven by the
-        // MCR NCO (currently free-running at base_increment when CRF
-        // isn't locked; CRF-tuned when locked). On each new tick we
-        // pop one block from AAF RX and write the upper 24 bits of
-        // channels 0+1 to the I2S CSRs. If AAF jitter buffer is empty
-        // we count an underrun and let the I2S TX repeat the last
-        // sample (sample-and-hold in gateware).
+        // MCR NCO. Each main-loop visit, drain ALL samples up to the
+        // current tick (not just one) — otherwise when main_loop runs
+        // slower than 48 kHz under AAF flood (~800 Hz observed), we
+        // skip ~98% of samples → audio sounds aliased / synth-like.
+        // I2S TX latches whatever's in i2s_audio_l/r at frame_start
+        // (48 kHz), so writes faster than that get sample-and-hold'd
+        // by the gateware — only the last write per audio-frame
+        // actually goes out the wire, which is exactly what we want.
         {
             uint32_t tick = mcr_sample_count_read();
             uint32_t ticks_due = tick - dac_last_sample_tick;
-            if (ticks_due > 0) {
-                int32_t blk[AAF_CHANNELS];
-                if (aaf.bound && aaf.rx_audio_capture &&
-                    aaf_rx_pop(&aaf, blk)) {
-                    // 32-bit AAF → 24-bit I2S sample (drop low 8 bits)
-                    main_i2s_audio_l_write((uint32_t)(blk[0] >> 8) & 0xFFFFFFu);
-                    main_i2s_audio_r_write((uint32_t)(blk[1] >> 8) & 0xFFFFFFu);
-                    main_i2s_push_write(1);
+            // Cap per-call drain to bound CSR write time, but ADVANCE
+            // dac_last_sample_tick by what we actually processed —
+            // NOT to `tick` directly. Otherwise capping = silently
+            // skipping audio samples (the "underrun" counter actually
+            // reflects samples we threw away because of the cap).
+            // 32 samples ≈ 0.16 ms of CSR work, fine between
+            // dispatch_rx visits now that the AAF fast-path skips
+            // the scratch memcpy.
+            if (ticks_due > 32) ticks_due = 32;
+            uint32_t processed = ticks_due;
+            while (ticks_due--) {
+                int32_t sl, sr;
+                if (dac_test_tone == 1) {
+                    // 1 kHz square wave at -20 dBFS (1/10 of full scale).
+                    // Full-scale (0x400000) overdrove cheap amps into
+                    // clipping/distortion that sounded like noise.
+                    int32_t v = (dac_tone_phase < 24) ? 0x00080000 : -0x00080000;
+                    sl = v; sr = v;
+                    dac_tone_phase = (dac_tone_phase + 1) % 48;
+                    dac_sample_count++;
+                } else if (dac_test_tone == 2) {
+                    sl = 0; sr = 0;
                     dac_sample_count++;
                 } else {
-                    dac_underrun_count++;
+                    int32_t blk[AAF_CHANNELS];
+                    if (aaf.bound && aaf.rx_audio_capture &&
+                        aaf_rx_pop(&aaf, blk)) {
+                        sl = blk[0] >> 8;
+                        sr = blk[1] >> 8;
+                        dac_sample_count++;
+                    } else {
+                        sl = 0; sr = 0;
+                        dac_underrun_count++;
+                    }
                 }
-                dac_last_sample_tick = tick;
+                main_i2s_audio_l_write((uint32_t)sl & 0xFFFFFFu);
+                main_i2s_audio_r_write((uint32_t)sr & 0xFFFFFFu);
+                main_i2s_push_write(1);
             }
+            dac_last_sample_tick += processed;
         }
         aaf_tx_poll(&aaf);
         check_uart_cmd();

@@ -174,14 +174,18 @@ void aaf_process_rx(aaf_state_t *a, const uint8_t *frame, uint32_t len)
     uint32_t bytes_per_block = AAF_CHANNELS * AAF_BYTES_PER_SAMPLE;
     uint32_t blocks          = stream_data_len / bytes_per_block;
 
+    // Copy only channels 0+1 (what the DAC consumes). Channels 2..7
+    // get parsed-past but not stored — saves 75% of the per-packet
+    // memory write cost (was 8 × 6 = 48 writes/packet × 8000 fps =
+    // 384k writes/sec). Under AAF flood the full 8ch copy starved
+    // gPTP RX and Hive refresh (entity goes empty). Re-add full 8ch
+    // when a real 8-channel consumer is wired up.
     uint32_t wr = a->rx_write_idx;
     for (uint32_t b = 0; b < blocks; b++) {
         uint32_t slot = wr & AAF_BUFFER_MASK;
-        for (int ch = 0; ch < AAF_CHANNELS; ch++) {
-            int32_t s = (int32_t)be32(audio);
-            a->rx_buf[ch][slot] = s;
-            audio += 4;
-        }
+        a->rx_buf[0][slot] = (int32_t)be32(audio);
+        a->rx_buf[1][slot] = (int32_t)be32(audio + 4);
+        audio += AAF_CHANNELS * AAF_BYTES_PER_SAMPLE;   // skip past ch 2..7
         wr++;
     }
     a->rx_write_idx = wr;

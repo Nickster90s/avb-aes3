@@ -21,7 +21,12 @@
 // margin for class A AVB (<125 µs talker-to-listener jitter target).
 // Larger than 64 doesn't fit in the 8 KB SRAM when paired with TX (D2).
 // Total RX buffer = 8 ch × 64 samples × 4 B = 2 KB.
-#define AAF_BUFFER_SIZE         64
+// Was 64 (1.33 ms at 48 kHz) — too small to absorb AAF burst arrivals
+// (8 packets/burst × 6 samples = 48 samples in one wire-burst window)
+// when main loop has been busy with Hive refresh / ACMP / etc. Bumped
+// to 512 (10.67 ms) so we have headroom both ways: tolerate input
+// bursts AND output stalls without underruns or overwrites.
+#define AAF_BUFFER_SIZE         512
 #define AAF_BUFFER_MASK         (AAF_BUFFER_SIZE - 1)
 
 // AAF class A: 8000 packets/sec, 6 samples per packet at 48 kHz.

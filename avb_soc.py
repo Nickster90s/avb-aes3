@@ -532,22 +532,17 @@ class AVBSoC(SoCCore):
         # PTP Timestamping Unit.
         self.tsu = TSUWithCSRs(sys_clk_freq)
 
-        # Ethernet MAC (Wishbone interface for firmware raw frame access).
-        # Pass TSU timestamp for RX/TX frame timestamping.
-        # nrxslots=2 (LiteEthMAC default). Both nrxslots=4 and =8 were
-        # tried and broke TX on hardware — Hive lost the entity, peer
-        # never replied to Pdelay_Req, MSRP silent — despite >130 MHz
-        # post-route timing and firmware correctly rebuilt against the
-        # new headers. The slot-RAM expansion appears to perturb the
-        # LiteEthMAC TX path in ways static analysis doesn't catch.
-        # Sticking with 2 is the proven-working config; the gPTP Sync
-        # drop concern during AECP bursts (writer_errors > 0) will be
-        # addressed instead by draining all pending slots per dispatch
-        # call, not by widening the slot RAM.
+        # nrxslots=2 — confirmed (again, 2026-05-21 with fresh firmware
+        # rebuild) that increasing to 4 silently kills TX: entity vanishes
+        # from Hive, no ADP egress. Tested both seed=4 and seed=23. The
+        # slot-RAM expansion appears to actually break the LiteEth TX path,
+        # not just a stale-firmware artifact. Don't try this again without
+        # patching LiteEthMAC itself. The AAF flood overrun has to be
+        # solved another way (drop early, deferred processing, etc.).
         self.add_ethernet(
             phy            = self.ethphy,
             data_width     = 8,
-            with_timestamp = False,  # We use our own TSU, not timer0 uptime
+            with_timestamp = False,
             nrxslots       = 2,
             ntxslots       = 2,
         )
@@ -810,7 +805,7 @@ def main():
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
         # and pick the seed with the highest eth_tx_clk PASS.
-        builder.build(seed=4)    # eth_tx_clk PASS 142.53 MHz (seed=79 unreliable post-drain-loop)
+        builder.build(seed=23)   # eth_tx_clk historically PASS at 137.89 MHz; trying after full clean wiped seed=4 placement
 
     if args.load:
         prog = soc.platform.create_programmer()

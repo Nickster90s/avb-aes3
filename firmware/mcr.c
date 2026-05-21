@@ -62,6 +62,15 @@ void mcr_bind(mcr_state_t *m, const uint8_t *stream_id)
 void mcr_unbind(mcr_state_t *m)
 {
     m->bound = 0;
+    // Force lock state to 0 — without this, track_clock_lock keeps
+    // seeing servo_locked=1 after CRF disconnect because the servo
+    // path stops getting updates and the last "locked" decision
+    // sticks. Hive then shows CLOCK_DOMAIN Media Locked never
+    // transitioning to Unlocked even when the source is gone.
+    m->servo_locked    = 0;
+    m->lock_streak     = 0;
+    m->have_latest     = 0;
+    m->servo_consumed  = 1;
     printf("[MCR] unbound\n");
 }
 

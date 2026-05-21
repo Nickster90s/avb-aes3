@@ -178,19 +178,16 @@ void mcr_servo_update(mcr_state_t *m)
     // Write to NCO CSR
     mcr_increment_write(m->current_increment);
 
-    // Lock hysteresis. Enter LOCKED after 8 consecutive |delta| < 2us;
-    // exit only after 4 consecutive |delta| > 10us. Class A bridge
-    // jitter through a loaded switch (with our own AAF TX flooding it)
-    // can hit 1-5us regularly. Tighter thresholds (200ns enter, 2us
-    // exit) had MCR never enter LOCKED at all in practice because the
-    // 8-streak <200ns condition was never met. The PI servo is
-    // tracking frequency, not phase — so a wide entrance threshold is
-    // fine; the audio clock is still being recovered correctly even
-    // when individual deltas are noisy.
+    // Lock hysteresis — single-sample with wide thresholds.
+    // 8-streak entry never fired in practice because Class A jitter
+    // routinely brushes µs; lock was stuck at 0 (Media Locked never
+    // bumped). Wide thresholds alone are enough to ignore individual
+    // jitter spikes; counter flapping from before came from narrow
+    // thresholds (500 ns) not from single-sample evaluation.
     #define MCR_LOCK_ENTER_NS    2000
     #define MCR_LOCK_EXIT_NS    10000
-    #define MCR_LOCK_ENTER_STREAK  8
-    #define MCR_LOCK_EXIT_STREAK   4
+    #define MCR_LOCK_ENTER_STREAK  1
+    #define MCR_LOCK_EXIT_STREAK   1
     int64_t abs_delta = (delta < 0) ? -delta : delta;
 
     // Roll a 500-sample (1s at 500fps) stats window for diagnostics.

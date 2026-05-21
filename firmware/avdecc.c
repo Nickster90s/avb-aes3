@@ -941,7 +941,14 @@ static uint32_t build_desc_clock_domain(uint8_t *d, uint16_t idx, avdecc_state_t
     av_put_be16(d + 2, 0);
     write_name64(d + 4, "Clock Domain");
     av_put_be16(d + 68, 0xFFFF);
-    av_put_be16(d + 70, s->current_clock_source); // clock_source_index (dynamic)
+    // Defensive clamp: if current_clock_source somehow drifts out of
+    // range, Hive logs "Reference for Domain 0: AEM Error" and treats
+    // the whole entity as malformed (refuses to patch listeners → CRF
+    // never arrives, MCR never binds, debugging spirals). Clamp to 0
+    // (Internal) so the descriptor always references a valid source.
+    uint16_t cs = s->current_clock_source;
+    if (cs >= N_CLOCK_SOURCES) cs = 0;
+    av_put_be16(d + 70, cs);                       // clock_source_index (dynamic, clamped)
     av_put_be16(d + 72, 76);                       // clock_sources_offset
     av_put_be16(d + 74, N_CLOCK_SOURCES);          // clock_sources_count
     for (uint16_t i = 0; i < N_CLOCK_SOURCES; i++)

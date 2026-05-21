@@ -15,23 +15,17 @@
 
 // PI servo gains for NCO frequency tuning.
 //
-// Each unit of NCO increment ≈ sys_clk_freq / 2^32 ≈ 0.012 Hz (at 50 MHz),
-// or about 0.24 ppm of fs=48000. PI runs on delta-offset between
-// consecutive CRF packets (delta_offset = rate error in ns/packet).
-// Integral of delta_offset = total accumulated phase = absolute offset
-// drift, so PI-on-delta drives offset → constant in the locked state.
-// PI gains. delta is rate-error per packet in ns (packet interval
-// ≈ 2 ms for CRF at 48 kHz/96-intvl). NCO base_increment is
-// (fs / sys_clk_freq) * 2^32 ≈ 4.12M for 48 kHz on 50 MHz. To
-// correct delta ns over one 2 ms interval, the NCO needs
-// delta * 2.06e-3 units of correction (≈ delta / 512). Our prior
-// gain of 1/1 over-corrected by ~500×, which made the loop ring
-// and breach the 500ns lock-hysteresis exit threshold ~50 times
-// per second.
+// These are the original gains the project was built with — they were
+// changed to 1/128 / 1/8192 during the unsolicited-push debugging
+// (commit 0834b5a) to stop counter ringing, but that change made the
+// servo 128–256× slower and stream lock effectively stopped happening.
+// The counter "ringing" was a hysteresis/reporting problem, not a
+// servo problem. Wide single-sample hysteresis (2 µs / 10 µs) below
+// handles the counter side without crippling convergence.
 #define MCR_KP_NUM            1
-#define MCR_KP_DEN            128
+#define MCR_KP_DEN            1
 #define MCR_KI_NUM            1
-#define MCR_KI_DEN            8192
+#define MCR_KI_DEN            32
 #define MCR_INTEGRAL_CLAMP    1000000        // ±1 ms worth of phase
 #define MCR_INCREMENT_MAX_DELTA  (1 << 24)   // ~4 Mppm guard against wild swings
 

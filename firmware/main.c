@@ -16,7 +16,6 @@
 
 #include "gptp.h"
 #include "avtp.h"
-#include "aes3.h"
 #include "srp.h"
 #include "avdecc.h"
 #include "mcr.h"
@@ -28,7 +27,6 @@ static const uint8_t mac_addr[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x42};
 
 static gptp_t gptp;
 static avtp_stream_t avtp;
-static aes3_state_t aes3;
 static srp_state_t srp;
 static avdecc_state_t avdecc;
 static mcr_state_t    mcr;
@@ -42,6 +40,13 @@ static aaf_state_t    aaf;
 // Audio ring buffers (talker + listener)
 static audio_ring_t tx_audio_ring;
 static audio_ring_t rx_audio_ring;
+
+// I2S DAC writer state — paced from mcr_sample_count which ticks at fs
+// (48 kHz) once MCR is locked. Each tick we pop one block from AAF RX
+// (channels 0+1) and write to the I2S TX CSRs.
+static uint32_t dac_sample_count;
+static uint32_t dac_underrun_count;
+static uint32_t dac_last_sample_tick;
 
 // RX EtherType counters for link-debug
 static uint32_t rx_total, rx_ptp, rx_avtp, rx_msrp, rx_other;
@@ -279,12 +284,10 @@ static void check_uart_cmd(void)
                    (unsigned long)avtp.rx_packet_count,
                    (unsigned long)audio_ring_count(&rx_audio_ring),
                    (unsigned long)avtp.rx_seq_errors);
-            printf("[AES3] lk=%d rx=%lu tx=%lu ov=%lu un=%lu\n",
-                   aes3.rx_locked,
-                   (unsigned long)aes3.rx_sample_count,
-                   (unsigned long)aes3.tx_sample_count,
-                   (unsigned long)aes3.rx_overrun_count,
-                   (unsigned long)aes3.tx_underrun_count);
+            printf("[DAC ] i2s_src=%lu samples=%lu underruns=%lu\n",
+                   (unsigned long)main_i2s_source_read(),
+                   (unsigned long)dac_sample_count,
+                   (unsigned long)dac_underrun_count);
             printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d bridge_class=%u prio=%u vid=%u talker_prio_byte=0x%02x\n",
                    (unsigned long)srp.join_count,
                    (unsigned long)srp.rx_pdu_count,
@@ -450,7 +453,7 @@ static void check_uart_cmd(void)
             break;
         case 'h':
         case '?':
-            printf("\n  s   status (gPTP / AVTP / AES3 / SRP / AVDECC / I2S)\n"
+            printf("\n  s   status (gPTP / AVTP / DAC / SRP / AVDECC / I2S)\n"
                      "  m   MCR servo state (CRF lock, NCO increment, offset)\n"
                      "  a   AAF stream state (RX/TX counts, jitter buffer level)\n"
                      "  e   RX ethertype counters + LiteEth heartbeat\n"
@@ -556,7 +559,10 @@ static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_ma
         // the audio engines to filter on it.
         srp_listener_enable(&srp, stream_id, 1);
         if (p->uid == LISTENER_UID_CRF)      mcr_bind(&mcr, stream_id);
-        else if (p->uid == LISTENER_UID_AAF) aaf_bind(&aaf, stream_id);
+        else if (p->uid == LISTENER_UID_AAF) {
+            aaf_bind(&aaf, stream_id);
+            aaf.rx_audio_capture = 1;
+        }
 
         p->active = 0;
     }
@@ -632,7 +638,13 @@ static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
     }
     srp_listener_enable(&srp, stream_id, 1);
     if (uid == LISTENER_UID_CRF)      mcr_bind(&mcr, stream_id);
-    else if (uid == LISTENER_UID_AAF) aaf_bind(&aaf, stream_id);
+    else if (uid == LISTENER_UID_AAF) {
+        aaf_bind(&aaf, stream_id);
+        // Real consumer now waiting (I2S DAC) — turn on the per-packet
+        // audio copy in aaf_process_rx. Without this, rx_buf stays
+        // empty and the DAC writer would only emit underruns.
+        aaf.rx_audio_capture = 1;
+    }
 }
 
 static void on_listener_disconnect(uint16_t uid)
@@ -646,6 +658,7 @@ static void on_listener_disconnect(uint16_t uid)
     } else if (uid == LISTENER_UID_AAF) {
         if (aaf.bound) srp_listener_enable(&srp, aaf.stream_id, 0);
         aaf_unbind(&aaf);
+        aaf.rx_audio_capture = 0;   // no consumer → stop the per-pkt copy
     }
 }
 
@@ -688,8 +701,10 @@ int main(void)
     // Init protocol stacks
     gptp_init(&gptp, mac_addr);
     avtp_init(&avtp, mac_addr, &tx_audio_ring, &rx_audio_ring);
-    aes3_init(&aes3);
     srp_init(&srp, mac_addr);
+    // I2S TX source: 1 = firmware-fed (we'll push samples from AAF RX
+    // ch 0/1 via the i2s_audio_l/r CSRs at the audio sample rate).
+    main_i2s_source_write(1);
     mcr_init(&mcr, CONFIG_CLOCK_FREQUENCY, 48000);
     {
         // AAF uses the same talker stream_id/dest_mac advertised in AVDECC.
@@ -732,7 +747,6 @@ int main(void)
         dispatch_rx();
         gptp_poll(&gptp);
         avtp_poll(&avtp);
-        aes3_poll(&aes3, &tx_audio_ring, &rx_audio_ring);
         srp_poll(&srp);
 
         // Track per-stream MEDIA_LOCKED for Hive's listener indicators.
@@ -773,15 +787,31 @@ int main(void)
         }
         avdecc_poll(&avdecc);
         mcr_servo_update(&mcr);
-        // Audio routing: drain AAF RX (8ch INT_32BIT) into AES3 TX (ch 0+1).
-        // AAF→AAF loopback diagnostic disabled — it added per-packet CPU
-        // work that starved the gPTP RX path, causing Pdelay timeout +
-        // lost lock under the AAF flood (8000 fps × loopback writes).
+
+        // DAC writer: pace AAF RX ch 0/1 → I2S TX at the audio sample
+        // rate. mcr_sample_count ticks at fs (48 kHz) — driven by the
+        // MCR NCO (currently free-running at base_increment when CRF
+        // isn't locked; CRF-tuned when locked). On each new tick we
+        // pop one block from AAF RX and write the upper 24 bits of
+        // channels 0+1 to the I2S CSRs. If AAF jitter buffer is empty
+        // we count an underrun and let the I2S TX repeat the last
+        // sample (sample-and-hold in gateware).
         {
-            int32_t blk[AAF_CHANNELS];
-            while (aaf_rx_pop(&aaf, blk)) {
-                if (audio_ring_space(&tx_audio_ring) > 0)
-                    audio_ring_write(&tx_audio_ring, blk[0] >> 8, blk[1] >> 8);
+            uint32_t tick = mcr_sample_count_read();
+            uint32_t ticks_due = tick - dac_last_sample_tick;
+            if (ticks_due > 0) {
+                int32_t blk[AAF_CHANNELS];
+                if (aaf.bound && aaf.rx_audio_capture &&
+                    aaf_rx_pop(&aaf, blk)) {
+                    // 32-bit AAF → 24-bit I2S sample (drop low 8 bits)
+                    main_i2s_audio_l_write((uint32_t)(blk[0] >> 8) & 0xFFFFFFu);
+                    main_i2s_audio_r_write((uint32_t)(blk[1] >> 8) & 0xFFFFFFu);
+                    main_i2s_push_write(1);
+                    dac_sample_count++;
+                } else {
+                    dac_underrun_count++;
+                }
+                dac_last_sample_tick = tick;
             }
         }
         aaf_tx_poll(&aaf);

@@ -1776,9 +1776,12 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
             st = AECP_STATUS_BAD_ARGUMENTS;
         else {
             s->current_clock_source = src;
-            // Re-sync lock tracker to the new source's current state so
-            // the next CLOCK_DOMAIN poll reflects the switch immediately.
-            s->clock_last_locked = 0xFF;   // force re-evaluation next poll
+            // Don't reset the 0xFF sentinel — letting track_clock_lock
+            // observe the natural transition from the OLD source's
+            // tracked state to the NEW source's current state is what
+            // bumps LOCKED/UNLOCKED. If we re-baseline here, the swap
+            // looks like "already there" and the LOCKED counter stays
+            // 0 even though Media Clock is locked to CRF.
             st = AECP_STATUS_SUCCESS;
             if (s->on_clock_source_change)
                 s->on_clock_source_change(src);

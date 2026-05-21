@@ -92,9 +92,14 @@ static void dispatch_rx(void)
     // stops, Hive loses entity, gPTP servo can't update. 16 frames is
     // roughly one Class A burst window; main_loop drives dispatch_rx
     // continuously so any residual frames are picked up next call.
-    // Back to 16 — original known-good value (the fast-drop continue
-    // path was the actual cause of avtp=0, not the budget).
-    int drain_budget = 16;
+    // Drain budget. 16 was OK with nrxslots=2 in light traffic, but with
+    // AAF + CRF + AVDECC + gPTP arriving simultaneously the 2-slot FIFO
+    // overruns producing 1000+ writer_errors/sec under Hive refresh
+    // (READ_DESCRIPTOR burst overlapping AAF flow). 64 lets one
+    // dispatch_rx call empty an entire bridge burst window without
+    // returning to main_loop where slower paths (printf, MCR servo,
+    // descriptor builds) could let more frames pile up.
+    int drain_budget = 64;
     while ((ethmac_sram_writer_ev_pending_read() & ETHMAC_EV_SRAM_WRITER)
            && (drain_budget-- > 0)) {
 
@@ -768,15 +773,15 @@ int main(void)
         }
         avdecc_poll(&avdecc);
         mcr_servo_update(&mcr);
-        // Audio routing: drain AAF RX (8ch INT_32BIT) into:
-        //   - tx_audio_ring (channels 0+1, >>8 to 24-bit) → AES3 TX wire
-        //   - aaf_tx_push (all 8ch) → AAF talker (loopback for diagnostics)
+        // Audio routing: drain AAF RX (8ch INT_32BIT) into AES3 TX (ch 0+1).
+        // AAF→AAF loopback diagnostic disabled — it added per-packet CPU
+        // work that starved the gPTP RX path, causing Pdelay timeout +
+        // lost lock under the AAF flood (8000 fps × loopback writes).
         {
             int32_t blk[AAF_CHANNELS];
             while (aaf_rx_pop(&aaf, blk)) {
                 if (audio_ring_space(&tx_audio_ring) > 0)
                     audio_ring_write(&tx_audio_ring, blk[0] >> 8, blk[1] >> 8);
-                aaf_tx_push(&aaf, blk);
             }
         }
         aaf_tx_poll(&aaf);

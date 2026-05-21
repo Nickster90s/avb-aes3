@@ -464,6 +464,10 @@ static void send_connect_tx_command(avdecc_state_t *s, const avdecc_resolve_t *r
 // controller, using the talker's resolved stream_id / dest_mac / vlan.
 // The original controller's sequence_id is echoed back so it matches
 // up with their outstanding CONNECT_RX_COMMAND state.
+// Forward decls — full definitions live near push_unsol_counters().
+static void notify_listener_connected   (avdecc_state_t *s, uint16_t uid);
+static void notify_listener_disconnected(avdecc_state_t *s, uint16_t uid);
+
 static void send_deferred_connect_rx_response(avdecc_state_t *s,
                                                const avdecc_resolve_t *r,
                                                uint8_t status,
@@ -539,6 +543,8 @@ static void acmp_handle_connect_tx_response(avdecc_state_t *s, const uint8_t *pd
             if (s->on_listener_connect)
                 s->on_listener_connect(r->listener_uid,
                                         resolved_sid, resolved_dst, r->talker_id);
+
+            notify_listener_connected(s, r->listener_uid);
         }
 
         send_deferred_connect_rx_response(s, r, status,
@@ -636,6 +642,11 @@ static void acmp_handle_connect_rx(avdecc_state_t *s, const uint8_t *pdu)
     if (s->on_listener_connect)
         s->on_listener_connect(luid, stream_id, dest_mac, talker_id);
 
+    // Paint the Hive black dot: bump MEDIA_LOCKED (Milan §5.3.8.10 guarded)
+    // and push fresh COUNTERS + STREAM_INFO unsolicited responses so the
+    // listener row's "active" indicator appears without a manual refresh.
+    notify_listener_connected(s, luid);
+
     acmp_send_response(s, ACMP_MSG_CONNECT_RX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
 }
 
@@ -647,6 +658,7 @@ static void acmp_handle_disconnect_rx(avdecc_state_t *s, const uint8_t *pdu)
         l->connected = 0;
         if (l->connection_count > 0) l->connection_count--;
         if (s->on_listener_disconnect) s->on_listener_disconnect(luid);
+        notify_listener_disconnected(s, luid);
     }
     printf("[AVDECC] DISCONNECT_RX uid=%u\n", luid);
     acmp_send_response(s, ACMP_MSG_DISCONNECT_RX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
@@ -2027,14 +2039,14 @@ void avdecc_depart(avdecc_state_t *s)
 static void push_unsol_counters(avdecc_state_t *s, uint16_t dt, uint16_t di,
                                  uint32_t valid, const uint32_t *counters)
 {
-    // KILL SWITCH — earlier attempts at unsolicited counter pushes
-    // flooded the bridge (one bug fired 590 pushes/s × N controllers,
-    // bringing the AVB network down). Until we have proper
-    // rate-limiting + verified state-change detection, suppress all
-    // unsolicited pushes. Controllers (Hive) get fresh state via
-    // periodic GET_COUNTERS polls — slower UI update but no flood.
-    (void)s; (void)dt; (void)di; (void)valid; (void)counters;
-#if 0
+    // Pushes only fire on actual state changes (track_clock_lock /
+    // avdecc_listener_lock_changed) so volume is bounded by lock
+    // transition rate. The earlier flood (590 pushes/s × N ctrls
+    // crashing the network) came from a clock-source-change branch
+    // that bumped the counter in a loop — that path was reverted
+    // in 57d6d06. With MCR exit_streak=4 now suppressing single-
+    // sample jitter spikes, transition rate is low enough for
+    // Hive to show live updates without manual refresh.
     for (int i = 0; i < AVDECC_MAX_UNSOL_CTRL; i++) {
         if (!s->unsol_ctrl[i].active) continue;
 
@@ -2061,7 +2073,6 @@ static void push_unsol_counters(avdecc_state_t *s, uint16_t dt, uint16_t di,
         avdecc_eth_send(14 + 24 + 136);
         s->aecp_tx_count++;
     }
-#endif
 }
 
 static void push_unsol_clock_counters(avdecc_state_t *s)
@@ -2080,6 +2091,125 @@ static void push_unsol_stream_counters(avdecc_state_t *s, uint16_t uid)
     c[1]  = s->stream_media_unlocked[uid];
     c[11] = s->stream_frames_rx     [uid];
     push_unsol_counters(s, AEM_DESC_STREAM_INPUT, uid, 0x00000FFF, c);
+}
+
+// Build the 56-byte Milan GET_STREAM_INFO payload (the part that follows
+// the AECP header at offset +24). Layout matches the response builder in
+// aecp_handle's AEM_CMD_GET_STREAM_INFO case. dt must be STREAM_INPUT or
+// STREAM_OUTPUT. Returns the number of bytes written (always 56).
+static uint32_t build_stream_info_payload(avdecc_state_t *s, uint16_t dt,
+                                          uint16_t di, uint8_t *p)
+{
+    const uint8_t *fmt = stream_fmt_aaf_8ch_48k;
+    const uint8_t *stream_id = NULL, *dest_mac = NULL;
+    uint32_t info_flags = STREAM_INFO_FLAG_STREAM_FORMAT_VALID;
+    uint8_t  probing = 0;
+    uint32_t msrp_latency = 2000000;
+    uint16_t vlan_id = 2;
+
+    if (dt == AEM_DESC_STREAM_OUTPUT && di < AVDECC_MAX_TALKERS) {
+        const avdecc_talker_stream_t *t = &s->talkers[di];
+        stream_id = t->stream_id;
+        dest_mac  = t->dest_mac;
+        info_flags |= STREAM_INFO_FLAG_STREAM_ID_VALID
+                    | STREAM_INFO_FLAG_STREAM_DEST_MAC_VALID
+                    | STREAM_INFO_FLAG_MSRP_ACC_LATENCY_VALID
+                    | STREAM_INFO_FLAG_STREAM_VLAN_ID_VALID;
+    } else if (dt == AEM_DESC_STREAM_INPUT && di < AVDECC_MAX_LISTENERS) {
+        const avdecc_listener_stream_t *l = &s->listeners[di];
+        fmt = (di == LISTENER_CRF_INDEX) ? stream_fmt_crf_48k : stream_fmt_aaf_8ch_48k;
+        if (l->connected) {
+            stream_id = l->stream_id;
+            dest_mac  = l->dest_mac;
+            info_flags |= STREAM_INFO_FLAG_STREAM_ID_VALID
+                        | STREAM_INFO_FLAG_STREAM_DEST_MAC_VALID;
+            int has_talker = 0;
+            for (int i = 0; i < 8; i++)
+                if (l->talker_id[i]) { has_talker = 1; break; }
+            if (has_talker) {
+                info_flags |= STREAM_INFO_FLAG_CONNECTED
+                            | STREAM_INFO_FLAG_FAST_CONNECT
+                            | STREAM_INFO_FLAG_SAVED_STATE;
+            }
+            probing = 3;   // Completed
+            if (l->msrp_accumulated_latency_ns)
+                msrp_latency = l->msrp_accumulated_latency_ns;
+            if (l->stream_vlan_id)
+                vlan_id = l->stream_vlan_id;
+        }
+    }
+
+    memset(p, 0, 56);
+    av_put_be16(p +  0, dt);
+    av_put_be16(p +  2, di);
+    av_put_be32(p +  4, info_flags);
+    memcpy   (p +  8, fmt, 8);                             // stream_format
+    if (stream_id) memcpy(p + 16, stream_id, 8);
+    av_put_be32(p + 24, msrp_latency);                     // MSRP accumulated latency
+    if (dest_mac) memcpy(p + 28, dest_mac, 6);
+    // bytes 34..43 reserved/failure already zero from memset
+    av_put_be16(p + 44, vlan_id);                          // stream_vlan_id
+    // Milan extension (offset 48..55):
+    // 48..51 = stream_info_flags_ex (0), 52 = probing|acmp, 53 = rsvd, 54..55 = rsvd
+    p[52] = ((probing & 0x07) << 5);                       // acmp_status=0
+    return 56;
+}
+
+// Emit an unsolicited GET_STREAM_INFO_RESPONSE for (dt,di) to every
+// registered controller. Mirrors sm2's notify_stream_info_changed —
+// causes Hive to refresh the listener's flags + probing_status without
+// waiting for its own poll, which is what makes the "active" black dot
+// appear in the patch matrix right after CONNECT_RX.
+static void push_unsol_stream_info(avdecc_state_t *s, uint16_t dt, uint16_t di)
+{
+    for (int i = 0; i < AVDECC_MAX_UNSOL_CTRL; i++) {
+        if (!s->unsol_ctrl[i].active) continue;
+
+        uint8_t *frame = avdecc_tx_buf();
+        memcpy(frame, s->unsol_ctrl[i].mac, 6);
+        memcpy(frame + 6, s->src_mac, 6);
+        av_put_be16(frame + 12, AVDECC_ETHERTYPE);
+
+        uint8_t *p = frame + 14;
+        p[0] = AVTP_SUBTYPE_AECP;
+        p[1] = AECP_MSG_AEM_RESPONSE;
+        memcpy(p + AECP_OFF_TARGET_ID,     s->entity_id, 8);
+        memcpy(p + AECP_OFF_CONTROLLER_ID, s->unsol_ctrl[i].controller_eid, 8);
+        av_put_be16(p + AECP_OFF_SEQ_ID,   s->unsol_ctrl[i].unsol_seq_id++);
+        av_put_be16(p + AECP_OFF_CMD_TYPE, 0x8000 | AEM_CMD_GET_STREAM_INFO);
+
+        build_stream_info_payload(s, dt, di, p + 24);
+        aecp_set_status_cdl(p, AECP_STATUS_SUCCESS, 68);   // 12 (hdr) + 56 (payload)
+
+        avdecc_eth_send(14 + 24 + 56);
+        s->aecp_tx_count++;
+    }
+}
+
+// Connect-side counter dance per sm2 / Milan §5.3.8.10:
+// bump MEDIA_LOCKED only when LOCKED == UNLOCKED (preserves |L-U| ≤ 1).
+// Push fresh counters + stream_info so Hive paints the dot immediately.
+static void notify_listener_connected(avdecc_state_t *s, uint16_t uid)
+{
+    if (uid >= AVDECC_MAX_LISTENERS) return;
+    if (s->stream_media_locked[uid] == s->stream_media_unlocked[uid]) {
+        s->stream_media_locked[uid]++;
+        s->stream_last_locked[uid] = 1;
+    }
+    push_unsol_stream_counters(s, uid);
+    push_unsol_stream_info    (s, AEM_DESC_STREAM_INPUT, uid);
+}
+
+// Disconnect-side: bump MEDIA_UNLOCKED only if UNLOCKED < LOCKED.
+static void notify_listener_disconnected(avdecc_state_t *s, uint16_t uid)
+{
+    if (uid >= AVDECC_MAX_LISTENERS) return;
+    if (s->stream_media_unlocked[uid] < s->stream_media_locked[uid]) {
+        s->stream_media_unlocked[uid]++;
+        s->stream_last_locked[uid] = 0;
+    }
+    push_unsol_stream_counters(s, uid);
+    push_unsol_stream_info    (s, AEM_DESC_STREAM_INPUT, uid);
 }
 
 void avdecc_listener_lock_changed(avdecc_state_t *s, uint16_t uid, uint8_t locked)

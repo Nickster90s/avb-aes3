@@ -178,16 +178,15 @@ void mcr_servo_update(mcr_state_t *m)
     // Write to NCO CSR
     mcr_increment_write(m->current_increment);
 
-    // Lock hysteresis — single-sample with wide thresholds.
-    // 8-streak entry never fired in practice because Class A jitter
-    // routinely brushes µs; lock was stuck at 0 (Media Locked never
-    // bumped). Wide thresholds alone are enough to ignore individual
-    // jitter spikes; counter flapping from before came from narrow
-    // thresholds (500 ns) not from single-sample evaluation.
+    // Asymmetric hysteresis: lock fast (1 good sample) but unlock slow
+    // (4 consecutive bad samples). Single-sample exit caused MEDIA_LOCKED/
+    // UNLOCKED to climb in lockstep under occasional Class A jitter
+    // spikes (max|d|=17.8 µs observed even with avg|d|=367 ns).
+    // 4-sample exit treats those as transient and stays locked.
     #define MCR_LOCK_ENTER_NS    2000
     #define MCR_LOCK_EXIT_NS    10000
     #define MCR_LOCK_ENTER_STREAK  1
-    #define MCR_LOCK_EXIT_STREAK   1
+    #define MCR_LOCK_EXIT_STREAK   4
     int64_t abs_delta = (delta < 0) ? -delta : delta;
 
     // Roll a 500-sample (1s at 500fps) stats window for diagnostics.

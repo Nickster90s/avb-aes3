@@ -9,12 +9,12 @@
 # - LiteEthTSU (PTP Timestamping Unit) with CSRs for gPTP firmware
 # - I2S TX → PCM5102A DAC
 # - MCR NCO (firmware PI servo on CRF stream)
-# - AVTPStreamFilter (gateware-side stream matching, Stage 1)
+# - AVTPSampleExtractor (gateware-side stream matching + sample extraction, Stage 2a)
 # - UART (PMOD)
 #
 # AES3 RX/TX gateware modules were removed 2026-05-21 — they were
 # dormant (firmware path moved to I2S DAC) but still consumed enough
-# slices to block AVTPStreamFilter timing closure. Verilog files
+# slices to block AVTPSampleExtractor timing closure. Verilog files
 # preserved in rtl/_aes3_backup/.
 #
 # Build:
@@ -49,7 +49,7 @@ from liteeth.core.ptp import LiteEthTSU
 # Stage 1 of firmware-to-gateware audio path migration. Observes the
 # LiteEth MAC RX stream and per-frame matches (dst_mac, stream_id)
 # against CSR-configured slots; 3-stage pipelined for timing closure.
-from avtp_stream_filter import AVTPStreamFilter
+from avtp_extractor import AVTPSampleExtractor
 
 from migen.genlib.fifo import SyncFIFO
 
@@ -364,21 +364,38 @@ class AVBSoC(SoCCore):
         ]
 
         # ------------------------------------------------------------
-        # Stage 1: AVTP stream filter (observer of MAC RX stream).
-        # 3-cycle pipelined to keep eth_tx_clk timing closure margin.
-        # Doesn't drive back-pressure on the MAC and doesn't affect the
-        # existing SRAM writer path — per-slot match counters give
-        # firmware a way to verify the gateware sees the same streams
-        # the dispatcher does. Stage 2 will route matched frames'
-        # samples directly to per-stream FIFOs (CPU offload).
+        # Stage 2a: AVTPSampleExtractor (observer of MAC RX stream).
+        # Same matching pipeline as the Stage-1 filter but ALSO extracts
+        # AAF audio samples into per-slot per-channel FIFOs that
+        # firmware reads via CSR. 32 KB BRAM for 4×8×256 sample buffer.
+        # Still observer mode — frames also reach the CPU SRAM writer
+        # as before, but firmware no longer copies audio bytes (gateware
+        # has already done it). Stage 2b will gate matched frames out
+        # of the LiteEth SRAM path to eliminate the AAF flood entirely.
         # ------------------------------------------------------------
-        self.submodules.avtp_filter = avtp_filter = AVTPStreamFilter(n_slots=4)
+        # First-light shrink: 1 AAF slot. AAF stream on the wire is 8-channel
+        # (Milan default) — the extractor FSM still parses all 8, but only
+        # ch 0 and ch 1 (L+R) are stored in FIFOs and forwarded to the DAC.
+        # CRF stays in firmware dispatcher (~100 Hz). The full 4 slots × 8 ch
+        # fanout collapsed sys_clk to 60-70 MHz; grow back to multi-slot
+        # once the end-to-end audio path is verified.
+        self.submodules.avtp_extractor = avtp_extractor = AVTPSampleExtractor(
+            n_slots=1, n_channels=2, wire_channels=8, fifo_depth=256)
         self.comb += [
-            avtp_filter.sink.valid.eq(mac.core.source.valid & mac.core.source.ready),
-            avtp_filter.sink.data.eq(mac.core.source.data),
-            avtp_filter.sink.last.eq(mac.core.source.last),
-            avtp_filter.sink.last_be.eq(mac.core.source.last_be),
+            avtp_extractor.sink.valid.eq(mac.core.source.valid & mac.core.source.ready),
+            avtp_extractor.sink.data.eq(mac.core.source.data),
+            avtp_extractor.sink.last.eq(mac.core.source.last),
+            avtp_extractor.sink.last_be.eq(mac.core.source.last_be),
         ]
+
+        # Stage 2b: drop matched AAF frames before they raise the CPU event.
+        # The extractor combinationally asserts match_at_eof on the same cycle
+        # as the last beat of a matched frame; LiteEth's SRAM writer (patched)
+        # then routes that frame into DISCARD instead of TERMINATE, so the
+        # ev_pending interrupt never fires and the dispatch loop never wakes
+        # for it. Audio bytes are already in the extractor FIFOs by then.
+        self.comb += mac.interface.sram.writer.discard_in.eq(
+            avtp_extractor.match_at_eof)
 
         # CSRs: pop strobe + 80-bit popped value + level + overflow count.
         self.rx_ts_pop_lo  = CSRStatus(32, description="RX-ring popped nanoseconds.")
@@ -567,7 +584,7 @@ def main():
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
         # and pick the seed with the highest eth_tx_clk PASS.
-        builder.build(seed=13)   # eth_tx_clk PASS 133.85 MHz (post-cleanup sweep with AVTPStreamFilter integrated, 2026-05-22)
+        builder.build(seed=8)    # eth_tx_clk PASS 131.49 MHz (final-netlist sweep, 1×2-ch AVTPSampleExtractor + wire_channels=8, 2026-05-22)
 
     if args.load:
         prog = soc.platform.create_programmer()

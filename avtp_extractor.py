@@ -18,10 +18,12 @@
 # header + a 64-deep audio_buffer for the audio portion. After EOF,
 # if matched, we replay the audio into per-channel FIFOs.
 #
-# CSR interface for firmware:
-#   slotN_chM_pop  (write-strobe)    : pop one sample from this FIFO
-#   slotN_chM_data (read-only 32-bit): sample at head of FIFO
-#   slotN_chM_level(read-only 9-bit) : FIFO occupancy
+# CSR interface for firmware (indirect-addressed to keep the CSR read
+# mux small — direct per-channel CSRs explode sys_clk fmax):
+#   slotN_ch_select (write 0..n_channels-1): select FIFO for next access
+#   slotN_pop  (write-strobe)    : pop one sample from selected channel
+#   slotN_data (read-only 32-bit): sample at head of selected channel
+#   slotN_level(read-only 9-bit) : occupancy of selected channel
 
 from migen import *
 from migen.genlib.fifo import SyncFIFO
@@ -41,22 +43,37 @@ class AVTPSampleExtractor(Module, AutoCSR):
     count, sample format) and pushes each per-channel sample into the
     corresponding sample_fifo[slot][channel].
 
-    n_slots    — number of configurable stream slots
-    n_channels — number of channels per slot to extract
-    fifo_depth — depth of each per-channel sample FIFO (samples)
+    n_slots        — number of configurable stream slots
+    n_channels     — number of channels per slot to STORE into FIFOs
+    wire_channels  — number of channels in the AAF wire format
+                     (defaults to n_channels). Samples for channels
+                     [n_channels..wire_channels-1] are parsed but
+                     dropped — lets a 1×2 FIFO config still consume
+                     an 8-channel AAF stream.
+    fifo_depth     — depth of each per-channel sample FIFO (samples)
 
     Total BRAM: n_slots × n_channels × fifo_depth × 4 bytes.
-    Default (4 × 8 × 256) = 32 KB.
     """
 
-    def __init__(self, n_slots=4, n_channels=8, fifo_depth=256, dw=32):
+    def __init__(self, n_slots=4, n_channels=8, fifo_depth=256, dw=32,
+                 wire_channels=None):
         assert dw == 32, "Only 32-bit input stream supported at present"
+        if wire_channels is None:
+            wire_channels = n_channels
+        assert wire_channels >= n_channels, "wire_channels must be ≥ n_channels"
 
         # ---- Input stream (observe-only) ----
         self.sink = stream.Endpoint([
             ("data",    dw),
             ("last_be", dw // 8),
         ])
+
+        # ---- Stage 2b: combinational match-at-EOF signal ----
+        # High on the same cycle as sink.valid & sink.last when the current
+        # frame matches any enabled slot. Driven into LiteEth SRAM writer's
+        # discard_in so matched frames are buffered in slot SRAM but never
+        # raise the ev_pending event — CPU dispatcher never sees them.
+        self.match_at_eof = Signal()
 
         # ---- Per-slot configuration CSRs (split for 32-bit CSR width) ----
         for i in range(n_slots):
@@ -93,10 +110,12 @@ class AVTPSampleExtractor(Module, AutoCSR):
                 getattr(self, f"slot{i}_stream_id_hi").storage)
             for i in range(n_slots))
 
-        # ---- Per-slot per-channel CSR-readable sample FIFOs ----
-        # Each FIFO is a 32-bit-wide × fifo_depth-deep SyncFIFO. Per-channel
-        # access via dedicated CSRs lets firmware pop samples without an
-        # additional mux address.
+        # ---- Per-slot CSR-readable sample FIFOs (indirect addressing) ----
+        # Each FIFO is a 32-bit-wide × fifo_depth-deep SyncFIFO. To keep the
+        # CSR read mux small, we expose ONE data/level/pop per slot and a
+        # ch_select CSR that picks which FIFO they target. Otherwise the
+        # 4×8×3 = 96 CSRs collapse sys_clk fmax to ~60 MHz.
+        ch_sel_w = (n_channels - 1).bit_length() if n_channels > 1 else 1
         self.fifos = []
         for s in range(n_slots):
             row = []
@@ -104,25 +123,32 @@ class AVTPSampleExtractor(Module, AutoCSR):
                 fifo = SyncFIFO(width=32, depth=fifo_depth)
                 self.submodules += fifo
                 row.append(fifo)
-
-                # Three CSRs per FIFO: pop strobe, data head, level.
-                pop = CSRStorage(1, name=f"slot{s}_ch{c}_pop",
-                    description=f"Slot {s} ch {c}: write 1 to pop one sample.")
-                data = CSRStatus(32, name=f"slot{s}_ch{c}_data",
-                    description=f"Slot {s} ch {c}: sample at FIFO head.")
-                level = CSRStatus(9, name=f"slot{s}_ch{c}_level",
-                    description=f"Slot {s} ch {c}: FIFO occupancy 0..{fifo_depth}.")
-                setattr(self, f"slot{s}_ch{c}_pop",   pop)
-                setattr(self, f"slot{s}_ch{c}_data",  data)
-                setattr(self, f"slot{s}_ch{c}_level", level)
-
-                self.comb += [
-                    data.status.eq(fifo.dout),
-                    level.status.eq(fifo.level),
-                    # Pop on CSRStorage write (re-edge of .re).
-                    fifo.re.eq(pop.re),
-                ]
             self.fifos.append(row)
+
+            ch_sel = CSRStorage(ch_sel_w, name=f"slot{s}_ch_select",
+                description=f"Slot {s}: channel index for data/level/pop.")
+            pop    = CSRStorage(1, name=f"slot{s}_pop",
+                description=f"Slot {s}: write 1 to pop one sample from selected channel.")
+            data   = CSRStatus(32, name=f"slot{s}_data",
+                description=f"Slot {s}: sample at head of selected channel.")
+            level  = CSRStatus(9, name=f"slot{s}_level",
+                description=f"Slot {s}: occupancy of selected channel.")
+            setattr(self, f"slot{s}_ch_select", ch_sel)
+            setattr(self, f"slot{s}_pop",       pop)
+            setattr(self, f"slot{s}_data",      data)
+            setattr(self, f"slot{s}_level",     level)
+
+            # 8:1 muxes on data/level — small, local to this slot
+            sel = ch_sel.storage
+            data_mux  = Array([row[c].dout  for c in range(n_channels)])
+            level_mux = Array([row[c].level for c in range(n_channels)])
+            self.comb += [
+                data.status.eq(data_mux[sel]),
+                level.status.eq(level_mux[sel]),
+            ]
+            # Pop fires re only on the selected channel
+            for c in range(n_channels):
+                self.comb += row[c].re.eq(pop.re & (sel == c))
 
         # ---- Frame buffer ----
         # 8 header beats + audio. Worst-case AAF: 24-byte AAF header + 6 ×
@@ -170,8 +196,16 @@ class AVTPSampleExtractor(Module, AutoCSR):
         )
 
         def byte_at(off):
+            # LiteEth mac.core.source.data carries frame byte 0 at the LSB
+            # of the data word (sink.data[7:0]), byte 3 at the MSB
+            # ([31:24]). The writer's endianness="big" reversal applies to
+            # memory storage, NOT to the stream itself. So shift = 8*(off%4),
+            # NOT 24-8*(off%4). Verified empirically via diag CSRs on FPGA
+            # 2026-05-22 — the wrong shift caused vlan_comb to read byte 15
+            # instead of byte 12, classifying VLAN frames as untagged, which
+            # in turn made the stream_id match fail on every frame.
             w = off // 4
-            shift = 24 - 8 * (off % 4)
+            shift = 8 * (off % 4)
             return hdr_words[w][shift:shift + 8]
 
         # Pipeline stage B: latch keys at EOF.
@@ -229,6 +263,44 @@ class AVTPSampleExtractor(Module, AutoCSR):
             ),
         ]
 
+        # ---- Diagnostic: capture last-observed wire keys at every EOF ----
+        # If slotN_match_count stays 0 while frames are arriving, these tell
+        # us what the gateware ACTUALLY saw vs what firmware programmed.
+        self.diag_eof_count = CSRStatus(32, description="Total frames seen at EOF.")
+        self.diag_last_sid_hi = CSRStatus(32, description="Last EOF: sid[63:32].")
+        self.diag_last_sid_lo = CSRStatus(32, description="Last EOF: sid[31:0].")
+        self.diag_last_dst_mac_hi = CSRStatus(16, description="Last EOF: dst_mac[47:32].")
+        self.diag_last_dst_mac_lo = CSRStatus(32, description="Last EOF: dst_mac[31:0].")
+        self.diag_last_subtype = CSRStatus(8, description="Last EOF: AVTP subtype.")
+        self.sync += If(eof_b,
+            self.diag_eof_count.status.eq(self.diag_eof_count.status + 1),
+            self.diag_last_sid_hi.status.eq(sid_b[32:64]),
+            self.diag_last_sid_lo.status.eq(sid_b[0:32]),
+            self.diag_last_dst_mac_hi.status.eq(dst_mac_b[32:48]),
+            self.diag_last_dst_mac_lo.status.eq(dst_mac_b[0:32]),
+            self.diag_last_subtype.status.eq(subtype_b),
+        )
+
+        # ---- Stage 2b: combinational match-at-EOF for LiteEth discard_in ----
+        # All header words (hdr_words[0..7]) are latched by the time sink.last
+        # fires, so the combinational keys (dst_mac_comb, sid_comb, subtype_comb)
+        # are valid on the EOF cycle itself. OR-reduce per-slot enable+match.
+        any_slot_match_comb = Signal()
+        per_slot_match = Cat(*[
+            (slot_enabled[i]
+             & (slot_dst_mac[i]   == dst_mac_comb)
+             & (slot_stream_id[i] == sid_comb))
+            for i in range(n_slots)
+        ])
+        self.comb += [
+            any_slot_match_comb.eq(per_slot_match != 0),
+            self.match_at_eof.eq(
+                self.sink.valid & self.sink.last
+                & (subtype_comb == AVTP_SUBTYPE_AAF)
+                & any_slot_match_comb
+            ),
+        ]
+
         # ---- Sample extraction FSM ----
         #
         # On matched-EOF, walk the captured frame buffer from the audio
@@ -273,9 +345,12 @@ class AVTPSampleExtractor(Module, AutoCSR):
         ex_beat_addr  = Signal(max=BUF_BEATS + 1)   # next memory read
         ex_prev_word  = Signal(32)                  # beat[N-1]
 
-        # AAF Class A: 6 sample-blocks × n_channels = total samples per frame.
-        # Hardcoded to the wire format we declared in the AEM descriptor.
-        SAMPLES_PER_FRAME = 6 * n_channels
+        # AAF Class A: 6 sample-blocks × wire_channels = total samples
+        # per frame on the wire. We may instantiate fewer FIFOs than
+        # wire_channels (n_channels < wire_channels): the FSM still steps
+        # through all wire samples but writes are only enabled for
+        # channels [0..n_channels-1]. Other samples are simply dropped.
+        SAMPLES_PER_FRAME = 6 * wire_channels
 
         # Combinational read address.
         self.comb += rd_port.adr.eq(ex_beat_addr)
@@ -283,25 +358,32 @@ class AVTPSampleExtractor(Module, AutoCSR):
         # Per-FIFO write enable + data. ex_state == EX_STREAM drives
         # exactly one fifo[slot][ch].we high per cycle (one-hot decode).
         ex_sample = Signal(32)
-        self.comb += ex_sample.eq(Cat(rd_port.dat_r[16:32], ex_prev_word[0:16]))
-        # ↑ Cat() is LSB-first in Migen:
-        #     bits 0..15  = rd_port.dat_r[16:32]  (curr_word[31:16] on wire)
-        #     bits 16..31 = ex_prev_word[0:16]    (prev_word[15:0]  on wire)
-        # → integer value reads as {prev[15:0], curr[31:16]} big-endian
-        # → matches the on-wire AAF sample for byte-offset = 2.
+        # LiteEth frame_buf stores beats LSB-first: byte at frame offset
+        # (4w+0) is at bits [7:0] of word w, byte (4w+3) at [31:24].
+        # AAF sample at byte offset 4n+2 (VLAN: 42, untagged: 38) spans:
+        #   prev_word bits[16:24] = byte 4n+2 (audio MSB)
+        #   prev_word bits[24:32] = byte 4n+3
+        #   curr_word bits[0:8]   = byte 4n+4
+        #   curr_word bits[8:16]  = byte 4n+5 (audio LSB)
+        # Cat is LSB-first, so place byte 4n+5 at Cat position 0 (LSB).
+        self.comb += ex_sample.eq(Cat(
+            rd_port.dat_r[8:16],     # ex_sample[7:0]   = byte 4n+5
+            rd_port.dat_r[0:8],      # ex_sample[15:8]  = byte 4n+4
+            ex_prev_word[24:32],     # ex_sample[23:16] = byte 4n+3
+            ex_prev_word[16:24],     # ex_sample[31:24] = byte 4n+2 (sample MSB)
+        ))
 
-        # Channel index for the current sample.
-        ex_ch_now = Signal(max=n_channels)
-        self.comb += ex_ch_now.eq(ex_sample_n[:Signal(max=n_channels).nbits] if n_channels > 1
-                                  else 0)
-        # Actually, just modulo: ex_sample_n mod n_channels.
-        # n_channels is a constant power-of-2 (8) so the modulo is the
-        # low log2(n_channels) bits of ex_sample_n. Simpler:
-        if n_channels == 1:
+        # Channel index for the current sample (modulo wire_channels —
+        # the wire AAF format always has wire_channels samples per block).
+        # FIFOs only exist for ch < n_channels; for c in (n_channels..
+        # wire_channels-1) the write enables below never assert, so the
+        # sample is parsed and dropped.
+        ex_ch_now = Signal(max=max(wire_channels, 2))
+        if wire_channels == 1:
             self.comb += ex_ch_now.eq(0)
         else:
             import math
-            nb = int(math.log2(n_channels))
+            nb = int(math.log2(wire_channels))
             self.comb += ex_ch_now.eq(ex_sample_n[:nb])
 
         # One-hot per-(slot,ch) write enable + shared sample data.
@@ -379,9 +461,12 @@ class AVTPSampleExtractor(Module, AutoCSR):
 # ----------------------------------------------------------------------
 
 def _bytes_to_beats(bs):
+    # LiteEth byte layout: byte 0 of beat at LSB, byte 3 at MSB.
+    # (Sim previously used (b0<<24)|...|b3, which gave the OPPOSITE layout
+    # — matched the extractor's broken byte_at but not real hardware.)
     while len(bs) % 4 != 0:
         bs.append(0)
-    return [(bs[i] << 24) | (bs[i+1] << 16) | (bs[i+2] << 8) | bs[i+3]
+    return [bs[i] | (bs[i+1] << 8) | (bs[i+2] << 16) | (bs[i+3] << 24)
             for i in range(0, len(bs), 4)]
 
 

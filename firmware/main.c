@@ -36,14 +36,17 @@ static aaf_state_t    aaf;
 #define LISTENER_UID_AAF  1
 #define TALKER_UID_AAF    0
 
-// AVTP gateware filter slots — Stage 1. Slot 0 = CRF, slot 1 = AAF in.
-#define AVTP_FILTER_SLOT_CRF  0
-#define AVTP_FILTER_SLOT_AAF  1
+// AVTP gateware filter slot — shrunk to single AAF slot for first-light.
+// CRF still goes through CPU dispatcher (low-rate). SLOT_CRF kept as a
+// sentinel so callers compile, but set/clear are no-ops for it.
+#define AVTP_FILTER_SLOT_CRF  -1
+#define AVTP_FILTER_SLOT_AAF  0
 
 static void avtp_filter_set_slot(int slot,
                                   const uint8_t *stream_id,
                                   const uint8_t *dest_mac)
 {
+    if (slot != AVTP_FILTER_SLOT_AAF) return;  // CRF: not in hardware
     uint32_t sid_hi = ((uint32_t)stream_id[0] << 24) |
                       ((uint32_t)stream_id[1] << 16) |
                       ((uint32_t)stream_id[2] <<  8) |
@@ -57,57 +60,23 @@ static void avtp_filter_set_slot(int slot,
                       ((uint32_t)dest_mac[3] << 16) |
                       ((uint32_t)dest_mac[4] <<  8) |
                        (uint32_t)dest_mac[5];
-    switch (slot) {
-        case 0:
-            avtp_filter_slot0_stream_id_hi_write(sid_hi);
-            avtp_filter_slot0_stream_id_lo_write(sid_lo);
-            avtp_filter_slot0_dst_mac_hi_write   (mac_hi);
-            avtp_filter_slot0_dst_mac_lo_write   (mac_lo);
-            avtp_filter_slot0_enabled_write      (1);
-            break;
-        case 1:
-            avtp_filter_slot1_stream_id_hi_write(sid_hi);
-            avtp_filter_slot1_stream_id_lo_write(sid_lo);
-            avtp_filter_slot1_dst_mac_hi_write   (mac_hi);
-            avtp_filter_slot1_dst_mac_lo_write   (mac_lo);
-            avtp_filter_slot1_enabled_write      (1);
-            break;
-        case 2:
-            avtp_filter_slot2_stream_id_hi_write(sid_hi);
-            avtp_filter_slot2_stream_id_lo_write(sid_lo);
-            avtp_filter_slot2_dst_mac_hi_write   (mac_hi);
-            avtp_filter_slot2_dst_mac_lo_write   (mac_lo);
-            avtp_filter_slot2_enabled_write      (1);
-            break;
-        case 3:
-            avtp_filter_slot3_stream_id_hi_write(sid_hi);
-            avtp_filter_slot3_stream_id_lo_write(sid_lo);
-            avtp_filter_slot3_dst_mac_hi_write   (mac_hi);
-            avtp_filter_slot3_dst_mac_lo_write   (mac_lo);
-            avtp_filter_slot3_enabled_write      (1);
-            break;
-    }
+    avtp_extractor_slot0_stream_id_hi_write(sid_hi);
+    avtp_extractor_slot0_stream_id_lo_write(sid_lo);
+    avtp_extractor_slot0_dst_mac_hi_write   (mac_hi);
+    avtp_extractor_slot0_dst_mac_lo_write   (mac_lo);
+    avtp_extractor_slot0_enabled_write      (1);
 }
 
 static void avtp_filter_clear_slot(int slot)
 {
-    switch (slot) {
-        case 0: avtp_filter_slot0_enabled_write(0); break;
-        case 1: avtp_filter_slot1_enabled_write(0); break;
-        case 2: avtp_filter_slot2_enabled_write(0); break;
-        case 3: avtp_filter_slot3_enabled_write(0); break;
-    }
+    if (slot != AVTP_FILTER_SLOT_AAF) return;
+    avtp_extractor_slot0_enabled_write(0);
 }
 
 static uint32_t avtp_filter_match_count(int slot)
 {
-    switch (slot) {
-        case 0: return avtp_filter_slot0_match_count_read();
-        case 1: return avtp_filter_slot1_match_count_read();
-        case 2: return avtp_filter_slot2_match_count_read();
-        case 3: return avtp_filter_slot3_match_count_read();
-    }
-    return 0;
+    if (slot != AVTP_FILTER_SLOT_AAF) return 0;
+    return avtp_extractor_slot0_match_count_read();
 }
 
 // I2S DAC writer state — paced from mcr_sample_count which ticks at fs
@@ -614,6 +583,19 @@ static void check_uart_cmd(void)
                    (unsigned long)avtp_filter_match_count(1),
                    (unsigned long)avtp_filter_match_count(2),
                    (unsigned long)avtp_filter_match_count(3));
+            printf("  HW slot0: en=%u sid=%08lx_%08lx mac=%04lx_%08lx\n",
+                   (unsigned)avtp_extractor_slot0_enabled_read(),
+                   (unsigned long)avtp_extractor_slot0_stream_id_hi_read(),
+                   (unsigned long)avtp_extractor_slot0_stream_id_lo_read(),
+                   (unsigned long)avtp_extractor_slot0_dst_mac_hi_read(),
+                   (unsigned long)avtp_extractor_slot0_dst_mac_lo_read());
+            printf("  HW last : eofs=%lu sid=%08lx_%08lx mac=%04lx_%08lx subtype=0x%02x\n",
+                   (unsigned long)avtp_extractor_diag_eof_count_read(),
+                   (unsigned long)avtp_extractor_diag_last_sid_hi_read(),
+                   (unsigned long)avtp_extractor_diag_last_sid_lo_read(),
+                   (unsigned long)avtp_extractor_diag_last_dst_mac_hi_read(),
+                   (unsigned long)avtp_extractor_diag_last_dst_mac_lo_read(),
+                   (unsigned)avtp_extractor_diag_last_subtype_read());
             break;
         case 'D':
             // Force-clear local listener bindings — useful when Hive's
@@ -751,7 +733,9 @@ static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_ma
             avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, stream_id, p->dest_mac);
         } else if (p->uid == LISTENER_UID_AAF) {
             aaf_bind(&aaf, stream_id);
-            aaf.rx_audio_capture = 1;
+            // Stage 2a: gateware AVTPSampleExtractor pulls audio into
+            // sample FIFOs; firmware aaf_process_rx no longer copies.
+            // aaf.rx_audio_capture stays 0 — only frame counting.
             avtp_filter_set_slot(AVTP_FILTER_SLOT_AAF, stream_id, p->dest_mac);
         }
 
@@ -833,10 +817,9 @@ static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
         avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, stream_id, dest_mac);
     } else if (uid == LISTENER_UID_AAF) {
         aaf_bind(&aaf, stream_id);
-        // Real consumer now waiting (I2S DAC) — turn on the per-packet
-        // audio copy in aaf_process_rx. Without this, rx_buf stays
-        // empty and the DAC writer would only emit underruns.
-        aaf.rx_audio_capture = 1;
+        // Stage 2a: gateware AVTPSampleExtractor copies audio samples
+        // into per-channel FIFOs. aaf.rx_audio_capture stays 0;
+        // aaf_process_rx only bumps the FRAMES_RX counter.
         avtp_filter_set_slot(AVTP_FILTER_SLOT_AAF, stream_id, dest_mac);
     }
 }
@@ -1000,12 +983,23 @@ int main(void)
             if (ticks_due > 32) ticks_due = 32;
             uint32_t processed = ticks_due;
             while (ticks_due--) {
+                // Stage 2a audio source: per-channel sample FIFOs in
+                // the gateware AVTPSampleExtractor. Slot 1 = AAF in,
+                // channels 0+1 → I2S L/R. Firmware never touches the
+                // audio bytes; gateware did the parse + sample pack.
                 int32_t sl = 0, sr = 0;
-                int32_t blk[AAF_CHANNELS];
-                if (aaf.bound && aaf.rx_audio_capture &&
-                    aaf_rx_pop(&aaf, blk)) {
-                    sl = blk[0] >> 8;
-                    sr = blk[1] >> 8;
+                // Indirect-addressed: write ch_select, then read data/level.
+                // Single AAF slot = slot 0; ch 0 = L, ch 1 = R.
+                avtp_extractor_slot0_ch_select_write(0);
+                uint32_t lvl_l = avtp_extractor_slot0_level_read();
+                avtp_extractor_slot0_ch_select_write(1);
+                uint32_t lvl_r = avtp_extractor_slot0_level_read();
+                if (lvl_l > 0 && lvl_r > 0) {
+                    sr = (int32_t)avtp_extractor_slot0_data_read() >> 8;
+                    avtp_extractor_slot0_pop_write(1);
+                    avtp_extractor_slot0_ch_select_write(0);
+                    sl = (int32_t)avtp_extractor_slot0_data_read() >> 8;
+                    avtp_extractor_slot0_pop_write(1);
                     dac_sample_count++;
                 } else {
                     dac_underrun_count++;

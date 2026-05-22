@@ -15,7 +15,7 @@
 #include <generated/soc.h>
 
 #include "gptp.h"
-#include "avtp.h"
+#include "avtp_const.h"
 #include "srp.h"
 #include "avdecc.h"
 #include "mcr.h"
@@ -26,7 +26,6 @@
 static const uint8_t mac_addr[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x42};
 
 static gptp_t gptp;
-static avtp_stream_t avtp;
 static srp_state_t srp;
 static avdecc_state_t avdecc;
 static mcr_state_t    mcr;
@@ -37,9 +36,79 @@ static aaf_state_t    aaf;
 #define LISTENER_UID_AAF  1
 #define TALKER_UID_AAF    0
 
-// Audio ring buffers (talker + listener)
-static audio_ring_t tx_audio_ring;
-static audio_ring_t rx_audio_ring;
+// AVTP gateware filter slots — Stage 1. Slot 0 = CRF, slot 1 = AAF in.
+#define AVTP_FILTER_SLOT_CRF  0
+#define AVTP_FILTER_SLOT_AAF  1
+
+static void avtp_filter_set_slot(int slot,
+                                  const uint8_t *stream_id,
+                                  const uint8_t *dest_mac)
+{
+    uint32_t sid_hi = ((uint32_t)stream_id[0] << 24) |
+                      ((uint32_t)stream_id[1] << 16) |
+                      ((uint32_t)stream_id[2] <<  8) |
+                       (uint32_t)stream_id[3];
+    uint32_t sid_lo = ((uint32_t)stream_id[4] << 24) |
+                      ((uint32_t)stream_id[5] << 16) |
+                      ((uint32_t)stream_id[6] <<  8) |
+                       (uint32_t)stream_id[7];
+    uint32_t mac_hi = ((uint32_t)dest_mac[0] <<  8) |  (uint32_t)dest_mac[1];
+    uint32_t mac_lo = ((uint32_t)dest_mac[2] << 24) |
+                      ((uint32_t)dest_mac[3] << 16) |
+                      ((uint32_t)dest_mac[4] <<  8) |
+                       (uint32_t)dest_mac[5];
+    switch (slot) {
+        case 0:
+            avtp_filter_slot0_stream_id_hi_write(sid_hi);
+            avtp_filter_slot0_stream_id_lo_write(sid_lo);
+            avtp_filter_slot0_dst_mac_hi_write   (mac_hi);
+            avtp_filter_slot0_dst_mac_lo_write   (mac_lo);
+            avtp_filter_slot0_enabled_write      (1);
+            break;
+        case 1:
+            avtp_filter_slot1_stream_id_hi_write(sid_hi);
+            avtp_filter_slot1_stream_id_lo_write(sid_lo);
+            avtp_filter_slot1_dst_mac_hi_write   (mac_hi);
+            avtp_filter_slot1_dst_mac_lo_write   (mac_lo);
+            avtp_filter_slot1_enabled_write      (1);
+            break;
+        case 2:
+            avtp_filter_slot2_stream_id_hi_write(sid_hi);
+            avtp_filter_slot2_stream_id_lo_write(sid_lo);
+            avtp_filter_slot2_dst_mac_hi_write   (mac_hi);
+            avtp_filter_slot2_dst_mac_lo_write   (mac_lo);
+            avtp_filter_slot2_enabled_write      (1);
+            break;
+        case 3:
+            avtp_filter_slot3_stream_id_hi_write(sid_hi);
+            avtp_filter_slot3_stream_id_lo_write(sid_lo);
+            avtp_filter_slot3_dst_mac_hi_write   (mac_hi);
+            avtp_filter_slot3_dst_mac_lo_write   (mac_lo);
+            avtp_filter_slot3_enabled_write      (1);
+            break;
+    }
+}
+
+static void avtp_filter_clear_slot(int slot)
+{
+    switch (slot) {
+        case 0: avtp_filter_slot0_enabled_write(0); break;
+        case 1: avtp_filter_slot1_enabled_write(0); break;
+        case 2: avtp_filter_slot2_enabled_write(0); break;
+        case 3: avtp_filter_slot3_enabled_write(0); break;
+    }
+}
+
+static uint32_t avtp_filter_match_count(int slot)
+{
+    switch (slot) {
+        case 0: return avtp_filter_slot0_match_count_read();
+        case 1: return avtp_filter_slot1_match_count_read();
+        case 2: return avtp_filter_slot2_match_count_read();
+        case 3: return avtp_filter_slot3_match_count_read();
+    }
+    return 0;
+}
 
 // I2S DAC writer state — paced from mcr_sample_count which ticks at fs
 // (48 kHz) once MCR is locked. Each tick we pop one block from AAF RX
@@ -47,13 +116,6 @@ static audio_ring_t rx_audio_ring;
 static uint32_t dac_sample_count;
 static uint32_t dac_underrun_count;
 static uint32_t dac_last_sample_tick;
-// Diagnostic DAC test mode — cycles via UART 'p':
-//   0 = OFF       — DAC writer reads from AAF jitter buffer (normal)
-//   1 = TONE      — 1 kHz square wave (±0.5 FS) on both L and R
-//   2 = SILENCE   — explicit zeros on both L and R (verifies the
-//                   noise/buzz on R is not coming from our data path)
-static uint8_t  dac_test_tone;
-static uint32_t dac_tone_phase;
 
 // RX EtherType counters for link-debug
 static uint32_t rx_total, rx_ptp, rx_avtp, rx_msrp, rx_other;
@@ -251,10 +313,10 @@ static void dispatch_rx(void)
                             rx_avtp_aaf++;
                             aaf_process_rx(&aaf, frame, len);
                             break;
-                        case AVTP_SUBTYPE_61883_IIDC:
-                            avtp_process_rx(&avtp, frame, len);
-                            break;
                         default:
+                            // 61883/IIDC and unknown subtypes — silently
+                            // drop. The legacy firmware/avtp.c 61883 stub
+                            // was moved to firmware/_avtp_backup/.
                             break;
                     }
                 }
@@ -381,14 +443,7 @@ static void check_uart_cmd(void)
                    (unsigned long)gptp.rx_other_count,
                    (unsigned long)gptp.rx_wrong_domain_count,
                    gptp.rx_last_msg_type, gptp.rx_last_domain);
-            printf("[AVTP] tx=%lu/%lu rx=%lu/%lu err=%lu\n",
-                   (unsigned long)avtp.tx_packet_count,
-                   (unsigned long)audio_ring_count(&tx_audio_ring),
-                   (unsigned long)avtp.rx_packet_count,
-                   (unsigned long)audio_ring_count(&rx_audio_ring),
-                   (unsigned long)avtp.rx_seq_errors);
-            printf("[DAC ] i2s_src=%lu samples=%lu underruns=%lu\n",
-                   (unsigned long)main_i2s_source_read(),
+            printf("[DAC ] samples=%lu underruns=%lu\n",
                    (unsigned long)dac_sample_count,
                    (unsigned long)dac_underrun_count);
             printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d bridge_class=%u prio=%u vid=%u talker_prio_byte=0x%02x\n",
@@ -531,14 +586,6 @@ static void check_uart_cmd(void)
             srp_talker_enable(&srp, 0);
             printf("[DIAG] AAF TX force-disabled\n");
             break;
-        case 'p':
-            dac_test_tone = (dac_test_tone + 1) % 3;
-            dac_tone_phase = 0;
-            printf("[DIAG] DAC test mode: %s\n",
-                   dac_test_tone == 1 ? "TONE (1 kHz square L=R)" :
-                   dac_test_tone == 2 ? "SILENCE (zeros L=R)" :
-                                        "OFF (AAF audio)");
-            break;
         case 'b':
             // Per-second windowed rates — Stage-0 baseline for the
             // firmware-on-audio architecture. Each subsequent
@@ -549,7 +596,8 @@ static void check_uart_cmd(void)
                    "  RX:        %lu writer_err/s  %lu aaf/s  %lu crf/s\n"
                    "  AVDECC:    %lu aecp_rx/s  %lu aecp_tx/s\n"
                    "  gPTP:      %lu sync_rx/s  %lu pdresp_rx/s\n"
-                   "  DAC:       %lu samples/s  %lu underruns/s\n",
+                   "  DAC:       %lu samples/s  %lu underruns/s\n"
+                   "  HW filter: slot0=%lu slot1=%lu slot2=%lu slot3=%lu  (cumulative)\n",
                    (unsigned long)bench.r_iter_per_sec,
                    (unsigned long)bench.r_iter_avg_ns,
                    (unsigned long)bench.r_iter_max_ns,
@@ -561,7 +609,11 @@ static void check_uart_cmd(void)
                    (unsigned long)bench.r_sync_rx,
                    (unsigned long)bench.r_pdresp_rx,
                    (unsigned long)bench.r_dac_samples,
-                   (unsigned long)bench.r_dac_underruns);
+                   (unsigned long)bench.r_dac_underruns,
+                   (unsigned long)avtp_filter_match_count(0),
+                   (unsigned long)avtp_filter_match_count(1),
+                   (unsigned long)avtp_filter_match_count(2),
+                   (unsigned long)avtp_filter_match_count(3));
             break;
         case 'D':
             // Force-clear local listener bindings — useful when Hive's
@@ -595,7 +647,6 @@ static void check_uart_cmd(void)
                      "  b   1-second rate window (Stage-0 baseline metrics)\n"
                      "  t   force-enable AAF TX (diagnostic, bypasses AVDECC)\n"
                      "  T   force-disable AAF TX\n"
-                     "  p   toggle DAC test tone (1 kHz square, L=R)\n"
                      "  D   force-clear all listener bindings (clears stale FAST_CONNECT)\n"
                      "  r   reboot\n"
                      "  h   help\n");
@@ -695,10 +746,13 @@ static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_ma
         // Now declare SRP ListenerReady with the REAL stream_id and bind
         // the audio engines to filter on it.
         srp_listener_enable(&srp, stream_id, 1);
-        if (p->uid == LISTENER_UID_CRF)      mcr_bind(&mcr, stream_id);
-        else if (p->uid == LISTENER_UID_AAF) {
+        if (p->uid == LISTENER_UID_CRF) {
+            mcr_bind(&mcr, stream_id);
+            avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, stream_id, p->dest_mac);
+        } else if (p->uid == LISTENER_UID_AAF) {
             aaf_bind(&aaf, stream_id);
             aaf.rx_audio_capture = 1;
+            avtp_filter_set_slot(AVTP_FILTER_SLOT_AAF, stream_id, p->dest_mac);
         }
 
         p->active = 0;
@@ -774,13 +828,16 @@ static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
         }
     }
     srp_listener_enable(&srp, stream_id, 1);
-    if (uid == LISTENER_UID_CRF)      mcr_bind(&mcr, stream_id);
-    else if (uid == LISTENER_UID_AAF) {
+    if (uid == LISTENER_UID_CRF) {
+        mcr_bind(&mcr, stream_id);
+        avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, stream_id, dest_mac);
+    } else if (uid == LISTENER_UID_AAF) {
         aaf_bind(&aaf, stream_id);
         // Real consumer now waiting (I2S DAC) — turn on the per-packet
         // audio copy in aaf_process_rx. Without this, rx_buf stays
         // empty and the DAC writer would only emit underruns.
         aaf.rx_audio_capture = 1;
+        avtp_filter_set_slot(AVTP_FILTER_SLOT_AAF, stream_id, dest_mac);
     }
 }
 
@@ -792,10 +849,12 @@ static void on_listener_disconnect(uint16_t uid)
     if (uid == LISTENER_UID_CRF) {
         if (mcr.bound) srp_listener_enable(&srp, mcr.stream_id, 0);
         mcr_unbind(&mcr);
+        avtp_filter_clear_slot(AVTP_FILTER_SLOT_CRF);
     } else if (uid == LISTENER_UID_AAF) {
         if (aaf.bound) srp_listener_enable(&srp, aaf.stream_id, 0);
         aaf_unbind(&aaf);
-        aaf.rx_audio_capture = 0;   // no consumer → stop the per-pkt copy
+        aaf.rx_audio_capture = 0;
+        avtp_filter_clear_slot(AVTP_FILTER_SLOT_AAF);
     }
 }
 
@@ -831,17 +890,9 @@ int main(void)
     }
     busy_wait(100);
 
-    // Init audio ring buffers
-    memset(&tx_audio_ring, 0, sizeof(tx_audio_ring));
-    memset(&rx_audio_ring, 0, sizeof(rx_audio_ring));
-
     // Init protocol stacks
     gptp_init(&gptp, mac_addr);
-    avtp_init(&avtp, mac_addr, &tx_audio_ring, &rx_audio_ring);
     srp_init(&srp, mac_addr);
-    // I2S TX source: 1 = firmware-fed (we'll push samples from AAF RX
-    // ch 0/1 via the i2s_audio_l/r CSRs at the audio sample rate).
-    main_i2s_source_write(1);
     mcr_init(&mcr, CONFIG_CLOCK_FREQUENCY, 48000);
     {
         // AAF uses the same talker stream_id/dest_mac advertised in AVDECC.
@@ -884,7 +935,6 @@ int main(void)
         bench_tick();
         dispatch_rx();
         gptp_poll(&gptp);
-        avtp_poll(&avtp);
         srp_poll(&srp);
 
         // Track per-stream MEDIA_LOCKED for Hive's listener indicators.
@@ -950,29 +1000,15 @@ int main(void)
             if (ticks_due > 32) ticks_due = 32;
             uint32_t processed = ticks_due;
             while (ticks_due--) {
-                int32_t sl, sr;
-                if (dac_test_tone == 1) {
-                    // 1 kHz square wave at -20 dBFS (1/10 of full scale).
-                    // Full-scale (0x400000) overdrove cheap amps into
-                    // clipping/distortion that sounded like noise.
-                    int32_t v = (dac_tone_phase < 24) ? 0x00080000 : -0x00080000;
-                    sl = v; sr = v;
-                    dac_tone_phase = (dac_tone_phase + 1) % 48;
-                    dac_sample_count++;
-                } else if (dac_test_tone == 2) {
-                    sl = 0; sr = 0;
+                int32_t sl = 0, sr = 0;
+                int32_t blk[AAF_CHANNELS];
+                if (aaf.bound && aaf.rx_audio_capture &&
+                    aaf_rx_pop(&aaf, blk)) {
+                    sl = blk[0] >> 8;
+                    sr = blk[1] >> 8;
                     dac_sample_count++;
                 } else {
-                    int32_t blk[AAF_CHANNELS];
-                    if (aaf.bound && aaf.rx_audio_capture &&
-                        aaf_rx_pop(&aaf, blk)) {
-                        sl = blk[0] >> 8;
-                        sr = blk[1] >> 8;
-                        dac_sample_count++;
-                    } else {
-                        sl = 0; sr = 0;
-                        dac_underrun_count++;
-                    }
+                    dac_underrun_count++;
                 }
                 main_i2s_audio_l_write((uint32_t)sl & 0xFFFFFFu);
                 main_i2s_audio_r_write((uint32_t)sr & 0xFFFFFFu);

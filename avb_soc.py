@@ -7,8 +7,15 @@
 # - VexRiscv CPU + SRAM
 # - LiteEth RGMII MAC (Wishbone interface for firmware raw frame access)
 # - LiteEthTSU (PTP Timestamping Unit) with CSRs for gPTP firmware
-# - AES3 TX/RX with hardware FIFOs and CSR interface
+# - I2S TX → PCM5102A DAC
+# - MCR NCO (firmware PI servo on CRF stream)
+# - AVTPStreamFilter (gateware-side stream matching, Stage 1)
 # - UART (PMOD)
+#
+# AES3 RX/TX gateware modules were removed 2026-05-21 — they were
+# dormant (firmware path moved to I2S DAC) but still consumed enough
+# slices to block AVTPStreamFilter timing closure. Verilog files
+# preserved in rtl/_aes3_backup/.
 #
 # Build:
 #   source /home/lisp/FPGA/env.sh
@@ -38,6 +45,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rtl"))
 from rgmii_var_delay import LiteEthPHYRGMIIVar
 from liteeth.mac import LiteEthMAC
 from liteeth.core.ptp import LiteEthTSU
+
+# Stage 1 of firmware-to-gateware audio path migration. Observes the
+# LiteEth MAC RX stream and per-frame matches (dst_mac, stream_id)
+# against CSR-configured slots; 3-stage pipelined for timing closure.
+from avtp_stream_filter import AVTPStreamFilter
 
 from migen.genlib.fifo import SyncFIFO
 
@@ -175,76 +187,6 @@ class TSUWithCSRs(LiteXModule):
             tsu.step.eq(0),
         )
 
-# Audio Clock Generator --------------------------------------------------------------------------------
-
-class AudioClkGen(LiteXModule):
-    """Generates audio-rate clock enables from the 12.288 MHz audio clock domain.
-
-    Provides:
-      - biphase_tick: 6.144 MHz enable (AES3 biphase symbol rate at 48 kHz)
-      - fs_48k:       48 kHz sample rate pulse (every 256 audio clocks)
-      - fs_96k:       96 kHz sample rate pulse (every 128 audio clocks)
-
-    The 12.288 MHz clock is crossed into sys_clk domain via pulse synchronizers,
-    so all outputs are in the sys_clk domain.
-    """
-    def __init__(self):
-        # Outputs (sys_clk domain, active-high single-cycle pulses)
-        self.biphase_tick = Signal()
-        self.fs_48k       = Signal()
-        self.fs_96k       = Signal()
-
-        # --- Audio clock domain dividers ---
-        # 12.288 MHz / 2 = 6.144 MHz biphase tick
-        # 12.288 MHz / 128 = 96 kHz
-        # 12.288 MHz / 256 = 48 kHz
-        audio_div = Signal(8)  # 0-255 counter in audio domain
-
-        # Toggle signals in audio domain (for CDC)
-        biphase_toggle = Signal()
-        fs_96k_toggle  = Signal()
-        fs_48k_toggle  = Signal()
-
-        self.sync.audio += [
-            audio_div.eq(audio_div + 1),
-            # Biphase: toggle every clock (div-by-2 = 6.144 MHz)
-            biphase_toggle.eq(~biphase_toggle),
-            # 96 kHz: toggle every 128 clocks
-            If(audio_div[6:8] == 0,
-                fs_96k_toggle.eq(~fs_96k_toggle),
-            ),
-            # 48 kHz: toggle every 256 clocks (on wrap)
-            If(audio_div == 0,
-                fs_48k_toggle.eq(~fs_48k_toggle),
-            ),
-        ]
-
-        # --- Clock domain crossing (toggle-to-pulse) ---
-        # Synchronize toggles from audio→sys domain, detect edges
-
-        for toggle, output, name in [
-            (biphase_toggle, self.biphase_tick, "biphase"),
-            (fs_96k_toggle,  self.fs_96k,       "fs96k"),
-            (fs_48k_toggle,  self.fs_48k,       "fs48k"),
-        ]:
-            # 2-stage synchronizer
-            sync1 = Signal(name=f"{name}_sync1")
-            sync2 = Signal(name=f"{name}_sync2")
-            sync3 = Signal(name=f"{name}_sync3")
-            self.sync += [
-                sync1.eq(toggle),
-                sync2.eq(sync1),
-                sync3.eq(sync2),
-            ]
-            self.comb += output.eq(sync2 ^ sync3)
-
-        # --- CSR status registers ---
-        self._fs_48k_count = CSRStatus(32, description="48 kHz tick counter (for diagnostics).")
-        fs_count = Signal(32)
-        self.sync += If(self.fs_48k, fs_count.eq(fs_count + 1))
-        self.comb += self._fs_48k_count.status.eq(fs_count)
-
-
 # MCR NCO -----------------------------------------------------------------------------------------------
 
 class MCRNco(LiteXModule):
@@ -290,7 +232,7 @@ class MCRNco(LiteXModule):
         ]
 
 
-# AES3 Pin Extension -----------------------------------------------------------------------------------
+# I2S Pin Extension ------------------------------------------------------------------------------------
 
 def i2s_io():
     return [
@@ -301,182 +243,6 @@ def i2s_io():
         # SODIMM pin 50 → FPGA ball U5 → PCM5102A DIN
         ("i2s_dout", 0, Pins("U5"), IOStandard("LVCMOS33")),
     ]
-
-def aes3_io():
-    """AES3 I/O pins on SODIMM connector."""
-    return [
-        ("aes3_out", 0, Pins("dimm:42"), IOStandard("LVCMOS33")),  # P5 — to RS-422 TX driver
-        ("aes3_in",  0, Pins("dimm:44"), IOStandard("LVCMOS33")),  # T6 — from RS-422 RX receiver
-    ]
-
-# AES3 CSR Wrapper -------------------------------------------------------------------------------------
-
-class AES3WithCSRs(LiteXModule):
-    """Wraps AES3 TX and RX Verilog modules with CSRs and hardware FIFOs.
-
-    Audio data path:
-      AES3 RX → rx_fifo → CSR read (firmware) → AVTP ring buffer → network
-      network → AVTP ring buffer → CSR write (firmware) → tx_fifo → AES3 TX
-    """
-    def __init__(self, platform, sys_clk_freq, pads_out, pads_in, biphase_tick=None):
-        # --- AES3 RX (input from external source) ---
-
-        # Signals from aes3_rx Verilog module
-        rx_audio_l     = Signal(24)
-        rx_audio_r     = Signal(24)
-        rx_audio_valid = Signal()
-        rx_locked      = Signal()
-        rx_is_96k      = Signal()
-        rx_error_count = Signal(4)
-        rx_cs          = Signal(192)
-        rx_cs_valid    = Signal()
-
-        self.specials += Instance("aes3_rx",
-            p_CLK_FREQ = sys_clk_freq,
-            i_clk      = ClockSignal("sys"),
-            i_rst      = ResetSignal("sys"),
-            i_aes3_in  = pads_in,
-            o_audio_l      = rx_audio_l,
-            o_audio_r      = rx_audio_r,
-            o_audio_valid  = rx_audio_valid,
-            o_audio_sub    = Signal(24),  # unused
-            o_sub_valid    = Signal(),    # unused
-            o_channel_status = rx_cs,
-            o_cs_valid     = rx_cs_valid,
-            o_locked       = rx_locked,
-            o_is_96k       = rx_is_96k,
-            o_error_count  = rx_error_count,
-        )
-
-        # RX FIFO: AES3 RX writes sample pairs, firmware reads via CSR.
-        # Width = 48 bits (24-bit L + 24-bit R), depth = 64 samples (~1.3 ms at 48k).
-        self.rx_fifo = rx_fifo = SyncFIFO(48, 64)
-
-        self.comb += [
-            rx_fifo.din.eq(Cat(rx_audio_r, rx_audio_l)),  # [47:24]=L, [23:0]=R
-            rx_fifo.we.eq(rx_audio_valid),
-        ]
-
-        # --- AES3 TX (output to external destination) ---
-
-        # Signals to aes3_tx Verilog module
-        tx_audio_l     = Signal(24)
-        tx_audio_r     = Signal(24)
-        tx_audio_valid = Signal()
-        tx_audio_ready = Signal()
-        tx_cs          = Signal(192)
-
-        use_ext_tick = 1 if biphase_tick is not None else 0
-        ext_tick_sig = biphase_tick if biphase_tick is not None else Signal()
-
-        self.specials += Instance("aes3_tx",
-            p_CLK_FREQ     = sys_clk_freq,
-            p_FS           = 48000,
-            p_USE_EXT_TICK = use_ext_tick,
-            i_clk      = ClockSignal("sys"),
-            i_rst      = ResetSignal("sys"),
-            i_audio_l      = tx_audio_l,
-            i_audio_r      = tx_audio_r,
-            i_audio_valid  = tx_audio_valid,
-            o_audio_ready  = tx_audio_ready,
-            i_ext_biphase_tick = ext_tick_sig,
-            i_channel_status = tx_cs,
-            o_aes3_out     = pads_out,
-        )
-
-        # TX FIFO: firmware writes sample pairs via CSR, AES3 TX reads.
-        # Same 48-bit width, depth 64.
-        self.tx_fifo = tx_fifo = SyncFIFO(48, 64)
-
-        # Feed AES3 TX from FIFO when TX is ready and FIFO has data.
-        self.comb += [
-            tx_audio_l.eq(tx_fifo.dout[24:48]),
-            tx_audio_r.eq(tx_fifo.dout[0:24]),
-            tx_audio_valid.eq(tx_fifo.readable & tx_audio_ready),
-            tx_fifo.re.eq(tx_fifo.readable & tx_audio_ready),
-        ]
-
-        # --- CSR Registers ---
-
-        # RX status
-        self._rx_locked  = CSRStatus(1,  description="AES3 RX PLL locked.")
-        self._rx_is_96k  = CSRStatus(1,  description="AES3 RX detected 96 kHz.")
-        self._rx_errors  = CSRStatus(4,  description="AES3 RX error counter.")
-        self._rx_level   = CSRStatus(7,  description="AES3 RX FIFO level (0-64).")
-
-        self.comb += [
-            self._rx_locked.status.eq(rx_locked),
-            self._rx_is_96k.status.eq(rx_is_96k),
-            self._rx_errors.status.eq(rx_error_count),
-            self._rx_level.status.eq(rx_fifo.level),
-        ]
-
-        # RX audio read: read _rx_audio_l first (latches pair), then _rx_audio_r.
-        self._rx_audio_l = CSRStatus(24, description="AES3 RX left channel — read first to pop FIFO.")
-        self._rx_audio_r = CSRStatus(24, description="AES3 RX right channel.")
-
-        rx_l_latch = Signal(24)
-        rx_r_latch = Signal(24)
-
-        # Pop FIFO and latch on read of _rx_audio_l.
-        self.comb += rx_fifo.re.eq(self._rx_audio_l.we & rx_fifo.readable)
-        self.sync += If(self._rx_audio_l.we & rx_fifo.readable,
-            rx_l_latch.eq(rx_fifo.dout[24:48]),
-            rx_r_latch.eq(rx_fifo.dout[0:24]),
-        )
-        self.comb += [
-            self._rx_audio_l.status.eq(rx_l_latch),
-            self._rx_audio_r.status.eq(rx_r_latch),
-        ]
-
-        # TX audio write: write _tx_audio_l, then _tx_audio_r, then strobe _tx_push.
-        self._tx_audio_l = CSRStorage(24, description="AES3 TX left channel.")
-        self._tx_audio_r = CSRStorage(24, description="AES3 TX right channel.")
-        self._tx_push    = CSRStorage(1,  description="Write 1 to push L/R pair to TX FIFO.")
-        self._tx_level   = CSRStatus(7,   description="AES3 TX FIFO level (0-64).")
-
-        self.comb += [
-            tx_fifo.din.eq(Cat(self._tx_audio_r.storage, self._tx_audio_l.storage)),
-            tx_fifo.we.eq(self._tx_push.re & tx_fifo.writable),
-            self._tx_level.status.eq(tx_fifo.level),
-        ]
-
-        # TX channel status (192 bits, written as 6 × 32-bit CSRs).
-        self._tx_cs0 = CSRStorage(32, description="TX channel status [31:0].")
-        self._tx_cs1 = CSRStorage(32, description="TX channel status [63:32].")
-        self._tx_cs2 = CSRStorage(32, description="TX channel status [95:64].")
-        self._tx_cs3 = CSRStorage(32, description="TX channel status [127:96].")
-        self._tx_cs4 = CSRStorage(32, description="TX channel status [159:128].")
-        self._tx_cs5 = CSRStorage(32, description="TX channel status [191:160].")
-
-        self.comb += tx_cs.eq(Cat(
-            self._tx_cs0.storage, self._tx_cs1.storage,
-            self._tx_cs2.storage, self._tx_cs3.storage,
-            self._tx_cs4.storage, self._tx_cs5.storage,
-        ))
-
-        # RX channel status (read-only, latched on cs_valid).
-        self._rx_cs0 = CSRStatus(32, description="RX channel status [31:0].")
-        self._rx_cs1 = CSRStatus(32, description="RX channel status [63:32].")
-        self._rx_cs2 = CSRStatus(32, description="RX channel status [95:64].")
-        self._rx_cs3 = CSRStatus(32, description="RX channel status [127:96].")
-        self._rx_cs4 = CSRStatus(32, description="RX channel status [159:128].")
-        self._rx_cs5 = CSRStatus(32, description="RX channel status [191:160].")
-
-        rx_cs_latch = Signal(192)
-        self.sync += If(rx_cs_valid, rx_cs_latch.eq(rx_cs))
-        self.comb += [
-            self._rx_cs0.status.eq(rx_cs_latch[0:32]),
-            self._rx_cs1.status.eq(rx_cs_latch[32:64]),
-            self._rx_cs2.status.eq(rx_cs_latch[64:96]),
-            self._rx_cs3.status.eq(rx_cs_latch[96:128]),
-            self._rx_cs4.status.eq(rx_cs_latch[128:160]),
-            self._rx_cs5.status.eq(rx_cs_latch[160:192]),
-        ]
-
-        # Add Verilog source files.
-        platform.add_source(os.path.join(os.path.dirname(__file__), "rtl", "aes3_rx.v"))
-        platform.add_source(os.path.join(os.path.dirname(__file__), "rtl", "aes3_tx.v"))
 
 # AVB SoC ----------------------------------------------------------------------------------------------
 
@@ -597,6 +363,23 @@ class AVBSoC(SoCCore):
             rx_ts_fifo.we.eq(commit_pulse & rx_ts_fifo.writable),
         ]
 
+        # ------------------------------------------------------------
+        # Stage 1: AVTP stream filter (observer of MAC RX stream).
+        # 3-cycle pipelined to keep eth_tx_clk timing closure margin.
+        # Doesn't drive back-pressure on the MAC and doesn't affect the
+        # existing SRAM writer path — per-slot match counters give
+        # firmware a way to verify the gateware sees the same streams
+        # the dispatcher does. Stage 2 will route matched frames'
+        # samples directly to per-stream FIFOs (CPU offload).
+        # ------------------------------------------------------------
+        self.submodules.avtp_filter = avtp_filter = AVTPStreamFilter(n_slots=4)
+        self.comb += [
+            avtp_filter.sink.valid.eq(mac.core.source.valid & mac.core.source.ready),
+            avtp_filter.sink.data.eq(mac.core.source.data),
+            avtp_filter.sink.last.eq(mac.core.source.last),
+            avtp_filter.sink.last_be.eq(mac.core.source.last_be),
+        ]
+
         # CSRs: pop strobe + 80-bit popped value + level + overflow count.
         self.rx_ts_pop_lo  = CSRStatus(32, description="RX-ring popped nanoseconds.")
         self.rx_ts_pop_mid = CSRStatus(32, description="RX-ring popped seconds[31:0].")
@@ -650,18 +433,8 @@ class AVBSoC(SoCCore):
         ]
         self.comb += self.tsu.tsu.tx_latch.eq(tx_sof)
 
-        # Audio Clock Generator.
-        self.audio_clk = AudioClkGen()
-
         # Media Clock Recovery NCO — driven by firmware PI servo on CRF.
         self.mcr = MCRNco(sys_clk_freq, fs=48000)
-
-        # AES3 TX/RX.
-        platform.add_extension(aes3_io())
-        aes3_out_pad = platform.request("aes3_out")
-        aes3_in_pad  = platform.request("aes3_in")
-        self.aes3 = AES3WithCSRs(platform, sys_clk_freq, aes3_out_pad, aes3_in_pad,
-                                  biphase_tick=self.audio_clk.biphase_tick)
 
         # I2S DAC output (PCM5102A).
         platform.add_extension(i2s_io())
@@ -670,32 +443,21 @@ class AVBSoC(SoCCore):
         i2s_dout_pad = platform.request("i2s_dout")
 
         # I2S TX runs in the audio clock domain (12.288 MHz).
-        # Audio source: AES3 RX FIFO output (L/R from the RX side).
+        # Source: firmware-fed CSRs (writes paced from MCR sample strobe).
         i2s_bck  = Signal()
         i2s_lrck = Signal()
         i2s_dout = Signal()
 
-        # CSR to select I2S source: 0 = AES3 RX, 1 = AVTP RX (firmware-written)
         self._i2s_audio_l = CSRStorage(24, description="I2S TX left channel (firmware write).")
         self._i2s_audio_r = CSRStorage(24, description="I2S TX right channel (firmware write).")
         self._i2s_push    = CSRStorage(1,  description="Write 1 to push L/R to I2S.")
-        self._i2s_source  = CSRStorage(1,  description="I2S source: 0=AES3 RX direct, 1=firmware.")
 
-        # I2S sample holding registers (sys_clk domain)
         i2s_l = Signal(24)
         i2s_r = Signal(24)
-        i2s_valid = Signal()
 
-        # Mux: AES3 RX direct or firmware-written samples
         self.comb += [
-            If(self._i2s_source.storage == 0,
-                # Direct from AES3 RX (last valid sample pair)
-                i2s_l.eq(self.aes3._rx_audio_l.status),
-                i2s_r.eq(self.aes3._rx_audio_r.status),
-            ).Else(
-                i2s_l.eq(self._i2s_audio_l.storage),
-                i2s_r.eq(self._i2s_audio_r.storage),
-            ),
+            i2s_l.eq(self._i2s_audio_l.storage),
+            i2s_r.eq(self._i2s_audio_r.storage),
         ]
 
         self.specials += Instance("i2s_tx",
@@ -805,7 +567,7 @@ def main():
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
         # and pick the seed with the highest eth_tx_clk PASS.
-        builder.build(seed=43)   # eth_tx_clk PASS 154.92 MHz (2026-05-21 sweep on Stage-0-baseline netlist)
+        builder.build(seed=13)   # eth_tx_clk PASS 133.85 MHz (post-cleanup sweep with AVTPStreamFilter integrated, 2026-05-22)
 
     if args.load:
         prog = soc.platform.create_programmer()

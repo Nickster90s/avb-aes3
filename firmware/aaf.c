@@ -16,7 +16,7 @@
 // +24..    sample data (6 × 8 ch × 4 B = 192 B)
 
 #include "aaf.h"
-#include "avtp.h"
+#include "avtp_const.h"
 #include "gptp.h"
 #include <generated/csr.h>
 #include <generated/mem.h>

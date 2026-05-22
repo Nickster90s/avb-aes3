@@ -7,7 +7,7 @@
 // C3: feed pairs into the MCR PI servo / NCO.
 
 #include "mcr.h"
-#include "avtp.h"   // AVTP_SUBTYPE_CRF
+#include "avtp_const.h"   // AVTP_SUBTYPE_CRF
 #include "gptp.h"   // gptp_read_rx_timestamp()
 #include <generated/csr.h>
 #include <string.h>

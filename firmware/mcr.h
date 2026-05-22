@@ -76,6 +76,17 @@ typedef struct {
     uint32_t seq_errors;
     uint8_t  last_seq;
     uint8_t  have_last_seq;
+
+    // CRF stale watchdog: if no CRF arrives for > MCR_STALE_THRESHOLD_MS,
+    // snap current_increment back to base_increment. Without this, the
+    // last servo-tuned increment persists past CRF loss, drifting MCR's
+    // strobe rate away from local audio_clk rate and causing the FIFO
+    // between firmware DAC push and I2S consume to overflow/underrun.
+    // last_rx_count_snapshot tracks the most-recently-observed rx_count;
+    // when it stops growing for MCR_STALE_THRESHOLD_MS we declare stale.
+    uint32_t last_rx_count_snapshot;
+    uint32_t last_rx_check_ms;
+    uint8_t  watchdog_reset_active;  // 1 while increment is held at base
 } mcr_state_t;
 
 void mcr_init  (mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs);
@@ -89,5 +100,11 @@ void mcr_process_rx(mcr_state_t *m, const uint8_t *frame, uint32_t len);
 // Called once per main loop iteration; runs the PI servo if there's a
 // new sample. Safe to call when not bound (no-op).
 void mcr_servo_update(mcr_state_t *m);
+
+// Called once per main loop iteration. If CRF input has been stale for
+// more than MCR_STALE_THRESHOLD_MS, snap current_increment back to
+// base_increment so the NCO runs at the default fs (= local crystal rate).
+// `now_ms` is monotonic ms (e.g. gptp_uptime_ms()).
+void mcr_watchdog_tick(mcr_state_t *m, uint32_t now_ms);
 
 #endif

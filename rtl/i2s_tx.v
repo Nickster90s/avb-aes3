@@ -21,7 +21,13 @@ module i2s_tx (
     // I2S output
     output reg         bck,        // Bit clock (3.072 MHz)
     output reg         lrck,       // Word select (48 kHz)
-    output reg         dout        // Serial data
+    output reg         dout,       // Serial data
+
+    // Externally-visible frame_start pulse — high for one audio_clk cycle
+    // at the start of each 48 kHz frame. Used by an upstream FIFO to pulse
+    // its read enable in lock-step with the I2S consumer, so samples are
+    // delivered at the exact rate i2s_tx consumes them (no drop / repeat).
+    output wire        frame_start_out
 );
 
     // 12.288 MHz / 4 = 3.072 MHz BCK (2 clk cycles per BCK half-period)
@@ -38,6 +44,7 @@ module i2s_tx (
 
     wire bck_falling = (clk_cnt[1:0] == 2'b01);  // Transition point for data
     wire frame_start = (clk_cnt == 8'd0);
+    assign frame_start_out = frame_start;
 
     always @(posedge clk) begin
         if (rst) begin

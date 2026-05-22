@@ -958,6 +958,7 @@ int main(void)
         }
         avdecc_poll(&avdecc);
         mcr_servo_update(&mcr);
+        mcr_watchdog_tick(&mcr, gptp_uptime_ms());
 
         // DAC writer: pace AAF RX ch 0/1 → I2S TX at the audio sample
         // rate. mcr_sample_count ticks at fs (48 kHz) — driven by the

@@ -34,6 +34,54 @@ void mcr_init(mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs)
         inc++;
     m->base_increment    = (uint32_t)inc;
     m->current_increment = (uint32_t)inc;
+    // Write the default to the NCO so it starts at the right rate even
+    // before a CRF stream binds.
+    mcr_increment_write(m->base_increment);
+    m->watchdog_reset_active = 1;
+}
+
+// Stale threshold: 200 ms. Class A CRF arrives at 8 kHz, so 200 ms is
+// 1600 PDUs of slack — well past any plausible transient. Tuning lower
+// would risk false triggers during MRP refresh storms; higher would let
+// rate drift accumulate audibly before snapping back to base rate.
+#define MCR_STALE_THRESHOLD_MS  200
+
+void mcr_watchdog_tick(mcr_state_t *m, uint32_t now_ms)
+{
+    if (!m->bound) {
+        // Not bound — make sure increment is at base (covers both the
+        // "never bound since boot" case and the "user disconnected CRF"
+        // case).
+        if (!m->watchdog_reset_active) {
+            m->current_increment    = m->base_increment;
+            mcr_increment_write(m->base_increment);
+            m->watchdog_reset_active = 1;
+        }
+        return;
+    }
+    if (m->rx_count != m->last_rx_count_snapshot) {
+        // CRF arrived since last check — refresh window.
+        m->last_rx_count_snapshot = m->rx_count;
+        m->last_rx_check_ms       = now_ms;
+        // Servo path will take over; clear the reset flag so a future
+        // stale event triggers another snap-back.
+        m->watchdog_reset_active  = 0;
+        return;
+    }
+    uint32_t age_ms = now_ms - m->last_rx_check_ms;
+    if (age_ms > MCR_STALE_THRESHOLD_MS) {
+        if (!m->watchdog_reset_active) {
+            m->current_increment    = m->base_increment;
+            mcr_increment_write(m->base_increment);
+            m->servo_integral       = 0;
+            m->have_prev            = 0;
+            m->servo_locked         = 0;
+            m->lock_streak          = 0;
+            m->watchdog_reset_active = 1;
+            printf("[MCR] CRF stale %lums — increment snapped to base\n",
+                   (unsigned long)age_ms);
+        }
+    }
 }
 
 void mcr_bind(mcr_state_t *m, const uint8_t *stream_id)
@@ -71,7 +119,13 @@ void mcr_unbind(mcr_state_t *m)
     m->lock_streak     = 0;
     m->have_latest     = 0;
     m->servo_consumed  = 1;
-    printf("[MCR] unbound\n");
+    // Snap the NCO back to base rate now that the talker reference is
+    // gone. Otherwise the gateware NCO keeps ticking at the last servo-
+    // tuned rate, drifting against audio_clk and audibly clicking.
+    m->current_increment    = m->base_increment;
+    mcr_increment_write(m->base_increment);
+    m->watchdog_reset_active = 1;
+    printf("[MCR] unbound — increment reset to base\n");
 }
 
 // CRF AVTPDU layout (IEEE 1722-2016 §10.2)

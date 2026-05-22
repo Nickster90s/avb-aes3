@@ -51,7 +51,7 @@ from liteeth.core.ptp import LiteEthTSU
 # against CSR-configured slots; 3-stage pipelined for timing closure.
 from avtp_extractor import AVTPSampleExtractor
 
-from migen.genlib.fifo import SyncFIFO
+from migen.genlib.fifo import SyncFIFO, AsyncFIFO
 
 # CRG -------------------------------------------------------------------------------------------------
 
@@ -460,32 +460,62 @@ class AVBSoC(SoCCore):
         i2s_dout_pad = platform.request("i2s_dout")
 
         # I2S TX runs in the audio clock domain (12.288 MHz).
-        # Source: firmware-fed CSRs (writes paced from MCR sample strobe).
+        # Source: firmware writes L/R CSRs then pulses _i2s_push — the push
+        # signals an AsyncFIFO enqueue (sys_clk side). i2s_tx pulls one
+        # sample per frame_start (48 kHz, audio_clk side). The FIFO bridges
+        # the two clock domains AND absorbs the rate mismatch between MCR-
+        # paced firmware push and audio_clk-paced I2S consume — without a
+        # FIFO, pushes that land mid-frame are silently dropped by i2s_tx.
         i2s_bck  = Signal()
         i2s_lrck = Signal()
         i2s_dout = Signal()
+        i2s_frame_start = Signal()
 
         self._i2s_audio_l = CSRStorage(24, description="I2S TX left channel (firmware write).")
         self._i2s_audio_r = CSRStorage(24, description="I2S TX right channel (firmware write).")
-        self._i2s_push    = CSRStorage(1,  description="Write 1 to push L/R to I2S.")
+        self._i2s_push    = CSRStorage(1,  description="Write 1 to push L/R to I2S FIFO.")
+        self._i2s_fifo_drops = CSRStatus(32, description="Pushes dropped because FIFO was full.")
 
-        i2s_l = Signal(24)
-        i2s_r = Signal(24)
+        # 48-bit FIFO (24 L + 24 R), depth 32 samples = ~660 µs at 48 kHz.
+        i2s_fifo = AsyncFIFO(width=48, depth=32)
+        i2s_fifo = ClockDomainsRenamer({"write": "sys", "read": "audio"})(i2s_fifo)
+        self.submodules.i2s_fifo = i2s_fifo
 
+        # Write side (sys_clk): firmware pushes L||R when _i2s_push CSR
+        # is written. Drop if FIFO full (would happen if MCR > audio_clk
+        # rate; drop is preferable to overwriting in-flight samples).
+        i2s_fifo_drops = Signal(32)
+        push_pulse = self._i2s_push.re
         self.comb += [
-            i2s_l.eq(self._i2s_audio_l.storage),
-            i2s_r.eq(self._i2s_audio_r.storage),
+            i2s_fifo.din.eq(Cat(self._i2s_audio_r.storage,
+                                self._i2s_audio_l.storage)),  # R at bits[0:24], L at [24:48]
+            i2s_fifo.we.eq(push_pulse & i2s_fifo.writable),
+        ]
+        self.sync += If(push_pulse & ~i2s_fifo.writable,
+            i2s_fifo_drops.eq(i2s_fifo_drops + 1))
+        self.comb += self._i2s_fifo_drops.status.eq(i2s_fifo_drops)
+
+        # Read side (audio_clk): i2s_tx pulses frame_start at each 48 kHz
+        # boundary. Use that pulse as the FIFO read enable. dout updates on
+        # the next audio_clk edge, ready for i2s_tx's next frame_start.
+        i2s_l_from_fifo = Signal(24)
+        i2s_r_from_fifo = Signal(24)
+        self.comb += [
+            i2s_l_from_fifo.eq(i2s_fifo.dout[24:48]),
+            i2s_r_from_fifo.eq(i2s_fifo.dout[0:24]),
+            i2s_fifo.re.eq(i2s_frame_start & i2s_fifo.readable),
         ]
 
         self.specials += Instance("i2s_tx",
             i_clk         = ClockSignal("audio"),
             i_rst         = ResetSignal("audio"),
-            i_audio_l     = i2s_l,
-            i_audio_r     = i2s_r,
-            i_audio_valid = 1,  # Always valid — repeat last sample if no new data
+            i_audio_l     = i2s_l_from_fifo,
+            i_audio_r     = i2s_r_from_fifo,
+            i_audio_valid = i2s_fifo.readable,  # if FIFO empty, i2s_tx repeats last
             o_bck         = i2s_bck,
             o_lrck        = i2s_lrck,
-            o_dout        = i2s_dout,
+            o_dout            = i2s_dout,
+            o_frame_start_out = i2s_frame_start,
         )
 
         self.comb += [

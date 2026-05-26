@@ -20,11 +20,31 @@ the failure is routing/congestion-dominated: the USB UAC2 block scatters
 the TX-datapath cells across the die (critical-path coords bounce
 35,46 <-> 30,49 <-> 43,39). One buffer breaks one link only.
 
-NEXT LEVER = FLOORPLAN, not more buffers: region-constrain the USB block
-(usb_avb_subsystem instance) to a PBlock away from the LiteEth TX
-datapath so the placer keeps the TX cells clustered (recovers the
-without-USB 131 MHz at seed=8). nextpnr-xilinx region constraints via
-the XDC / --xdc, or LiteX platform.add_platform_command region. Then
-the buffer + clustering together should clear 125 MHz.
-Alternative if floorplan insufficient: trim USB (fewer channels) or
-pipeline more TX handshake links.
+## 3. mac/core.py — TX-only sys-datapath (2026-05-26, P3.2) ★ THE FIX
+The floorplan/seed route below only reached a fragile 114–134 MHz (seed +
+netlist lottery; see floorplan_usb.py). ROOT CAUSE: the chip is only ~14%
+full — eth_tx was a routing-LOCALITY problem, not congestion. The TX
+datapath (preamble→CRC→tx_cdc) ran in the 125 MHz eth_tx domain.
+
+FIX: added `with_sys_datapath_tx = True` right after the cd_tx/cd_rx block,
+moving ONLY the TX datapath into sys clock (cd_tx="sys",
+tx_datapath_dw=core_dw). CRC/preamble/padding now run 32-bit at 50 MHz;
+then skid-buffer + CDC + 32→8 convert, so eth_tx carries only the
+converter/last_be/gap. RX is left bit-identical (cd_rx, datapath_dw
+unchanged) so the gPTP RX-timestamp ring is untouched — deliberately chosen
+over add_ethernet(data_width=32), which would move RX too. Edits:
+`datapath_dw`→`tx_datapath_dw` in TX add_padding/add_crc/add_preamble + the
+skid Buffer; the two TX domain-switch `if`s use `with_sys_datapath_tx`.
+
+RESULT: eth_tx_clk 114 -> **163 MHz** (eth_rx 138, audio 134) — all PASS at
+125, ROBUST across seeds. Verified on FPGA (seed 4): loads, USB enumerates
+(1209:eab1), AVB firmware boots (gPTP/SRP/AVDECC). On-wire TX + Hive entity
+to be re-confirmed when next cabled to the AVB network.
+
+The floorplan (#below) and skid buffer (#2) are kept (harmless, marginal)
+but are NO LONGER the mechanism — this patch is. See memory
+feedback_eth_tx_sys_datapath.
+
+## (historical) NEXT LEVER notes — superseded by patch #3
+region-constrain the USB block via nextpnr --pre-place (floorplan_usb.py);
+recovered 114 MHz only. Kept for context.

@@ -643,6 +643,7 @@ def main():
     parser = argparse.ArgumentParser(description="AVB-AES3 SoC on Colorlight i9+")
     parser.add_argument("--build",        action="store_true", help="Build bitstream.")
     parser.add_argument("--load",         action="store_true", help="Load bitstream.")
+    parser.add_argument("--seed", default=8, type=int, help="nextpnr P&R seed.")
     parser.add_argument("--sys-clk-freq", default=50e6, type=float, help="System clock frequency.")
     parser.add_argument("--firmware",     default=None,        help="Custom firmware .bin to embed in ROM (replaces BIOS).")
     builder_args = parser.add_argument_group("builder")
@@ -697,7 +698,10 @@ def main():
         #         nextpnr-xilinx … --seed $s --freq 125 …
         #     done
         # and pick the seed with the highest eth_tx_clk PASS.
-        builder.build(seed=8)    # eth_tx_clk PASS 131.49 MHz (final-netlist sweep, 1×2-ch AVTPSampleExtractor + wire_channels=8, 2026-05-22)
+        # seed=8 gave eth_tx_clk 131 MHz WITHOUT usb; WITH the USB block
+        # (P3.2) placement shifted and seed=8 drops to 112 MHz (FAIL).
+        # Sweep --seed to recover eth_tx_clk >=125 MHz. Default still 8.
+        builder.build(seed=args.seed)
 
     if args.load:
         prog = soc.platform.create_programmer()

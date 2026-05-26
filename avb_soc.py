@@ -89,6 +89,18 @@ class _CRG(LiteXModule):
 
         self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
 
+        # USB clock domain: 60 MHz recovered from the USB3300 ULPI CLK
+        # output, re-emitted at phase 0 (the proven-good ULPI sampling
+        # phase from avb-usb-host's eye-scan). Separate PLL since ulpi_clk
+        # is async to clk25. VCO kept >=800 MHz by S7PLL's solver.
+        self.cd_usb = ClockDomain()
+        ulpi_clk = platform.request("ulpi_clock")
+        self.usb_pll = usb_pll = S7PLL(speedgrade=-1)
+        self.comb += usb_pll.reset.eq(self.rst)
+        usb_pll.register_clkin(ulpi_clk, 60e6)
+        usb_pll.create_clkout(self.cd_usb, 60e6, phase=0)
+        platform.add_false_path_constraints(self.cd_sys.clk, self.cd_usb.clk)
+
 # TSU CSR Wrapper --------------------------------------------------------------------------------------
 
 class TSUWithCSRs(LiteXModule):
@@ -244,6 +256,24 @@ def i2s_io():
         ("i2s_dout", 0, Pins("U5"), IOStandard("LVCMOS33")),
     ]
 
+def ulpi_io():
+    # USB3300 ULPI breakout on the P2 header. CLK=T4 (MRCC, clock-capable);
+    # RST active-HIGH (USB3300 pin 9) so handled as plain Pins, driven low
+    # by the gateware to release. Data is a bidirectional bus (TSTriple in
+    # the SoC). Verified free vs eth/eth_clocks/sdram on this platform.
+    # See avb-usb-host docs/phase3-bridge.md + memory ulpi-twisted-pair-wiring.
+    return [
+        ("ulpi_clock", 0, Pins("T4"), IOStandard("LVCMOS33")),
+        ("ulpi", 0,
+            Subsignal("dir",  Pins("T3"),  IOStandard("LVCMOS33")),
+            Subsignal("nxt",  Pins("U2"),  IOStandard("LVCMOS33")),
+            Subsignal("stp",  Pins("U3"),  IOStandard("LVCMOS33")),
+            Subsignal("rst",  Pins("R2"),  IOStandard("LVCMOS33")),
+            Subsignal("data", Pins("V2 V3 W1 W2 Y1 AA1 AB1 Y2"),
+                      IOStandard("LVCMOS33")),
+        ),
+    ]
+
 # AVB SoC ----------------------------------------------------------------------------------------------
 
 class AVBSoC(SoCCore):
@@ -257,6 +287,10 @@ class AVBSoC(SoCCore):
                 Subsignal("rx", Pins("M3")),   # FPGA RX ← CH347 TXD1
                 IOStandard("LVCMOS33"))
         ])
+
+        # USB UAC2 ULPI (P2 header) — must be added before the CRG, which
+        # requests ulpi_clock for the cd_usb PLL.
+        platform.add_extension(ulpi_io())
 
         # CRG.
         self.crg = _CRG(platform, sys_clk_freq)
@@ -546,6 +580,55 @@ class AVBSoC(SoCCore):
         self.comb += [
             self._i2s_bck_count.status.eq(bck_count),
             self._i2s_lrck_count.status.eq(lrck_count),
+        ]
+
+        # ---- USB UAC2 sink (Phase 3 / P3.2) ------------------------------
+        # Drop-in Verilog from avb-usb-host (tag usb-hs-uac2-working):
+        # ULPI link via ultraembedded ulpi_wrapper.v + LUNA USB device.
+        # Goal of P3.2: enumerate as USB HS UAC2 INSIDE this AVB bitstream.
+        # The decoded 8ch audio stream is exposed but, for now, just drained
+        # (ready=1) and fed a nominal 48k feedback. P3.3 wires it to an
+        # AsyncFIFO → AAF talker; P3.4 drives feedback from the MCR rate.
+        _rtl = os.path.join(os.path.dirname(__file__), "rtl")
+        platform.add_source(os.path.join(_rtl, "usb_avb_subsystem.v"))
+        platform.add_source(os.path.join(_rtl, "ulpi_wrapper.v"))
+
+        ulpi = platform.request("ulpi")
+        ulpi_data_ts = TSTriple(8)
+        self.specials += ulpi_data_ts.get_tristate(ulpi.data)
+
+        self.usb_ch_payload = usb_ch_payload = Signal(24)
+        self.usb_ch_channel = usb_ch_channel = Signal(3)
+        self.usb_ch_valid   = usb_ch_valid   = Signal()
+        self.usb_ch_first   = usb_ch_first   = Signal()
+        self.usb_ch_last    = usb_ch_last    = Signal()
+        usb_ch_ready        = Signal()
+        usb_feedback        = Signal(32)
+
+        self.specials += Instance("usb_avb_subsystem",
+            i_clk       = ClockSignal("sys"),
+            i_rst       = ResetSignal("sys"),
+            i_usb_clk   = ClockSignal("usb"),
+            i_ulpi_dir_i   = ulpi.dir,
+            i_ulpi_nxt_i   = ulpi.nxt,
+            i_ulpi_data_i  = ulpi_data_ts.i,
+            o_ulpi_data_o  = ulpi_data_ts.o,
+            o_ulpi_data_oe = ulpi_data_ts.oe,
+            o_ulpi_stp_o   = ulpi.stp,
+            o_ulpi_rst_o   = ulpi.rst,
+            o_channel_stream_payload = usb_ch_payload,
+            o_channel_stream_channel = usb_ch_channel,
+            o_channel_stream_valid   = usb_ch_valid,
+            o_channel_stream_first   = usb_ch_first,
+            o_channel_stream_last    = usb_ch_last,
+            i_channel_stream_ready   = usb_ch_ready,
+            i_feedback_value         = usb_feedback,
+        )
+        # P3.2 temporary: drain the stream, nominal 48k feedback
+        # (6.0 samples/microframe in 10.14 = 0x18000). Replaced in P3.3/P3.4.
+        self.comb += [
+            usb_ch_ready.eq(1),
+            usb_feedback.eq(0x0001_8000),
         ]
 
         # LED.

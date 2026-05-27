@@ -71,6 +71,9 @@ typedef struct {
 
     // Counters (debug)
     uint32_t rx_count;          // CRF packets matching our stream_id
+    uint32_t hw_rx_count;       // (avtp,local) pairs drained from the gateware
+                                // CRFTimestampExtractor FIFO — the flood-proof
+                                // servo feed. See mcr_pump_hw().
     uint32_t rx_other_count;    // CRF packets we received but for a different stream
     uint32_t bad_type_count;    // PDUs with type != AUDIO_SAMPLE
     uint32_t seq_errors;
@@ -96,6 +99,13 @@ void mcr_unbind(mcr_state_t *m);
 // Called from the AVTP RX dispatcher for any AVTPDU with subtype == CRF.
 // `frame` points at the Ethernet header; `len` is total frame length.
 void mcr_process_rx(mcr_state_t *m, const uint8_t *frame, uint32_t len);
+
+// Drain the gateware CRFTimestampExtractor FIFO and feed each (avtp_ts,
+// local_rx_ts) pair into the PI servo. This is the flood-proof servo input:
+// the hardware extractor captures CRF timestamps directly off the RX stream,
+// so the servo no longer depends on CRF frames surviving the 2-slot MAC RX.
+// Call once per main-loop pass (drains all queued pairs). No-op when unbound.
+void mcr_pump_hw(mcr_state_t *m);
 
 // Called once per main loop iteration; runs the PI servo if there's a
 // new sample. Safe to call when not bound (no-op).

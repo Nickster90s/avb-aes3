@@ -99,8 +99,22 @@ void mcr_bind(mcr_state_t *m, const uint8_t *stream_id)
     m->servo_integral = 0;
     m->servo_locked   = 0;
     m->servo_step_count = 0;
+    m->hw_rx_count    = 0;
     // Don't touch base_increment / current_increment — preserve servo state
     // across rebinds so the integrator's accumulated tuning isn't lost.
+
+    // Point the gateware CRFTimestampExtractor at this stream_id and enable
+    // it. From now on it snoops the RX stream and queues (avtp_ts, local_ts)
+    // pairs into its FIFO regardless of MAC RX slot pressure; mcr_pump_hw()
+    // drains them into the servo. stream_id is big-endian, [0]=MSB.
+    crf_ts_stream_id_hi_write(
+        ((uint32_t)stream_id[0] << 24) | ((uint32_t)stream_id[1] << 16) |
+        ((uint32_t)stream_id[2] <<  8) |  (uint32_t)stream_id[3]);
+    crf_ts_stream_id_lo_write(
+        ((uint32_t)stream_id[4] << 24) | ((uint32_t)stream_id[5] << 16) |
+        ((uint32_t)stream_id[6] <<  8) |  (uint32_t)stream_id[7]);
+    crf_ts_enabled_write(1);
+
     printf("[MCR] bound to stream "
            "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
            stream_id[0], stream_id[1], stream_id[2], stream_id[3],
@@ -125,6 +139,7 @@ void mcr_unbind(mcr_state_t *m)
     m->current_increment    = m->base_increment;
     mcr_increment_write(m->base_increment);
     m->watchdog_reset_active = 1;
+    crf_ts_enabled_write(0);   // stop the gateware extractor queuing pairs
     printf("[MCR] unbound — increment reset to base\n");
 }
 
@@ -278,4 +293,26 @@ void mcr_servo_update(mcr_state_t *m)
         }
     }
     m->servo_step_count++;
+}
+
+void mcr_pump_hw(mcr_state_t *m)
+{
+    if (!m->bound) return;
+    // Bound the per-call drain so a backlog can't stall the main loop.
+    int guard = 64;
+    while (crf_ts_level_read() && guard--) {
+        uint64_t avtp_ts = ((uint64_t)crf_ts_avtp_hi_read() << 32)
+                         |  (uint64_t)crf_ts_avtp_lo_read();
+        uint64_t sec     = crf_ts_local_sec_read();
+        uint32_t ns      = crf_ts_local_ns_read();
+        crf_ts_pop_write(1);                   // advance FIFO head
+
+        uint64_t local_ts = sec * 1000000000ull + ns;
+        m->latest_offset_ns = (int64_t)(avtp_ts - local_ts);
+        m->have_latest      = 1;
+        m->servo_consumed   = 0;
+        m->hw_rx_count++;
+        m->rx_count++;          // keep the stale watchdog fed from the HW source
+        mcr_servo_update(m);    // run the PI servo on this sample
+    }
 }

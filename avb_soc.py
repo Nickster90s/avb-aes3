@@ -50,6 +50,7 @@ from liteeth.core.ptp import LiteEthTSU
 # LiteEth MAC RX stream and per-frame matches (dst_mac, stream_id)
 # against CSR-configured slots; 3-stage pipelined for timing closure.
 from avtp_extractor import AVTPSampleExtractor
+from crf_extractor  import CRFTimestampExtractor
 
 from migen.genlib.fifo import SyncFIFO, AsyncFIFO
 
@@ -430,6 +431,22 @@ class AVBSoC(SoCCore):
         # for it. Audio bytes are already in the extractor FIFOs by then.
         self.comb += mac.interface.sram.writer.discard_in.eq(
             avtp_extractor.match_at_eof)
+
+        # Hardware CRF timestamp extractor — snoops the same RX stream and, for
+        # the bound CRF stream_id, captures (avtp_ts, local_rx_ts) pairs into a
+        # CSR FIFO the firmware PI servo drains. Decouples media-clock recovery
+        # from the congested 2-slot MAC RX path (CRF was being dropped under
+        # network flood → "patched but unlocked"). Observe-only; the CRF frame
+        # still reaches the CPU (firmware dispatch unchanged) — the servo just
+        # reads timestamps from here instead of from the dropped frames.
+        self.submodules.crf_ts = crf_ts = CRFTimestampExtractor(fifo_depth=16)
+        self.comb += [
+            crf_ts.sink.valid.eq(mac.core.source.valid & mac.core.source.ready),
+            crf_ts.sink.data.eq(mac.core.source.data),
+            crf_ts.sink.last.eq(mac.core.source.last),
+            crf_ts.sink.last_be.eq(mac.core.source.last_be),
+            crf_ts.tsu_ts.eq(self.tsu.timestamp),
+        ]
 
         # CSRs: pop strobe + 80-bit popped value + level + overflow count.
         self.rx_ts_pop_lo  = CSRStatus(32, description="RX-ring popped nanoseconds.")

@@ -509,6 +509,14 @@ static void check_uart_cmd(void)
                    (long)mcr.delta_max_abs,
                    (long)(mcr.delta_window_count ? mcr.delta_sum_abs / mcr.delta_window_count : 0),
                    mcr.lock_streak);
+            printf("  HW-extractor: en=%lu match=%lu eof=%lu ovf=%lu level=%lu hw_rx=%lu last_sub=%02lx\n",
+                   (unsigned long)crf_ts_enabled_read(),
+                   (unsigned long)crf_ts_match_count_read(),
+                   (unsigned long)crf_ts_eof_count_read(),
+                   (unsigned long)crf_ts_overflow_count_read(),
+                   (unsigned long)crf_ts_level_read(),
+                   (unsigned long)mcr.hw_rx_count,
+                   (unsigned long)crf_ts_diag_last_subtype_read());
             // Reset window after print so next sample starts fresh
             mcr.delta_max_abs     = 0;
             mcr.delta_sum_abs     = 0;
@@ -957,7 +965,8 @@ int main(void)
             }
         }
         avdecc_poll(&avdecc);
-        mcr_servo_update(&mcr);
+        mcr_pump_hw(&mcr);        // flood-proof servo feed from gateware CRF FIFO
+        mcr_servo_update(&mcr);   // also consume any CPU-path CRF sample
         mcr_watchdog_tick(&mcr, gptp_uptime_ms());
 
         // DAC writer: pace AAF RX ch 0/1 → I2S TX at the audio sample

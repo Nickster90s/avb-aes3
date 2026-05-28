@@ -228,21 +228,109 @@ class MCRNco(LiteXModule):
         self._phase = CSRStatus(32,
             description="Current NCO phase (debug).")
 
-        phase        = Signal(32)
+        # Phase exposed as self.phase so MCRI2STx can pick BCK/LRCK/bit_idx
+        # directly off the high bits (phase[31] = fs, phase[25] = 64*fs).
+        self.phase   = Signal(32)
         next_phase   = Signal(33)
         sample_count = Signal(32)
 
-        self.comb += next_phase.eq(phase + self._increment.storage)
+        self.comb += next_phase.eq(self.phase + self._increment.storage)
         self.sync += [
-            phase.eq(next_phase[:32]),
+            self.phase.eq(next_phase[:32]),
             self.sample_strobe.eq(next_phase[32]),
             If(self.sample_strobe,
                 sample_count.eq(sample_count + 1)),
         ]
         self.comb += [
             self._sample_count.status.eq(sample_count),
-            self._phase.status.eq(phase),
+            self._phase.status.eq(self.phase),
         ]
+
+
+# MCR-locked I2S transmitter ---------------------------------------------------------------------------
+
+class MCRI2STx(LiteXModule):
+    """I2S TX sample-locked to MCRNco. PCM5102A compatible.
+
+    Derives I2S clocks directly off the NCO's phase bits:
+        BCK  = nco.phase[25]   (64 * fs = 3.072 MHz at fs=48 kHz)
+        LRCK = nco.phase[31]   (fs    = 48 kHz)
+        bit_idx within channel = nco.phase[30:26]   (0..31)
+
+    Because the NCO is tuned by the firmware PI servo on CRF timestamps,
+    BCK and LRCK *move together* with the talker's media clock — the DAC
+    is sample-locked to the AVB CRF source by construction.
+
+    Cycle-to-cycle jitter on BCK is bounded by 1 sys_clk period (~20 ns
+    at 50 MHz). PCM5102A's internal CRPLL averages that out (loop BW ~kHz).
+
+    Wire pattern (per I2S spec, MSB-first with 1-bit delay after LRCK):
+        bit  0      : 0           (I2S 1-cycle delay)
+        bit  1..24  : data, MSB first (active[23] down to active[0])
+        bit 25..31  : 0           (zero padding to 32-bit channel)
+    Pattern is selected by lrck (0 = L, 1 = R).
+    """
+    def __init__(self, nco):
+        self.bck  = Signal()
+        self.lrck = Signal()
+        self.dout = Signal()
+
+        # Audio sample input — sys-domain stream (sync FIFO upstream).
+        self.audio_l     = Signal(24)
+        self.audio_r     = Signal(24)
+        self.audio_valid = Signal()   # FIFO has a sample ready
+        self.audio_ready = Signal()   # one-cycle pop strobe
+
+        # Diagnostic: frames where audio_valid was low when we needed a
+        # new sample (FIFO underrun = repeat previous frame).
+        self._underruns = CSRStatus(32,
+            description="Frames where the FIFO was empty at sample_strobe.")
+        underruns = Signal(32)
+        self.comb += self._underruns.status.eq(underruns)
+
+        # ---- Clock outputs straight off NCO phase bits ----
+        self.comb += [
+            self.bck .eq(nco.phase[25]),
+            self.lrck.eq(nco.phase[31]),
+        ]
+
+        # ---- Sample latch at each fs boundary (sample_strobe) ----
+        # On strobe: if FIFO has a sample, latch it; otherwise tick underrun
+        # counter and repeat the previous sample (well-behaved fallback).
+        shift_l = Signal(24)
+        shift_r = Signal(24)
+        self.sync += If(nco.sample_strobe,
+            If(self.audio_valid,
+                shift_l.eq(self.audio_l),
+                shift_r.eq(self.audio_r),
+            ).Else(
+                underruns.eq(underruns + 1),
+            )
+        )
+        self.comb += self.audio_ready.eq(nco.sample_strobe & self.audio_valid)
+
+        # ---- Combinational DOUT from current bit_idx ----
+        # Build a 32-bit wire pattern with the I2S delay + data + padding,
+        # then index it by bit_idx. Reverse the data bits so MSB lands at
+        # bit position 1 (just after the I2S 1-bit delay).
+        bit_idx = Signal(5)
+        self.comb += bit_idx.eq(nco.phase[26:31])
+
+        active = Signal(24)
+        self.comb += If(self.lrck == 0,
+            active.eq(shift_l),
+        ).Else(
+            active.eq(shift_r),
+        )
+
+        # Cat is LSB-first: bit 0 of `pattern` is the I2S 1-bit delay = 0,
+        # bits 1..24 are data MSB-first via active[::-1] (Migen reverse slice),
+        # bits 25..31 are zero padding. Dynamic indexing needs Array — Migen
+        # rejects Signal-keyed bit access on a plain Signal.
+        pattern = Signal(32)
+        self.comb += pattern.eq(Cat(C(0, 1), active[::-1], C(0, 7)))
+        pattern_arr = Array([pattern[i] for i in range(32)])
+        self.comb += self.dout.eq(pattern_arr[bit_idx])
 
 
 # I2S Pin Extension ------------------------------------------------------------------------------------
@@ -510,72 +598,49 @@ class AVBSoC(SoCCore):
         i2s_lrck_pad = platform.request("i2s_lrck")
         i2s_dout_pad = platform.request("i2s_dout")
 
-        # I2S TX runs in the audio clock domain (12.288 MHz).
-        # Source: firmware writes L/R CSRs then pulses _i2s_push — the push
-        # signals an AsyncFIFO enqueue (sys_clk side). i2s_tx pulls one
-        # sample per frame_start (48 kHz, audio_clk side). The FIFO bridges
-        # the two clock domains AND absorbs the rate mismatch between MCR-
-        # paced firmware push and audio_clk-paced I2S consume — without a
-        # FIFO, pushes that land mid-frame are silently dropped by i2s_tx.
-        i2s_bck  = Signal()
-        i2s_lrck = Signal()
-        i2s_dout = Signal()
-        i2s_frame_start = Signal()
+        # I2S TX is now sample-locked to MCR (task #60). The Verilog i2s_tx
+        # ran in cd_audio (12.288 MHz, free-running) and was bridged from
+        # sys via AsyncFIFO. New path:
+        #   firmware → CSR push → SyncFIFO (sys) → MCRI2STx (sys)
+        # MCRI2STx derives BCK/LRCK from the MCR NCO's phase bits and pops
+        # the FIFO at each NCO sample_strobe — so the DAC bit-clock and
+        # word-clock both move with the CRF talker. cd_audio is kept in
+        # the CRG for now but unused; can be removed in a follow-up.
 
         self._i2s_audio_l = CSRStorage(24, description="I2S TX left channel (firmware write).")
         self._i2s_audio_r = CSRStorage(24, description="I2S TX right channel (firmware write).")
         self._i2s_push    = CSRStorage(1,  description="Write 1 to push L/R to I2S FIFO.")
         self._i2s_fifo_drops = CSRStatus(32, description="Pushes dropped because FIFO was full.")
 
-        # 48-bit FIFO (24 L + 24 R), depth 32 samples = ~660 µs at 48 kHz.
-        i2s_fifo = AsyncFIFO(width=48, depth=32)
-        i2s_fifo = ClockDomainsRenamer({"write": "sys", "read": "audio"})(i2s_fifo)
+        # 48-bit SyncFIFO (24 L + 24 R), depth 32 = ~660 µs at 48 kHz.
+        # Sync (no CDC) because both write and read are sys-domain now.
+        i2s_fifo = SyncFIFO(width=48, depth=32)
         self.submodules.i2s_fifo = i2s_fifo
 
-        # Write side (sys_clk): firmware pushes L||R when _i2s_push CSR
-        # is written. Drop if FIFO full (would happen if MCR > audio_clk
-        # rate; drop is preferable to overwriting in-flight samples).
+        # Write side — firmware push.
         i2s_fifo_drops = Signal(32)
         push_pulse = self._i2s_push.re
         self.comb += [
             i2s_fifo.din.eq(Cat(self._i2s_audio_r.storage,
-                                self._i2s_audio_l.storage)),  # R at bits[0:24], L at [24:48]
+                                self._i2s_audio_l.storage)),  # R at [0:24], L at [24:48]
             i2s_fifo.we.eq(push_pulse & i2s_fifo.writable),
         ]
         self.sync += If(push_pulse & ~i2s_fifo.writable,
             i2s_fifo_drops.eq(i2s_fifo_drops + 1))
         self.comb += self._i2s_fifo_drops.status.eq(i2s_fifo_drops)
 
-        # Read side (audio_clk): i2s_tx pulses frame_start at each 48 kHz
-        # boundary. Use that pulse as the FIFO read enable. dout updates on
-        # the next audio_clk edge, ready for i2s_tx's next frame_start.
-        i2s_l_from_fifo = Signal(24)
-        i2s_r_from_fifo = Signal(24)
+        # MCRI2STx — pulls a (L, R) pair on every NCO sample_strobe and
+        # streams the bits out at BCK = nco.phase[25] (~3.072 MHz at fs=48k).
+        self.submodules.i2s_tx = i2s_tx = MCRI2STx(self.mcr)
         self.comb += [
-            i2s_l_from_fifo.eq(i2s_fifo.dout[24:48]),
-            i2s_r_from_fifo.eq(i2s_fifo.dout[0:24]),
-            i2s_fifo.re.eq(i2s_frame_start & i2s_fifo.readable),
+            i2s_tx.audio_l    .eq(i2s_fifo.dout[24:48]),
+            i2s_tx.audio_r    .eq(i2s_fifo.dout[0:24]),
+            i2s_tx.audio_valid.eq(i2s_fifo.readable),
+            i2s_fifo.re       .eq(i2s_tx.audio_ready),
+            i2s_bck_pad       .eq(i2s_tx.bck),
+            i2s_lrck_pad      .eq(i2s_tx.lrck),
+            i2s_dout_pad      .eq(i2s_tx.dout),
         ]
-
-        self.specials += Instance("i2s_tx",
-            i_clk         = ClockSignal("audio"),
-            i_rst         = ResetSignal("audio"),
-            i_audio_l     = i2s_l_from_fifo,
-            i_audio_r     = i2s_r_from_fifo,
-            i_audio_valid = i2s_fifo.readable,  # if FIFO empty, i2s_tx repeats last
-            o_bck         = i2s_bck,
-            o_lrck        = i2s_lrck,
-            o_dout            = i2s_dout,
-            o_frame_start_out = i2s_frame_start,
-        )
-
-        self.comb += [
-            i2s_bck_pad.eq(i2s_bck),
-            i2s_lrck_pad.eq(i2s_lrck),
-            i2s_dout_pad.eq(i2s_dout),
-        ]
-
-        platform.add_source(os.path.join(os.path.dirname(__file__), "rtl", "i2s_tx.v"))
 
         # I2S diagnostics — readable from firmware.
         self._i2s_mmcm_locked = CSRStatus(1,  description="Audio MMCM locked (1=ok).")
@@ -583,14 +648,16 @@ class AVBSoC(SoCCore):
         self._i2s_lrck_count  = CSRStatus(32, description="LRCK toggle counter (sys-clk view).")
         self.comb += self._i2s_mmcm_locked.status.eq(self.crg.audio_pll.locked)
 
-        # CDC BCK/LRCK to sys clk (data, not clock) and count edges.
+        # BCK/LRCK toggle counters (sys-clk view). Now that MCRI2STx
+        # generates these in sys domain (no longer audio_clk), no CDC is
+        # required — keep the 2-bit shift for clean edge detection only.
         bck_sync   = Signal(2)
         lrck_sync  = Signal(2)
         bck_count  = Signal(32)
         lrck_count = Signal(32)
         self.sync += [
-            bck_sync.eq(Cat(i2s_bck, bck_sync[0])),
-            lrck_sync.eq(Cat(i2s_lrck, lrck_sync[0])),
+            bck_sync.eq(Cat(i2s_tx.bck, bck_sync[0])),
+            lrck_sync.eq(Cat(i2s_tx.lrck, lrck_sync[0])),
             If(bck_sync[0]  != bck_sync[1],  bck_count.eq(bck_count + 1)),
             If(lrck_sync[0] != lrck_sync[1], lrck_count.eq(lrck_count + 1)),
         ]

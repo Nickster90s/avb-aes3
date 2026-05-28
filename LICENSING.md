@@ -7,31 +7,37 @@ Short version: **the original code we wrote is Apache 2.0** (see
 The two specific things worth understanding before reusing this
 project commercially:
 
-## 1. `rtl/ulpi_wrapper.v` is GPL
+## 1. `rtl/ulpi_wrapper.v` is GPL — what this means for our actual use
 
 This file is vendored verbatim from
 [ultraembedded/core_ulpi_wrapper](https://github.com/ultraembedded/core_ulpi_wrapper)
 and carries the **GNU General Public License, any later version**.
-That has consequences if you redistribute a bitstream built from this
-repo:
+The GPL only triggers on *distribution*. Most of the practical use
+cases for this project are fine without further action:
 
-- **Open-source distribution** — fine. The repo as a whole is
-  effectively GPL-compatible because everything else (Apache 2.0,
-  BSD-2/3-Clause, CERN-OHL-W-2.0) can be combined with GPL
-  *downstream*.
-- **Commercial / closed product** — the bitstream is a derivative
-  work of GPL'd Verilog. Options:
-    1. Release your product (firmware + bitstream + any modifications)
-       under GPL too. Sometimes that's fine.
-    2. Buy a commercial licence from ultraembedded. The file's own
-       header hints at this: *"If you would like a version with a more
-       permissive license for [commercial use]…"* — they sell one.
-    3. Replace `ulpi_wrapper.v` with an MIT/Apache-licensed
-       equivalent (or write your own). Possible but non-trivial — see
-       README §8 in `avb-usb-host` for what the wrapper does.
+### Use cases sorted by GPL risk
 
-If you don't redistribute the bitstream (private/internal use), GPL
-doesn't kick in. The obligation only arises on distribution.
+- **Private / own use** (the typical case for the project's author):
+  no distribution → no GPL obligation. Use the bitstream freely.
+- **Renting a hardware unit out** (e.g. EventsLight loans an event
+  rack to a venue for the weekend): the GPL FAQ does treat this as
+  conveying the embedded software, but with the source already
+  published in this public repo, the source-availability requirement
+  is met automatically — anyone who wants the source can find this
+  repo. Keep the LICENSE / NOTICE / LICENSING.md files visible inside
+  the firmware build (already are), and you're done.
+- **Open-source release** (this repo, as-is): also fine — the GPL'd
+  file keeps its header; everything else combines with it cleanly.
+- **Closed commercial product** (selling units, not in this project's
+  plans): would trigger the obligation to ship source on request, or
+  buy ultraembedded's commercial licence
+  (the file header hints at this: *"If you would like a version with a
+  more permissive license for [commercial use]…"*), or replace the
+  wrapper with a permissive equivalent. Not applicable today; flagged
+  here for future-self.
+
+For private use AND rental, the **public GitHub repo is the compliance
+mechanism** — you're already done as long as that stays accessible.
 
 ## 2. Imported files retain their headers
 

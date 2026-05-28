@@ -1,0 +1,45 @@
+avb-aes3 — Standalone AVB endpoint on Colorlight i9plus
+Copyright 2025-2026 Nick (nick.eventslight@gmail.com)
+
+This product includes software developed by third parties; see
+LICENSING.md for the per-component summary. The list below lists each
+component and the license under which it was obtained.
+
+------------------------------------------------------------------------
+1. ULPI wrapper (rtl/ulpi_wrapper.v)
+   Upstream: https://github.com/ultraembedded/core_ulpi_wrapper
+   Copyright (c) 2015–2020 ultraembedded
+   License: GPL (any later version)
+   Vendored verbatim. The combined bitstream is a derivative work of
+   GPL'd code. Commercial users should review ultraembedded's
+   commercial-license offer (mentioned in the file header).
+------------------------------------------------------------------------
+2. USB UAC2 subsystem (rtl/usb_avb_subsystem.v)
+   Generated from: https://github.com/Nickster90s/avb-usb-host
+   Carries inherited licenses from upstream Amaranth/LUNA dependencies
+   AND from hansfbaier/adat-usb2-audio-interface (CERN-OHL-W-2.0)
+   propagated through avb-usb-host. See that repo's NOTICE.
+------------------------------------------------------------------------
+3. LiteX / Migen / LiteEth / litex-boards / pythondata-*
+   Upstream: https://github.com/enjoy-digital/* and
+             https://github.com/litex-hub/*
+   License: BSD-2-Clause (per upstream)
+   Runtime dependencies, imported via Python; not vendored into this
+   repo. LiteEth is consumed from a patched branch
+   (colorlight-i9plus-b50612d-fixes) — see LITEETH_PATCHES.md.
+------------------------------------------------------------------------
+4. openXC7 (yosys + nextpnr-xilinx + prjxray-db)
+   Upstream: https://github.com/openXC7/toolchain-installer
+   License: various permissive (per upstream)
+   Build toolchain; not vendored. See TOOLCHAIN.md for the exact
+   version this project was built against.
+------------------------------------------------------------------------
+5. jdksavdecc (header values + descriptor IDs)
+   Upstream: https://github.com/jdkoftinoff/jdksavdecc-c
+   License: BSD-3-Clause (per upstream)
+   Used as a reference for AEM descriptor IDs and protocol constants
+   embedded in firmware/avdecc.[ch]; no source carried over verbatim.
+------------------------------------------------------------------------
+
+All other source code in this repository is original work and is
+licensed under the Apache License, Version 2.0 — see LICENSE.

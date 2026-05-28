@@ -1,2 +1,1 @@
-*.bit
-*.info
+# .bit and .info are now tracked under git-lfs (.gitattributes)

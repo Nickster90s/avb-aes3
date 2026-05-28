@@ -644,10 +644,14 @@ def main():
     parser.add_argument("--build",        action="store_true", help="Build bitstream.")
     parser.add_argument("--load",         action="store_true", help="Load bitstream.")
     parser.add_argument("--seed", default=4, type=int, help="nextpnr P&R seed.")
-    parser.add_argument("--no-floorplan", action="store_true",
-        help="Disable the USB pre-place floorplan (floorplan_usb.py). On by "
-             "default: confines the USB block to the right half so the 125 MHz "
-             "eth TX datapath keeps the left edge near its pins.")
+    parser.add_argument("--floorplan", action="store_true",
+        help="Inject floorplan_usb.py (--pre-place: confines USB to X>=78). "
+             "OFF by default. Patch #3 (LITEETH_PATCHES.md, TX-only sys-datapath) "
+             "made the floorplan unnecessary for eth_tx, and confining USB to "
+             "X>=78 puts it ~77 columns away from the ULPI pins at X=1 — that "
+             "long routing marginalises 60 MHz ULPI sampling and is the root "
+             "cause of the build-to-build USB error -71 lottery. Only pass "
+             "--floorplan to reproduce the pre-#3 timing-recovery behaviour.")
     parser.add_argument("--sys-clk-freq", default=50e6, type=float, help="System clock frequency.")
     parser.add_argument("--firmware",     default=None,        help="Custom firmware .bin to embed in ROM (replaces BIOS).")
     builder_args = parser.add_argument_group("builder")
@@ -693,31 +697,21 @@ def main():
 
     builder = Builder(soc, **builder_kwargs)
     if args.build:
-        # nextpnr-xilinx seed selection. The design is on the timing edge.
-        # WITH the USB block (P3.2) + the X78 USB floorplan (floorplan_usb.py),
-        # a seed sweep (3 4 7 11 13 17 19 23) gave eth_tx_clk:
-        #     seed  4 = 134.28 MHz  PASS  <- chosen (best margin; all clocks pass:
-        #                                    eth_rx 126.4, audio 137.3)
-        #     seed 11 = 130.26 MHz  PASS
-        #     others  = 92-120 MHz  FAIL
-        # Without the floorplan, no seed cleared 125 with USB present (best 114).
-        # Seed alone is NOT enough — the floorplan is required; both together get
-        # gigabit. If a future change shifts placement, re-sweep timing-only:
-        #     export NEXTPNR_ETH_REGION=""   # eth box hangs the placer; keep off
-        #     for s in 3 4 7 11 13 17 19 23; do
-        #         nextpnr-xilinx --json colorlight_i9plus.json --xdc *.xdc \
-        #           --chipdb $CHIPDB/xc7a50tfgg484.bin --timing-allow-fail \
-        #           --seed $s --freq 125 --pre-place floorplan_usb.py >seed_$s.log; done
-        # and pick the highest eth_tx_clk PASS.
+        # nextpnr-xilinx seed pinned to 4. Patch #3 (LITEETH_PATCHES.md,
+        # TX-only sys-datapath) made eth_tx_clk robust across seeds (163 MHz
+        # at seed 4 — well above the 125 MHz RGMII requirement), so the seed
+        # is no longer a knife-edge timing knob — it's just pinned for build
+        # reproducibility.
         #
-        # Floorplan (the real lever): a seed sweep can't close the 13-30 MHz
-        # gap — it's congestion, not seed. floorplan_usb.py is a nextpnr
-        # --pre-place hook that confines the USB block (cells matching
-        # 'usb_avb_subsystem', ~292) to the right half of the die, leaving the
-        # left edge (all eth pins + the 125 MHz RGMII TX datapath) clear.
-        # Injected here by prepending to _pnr_opts; finalize() appends
-        # --chipdb/--write after, so both land on the nextpnr command line.
-        if not args.no_floorplan:
+        # The earlier "USB floorplan + seed sweep" recipe is SUPERSEDED by
+        # patch #3 and is also actively harmful to USB: the floorplan
+        # confines USB to X>=78 (right half), but the ULPI input pins are
+        # at X=1 (left edge), so ULPI sampling has to traverse ~77 columns
+        # of routing — that's why rebuilds fail USB enumeration with
+        # error -71 (the working standalone has no such constraint and the
+        # wrapper lands naturally near the ULPI pins). floorplan_usb.py is
+        # kept for opt-in via --floorplan but is OFF by default now.
+        if args.floorplan:
             fp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "floorplan_usb.py")
             soc.platform.toolchain._pnr_opts += " --pre-place {} ".format(fp)

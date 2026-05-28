@@ -37,10 +37,19 @@
 
 import os
 
-# ---- USB block: right edge, clear of the eth TX cluster --------------------
+# ---- USB block: LEFT edge, close to the ULPI pins at X=1, Y=23-49 ----------
+# (Opposite of the original v2 region which pushed USB to X>=78.) Rationale:
+# patch #3 (TX-only sys-datapath) made gigabit eth_tx robust WITHOUT a
+# floorplan, so the v2 "USB to the right half" recipe is no longer needed —
+# AND that distance from the ULPI pins re-introduced placement-marginal HS
+# ULPI sampling once the CRF extractor + MCRI2STx were added (USB enumerated
+# only as full-speed, error -71 during HS chirp).
+# Goal here: keep USB cells within ~40 columns of X=1 so the 60 MHz ULPI
+# input setup time is satisfied regardless of synthesis non-determinism.
+# Eth TX cluster (X=51-62) is well clear of X<=40.
 USB_REGION = "usb_fp"
 USB_PREFIX = "usb_avb_subsystem"          # clean + $flatten\ -escaped names
-UX0, UY0, UX1, UY1 = 78, 0, 114, 156
+UX0, UY0, UX1, UY1 = 0, 10, 30, 70
 _u = os.environ.get("NEXTPNR_USB_REGION", "").strip()
 if _u:
     UX0, UY0, UX1, UY1 = (int(v) for v in _u.split(","))

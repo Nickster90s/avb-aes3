@@ -728,14 +728,15 @@ def main():
     parser.add_argument("--build",        action="store_true", help="Build bitstream.")
     parser.add_argument("--load",         action="store_true", help="Load bitstream.")
     parser.add_argument("--seed", default=4, type=int, help="nextpnr P&R seed.")
-    parser.add_argument("--floorplan", action="store_true",
-        help="Inject floorplan_usb.py (--pre-place: confines USB to X>=78). "
-             "OFF by default. Patch #3 (LITEETH_PATCHES.md, TX-only sys-datapath) "
-             "made the floorplan unnecessary for eth_tx, and confining USB to "
-             "X>=78 puts it ~77 columns away from the ULPI pins at X=1 — that "
-             "long routing marginalises 60 MHz ULPI sampling and is the root "
-             "cause of the build-to-build USB error -71 lottery. Only pass "
-             "--floorplan to reproduce the pre-#3 timing-recovery behaviour.")
+    parser.add_argument("--no-floorplan", action="store_true",
+        help="Disable the USB-near-ULPI proximity floorplan (floorplan_usb.py "
+             "constrains USB cells to X<=30, Y=10-70 — close to the ULPI pins "
+             "at X=1, Y=23-49). ON by default: with the gateware CRF extractor "
+             "+ MCRI2STx + AVB SoC present, nextpnr's free placement scatters "
+             "USB cells too far from the ULPI pins → marginal 60 MHz HS chirp "
+             "→ enumerate as full-speed + error -71. The proximity floorplan "
+             "deterministically pins USB near the pins. Only pass --no-floorplan "
+             "for debugging.")
     parser.add_argument("--sys-clk-freq", default=50e6, type=float, help="System clock frequency.")
     parser.add_argument("--firmware",     default=None,        help="Custom firmware .bin to embed in ROM (replaces BIOS).")
     builder_args = parser.add_argument_group("builder")
@@ -787,15 +788,15 @@ def main():
         # is no longer a knife-edge timing knob — it's just pinned for build
         # reproducibility.
         #
-        # The earlier "USB floorplan + seed sweep" recipe is SUPERSEDED by
-        # patch #3 and is also actively harmful to USB: the floorplan
-        # confines USB to X>=78 (right half), but the ULPI input pins are
-        # at X=1 (left edge), so ULPI sampling has to traverse ~77 columns
-        # of routing — that's why rebuilds fail USB enumeration with
-        # error -71 (the working standalone has no such constraint and the
-        # wrapper lands naturally near the ULPI pins). floorplan_usb.py is
-        # kept for opt-in via --floorplan but is OFF by default now.
-        if args.floorplan:
+        # USB proximity floorplan (ON by default since 2026-05-28). The
+        # floorplan_usb.py hook constrains USB cells to X<=30, Y=10-70 —
+        # immediately around the ULPI pins at X=1, Y=23-49. Without it the
+        # post-CRF-extractor / post-MCRI2STx builds scatter USB cells far
+        # enough from the pins that 60 MHz HS chirp fails (enumerate as
+        # full-speed + error -71). Patch #3 (LITEETH_PATCHES.md) made
+        # eth_tx robust without needing a floorplan, and the eth TX cluster
+        # naturally lands at X=51-62 so it never collides with USB's X<=30.
+        if not args.no_floorplan:
             fp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "floorplan_usb.py")
             soc.platform.toolchain._pnr_opts += " --pre-place {} ".format(fp)

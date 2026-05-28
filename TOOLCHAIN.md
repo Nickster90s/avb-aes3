@@ -98,7 +98,7 @@ time; only when we regenerate the `usb_avb_subsystem.v` blackbox.
 | amaranth | `/home/lisp/litex/venv/lib/python3.11/site-packages/amaranth/` | `0.5.8` (pip-installed in `litex/venv`) | stock |
 | luna | `/home/lisp/litex/venv/lib/python3.11/site-packages/luna/` | (pip-installed) | stock |
 | usb_protocol | `/home/lisp/litex/venv/lib/python3.11/site-packages/usb_protocol/` | (pip-installed) | stock |
-| avb-usb-host | `/home/lisp/FPGA/avb-usb-host` | `master` @ `7895049` | OUR project (not yet pushed) |
+| avb-usb-host | `/home/lisp/FPGA/avb-usb-host` | `master` @ `a9d701e` | OUR project: https://github.com/Nickster90s/avb-usb-host |
 | ultraembedded `ulpi_wrapper.v` | `avb-usb-host/rtl/ulpi_ultraembedded/ulpi_wrapper.v` (also copied into `avb-aes3/rtl/`) | from upstream `ultraembedded/core_ulpi_wrapper` | vendored |
 
 ### Amaranth-on-openXC7 quirks (memory: `feedback_amaranth_xray_toolchain`)
@@ -235,7 +235,7 @@ python3 -m venv ~/litex/venv
 git clone https://github.com/Nickster90s/avb-aes3 ~/FPGA/avb-aes3
 
 # 8. (Optional, only to regenerate USB block) avb-usb-host
-# git clone <when_pushed> ~/FPGA/avb-usb-host
+git clone https://github.com/Nickster90s/avb-usb-host ~/FPGA/avb-usb-host
 
 # 9. Build
 cd ~/FPGA/avb-aes3

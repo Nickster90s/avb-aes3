@@ -40,11 +40,16 @@ void mcr_init(mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs)
     m->watchdog_reset_active = 1;
 }
 
-// Stale threshold: 200 ms. Class A CRF arrives at 8 kHz, so 200 ms is
-// 1600 PDUs of slack — well past any plausible transient. Tuning lower
-// would risk false triggers during MRP refresh storms; higher would let
-// rate drift accumulate audibly before snapping back to base rate.
-#define MCR_STALE_THRESHOLD_MS  200
+// Stale threshold: 1000 ms. Class A CRF arrives at 8 kHz; a real talker
+// stopping streaming is on the order of seconds, not ~200 ms. 200 ms was
+// too twitchy: brief packet-burst losses (seq_err clusters) inside the
+// window fired the stale path and toggled `servo_locked` 1→0→1, which
+// then triggered unsolicited STREAM_INPUT MEDIA_LOCKED/UNLOCKED pushes
+// in avdecc.c (`avdecc_listener_lock_changed`) and Hive lit up the patch
+// even though there was no real disconnect (2026-05-28 bench observation).
+// 1000 ms still snaps the NCO back well before any audible drift can
+// accumulate (NCO retained-tuning drifts at sub-ppm; 1 s = sub-µs).
+#define MCR_STALE_THRESHOLD_MS  1000
 
 void mcr_watchdog_tick(mcr_state_t *m, uint32_t now_ms)
 {

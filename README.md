@@ -14,23 +14,25 @@ VexRiscv runs all the protocol stacks bare-metal — no Linux on the device.
 
 ---
 
-## 1. Status (what works as of 2026-05-28)
+## 1. Status (what works as of 2026-05-28 PM)
 
 | Subsystem  | State                                                            |
 |------------|------------------------------------------------------------------|
 | gPTP       | Locks ±30 ns to MOTU AVB Switch / Auvitran grandmaster           |
-| AVDECC     | Hive sees entity, full AEM tree, patchable in Hive               |
+| AVDECC     | Hive sees entity, full AEM tree, patchable, no spurious flicker  |
 | MSRP       | Talker + Listener registrar; READY substate at CONNECT_RX        |
 | ACMP       | Fast-path + slow-path (zero-stream-id) listener flows            |
 | AAF        | 8 ch RX + TX at 48 kHz / 24 bit, with jitter buffer              |
-| CRF        | RX parser feeds NCO PI servo (±2 µs lock, single-sample exit)    |
+| CRF        | Gateware extractor + firmware PI servo: max\|d\|≈0.8 µs, stays locked past 40 s |
+| MCR        | NCO PI-tuned by CRF servo, drives I2S BCK/LRCK (sample-locked DAC) |
 | AES3       | TX wired to AAF RX ch 0+1 (loopback bench-verified)              |
-| USB UAC2   | HS enumerate + playback robust; capture flow-control TBD         |
-| Eth gigabit| `eth_tx_clk` 150-163 MHz robust (TX-only sys-datapath patch)     |
+| I2S TX     | Bit-clock derived from MCR NCO phase — sample-locked to talker   |
+| USB UAC2   | HS enumerate (`1209:eab1`) + playback robust; capture TBD        |
+| Eth gigabit| `eth_tx_clk` 150-176 MHz robust (TX-only sys-datapath patch)     |
 
-Working build archived at
-`bitstreams/675fb9e-dirty_2026-05-28_1001_usb-avb-working-no-floorplan.bit`
-with full `git log -1` sidecar.
+**Latest verified bitstream** archived at
+`bitstreams/7199108-dirty_2026-05-28_1428_usb-near-ulpi-floorplan-crf-mcri2s-all-working.bit`
+— covers all of the above on one bit. Sidecar `.info` carries `git log -1` + uncommitted-diff stat.
 
 ---
 
@@ -401,18 +403,94 @@ across rebuilds.
 Same day: `bitstreams/archive.sh` was added so we can't lose another
 working build to an overwrite.
 
-### Today
+### Same-day continuation (2026-05-28 PM)
+
+After USB+AVB coexistence shipped (`9bdae1b`), the rest of the day landed
+the CRF gateware path, the MCR-driven I2S, and a paradoxical floorplan
+reversal:
+
+**`a493962` — Gateware CRF timestamp extractor.** Stage 2b for CRF: a
+Migen `CRFTimestampExtractor` (208 lines, observe-only `mac.core.source`
+snoop) matches the bound CRF stream_id, latches the TSU timestamp at
+frame arrival, and FIFOs `(avtp_ts, local_ts)` pairs for firmware to
+drain via `mcr_pump_hw`. Two consequences:
+
+- **Jitter:** firmware-RX-latency stops dominating. `max|d|` drops from
+  ~18 µs (firmware timestamps) to **~0.8 µs** (hardware timestamps).
+- **40 s drop fixed:** before, the firmware was just busy enough parsing
+  every CRF PDU at 8 kHz that the 1 s MSRP refresh occasionally slipped
+  past the bridge's 4× LeaveAll window (~39 s) and the bridge pruned
+  our Listener registration. With gateware capture taking the CRF load,
+  refreshes stay on time and the stream survives indefinitely.
+
+The original `f44a9b8` attempt at this looked like a code regression
+("entity vanishes from Hive, main loop dead") but was actually the
+stale-firmware build-cache trap: `make` link-failed because csr.h didn't
+yet have the new `crf_ts_*` accessors, the gateware build silently
+embedded the previous firmware.bin against the new CSR layout, and every
+CSR access landed at the wrong address. Caught this session with a clean
+`make clean && make` after the cherry-pick. See
+[[feedback_firmware_stale_csr_addr_trap]] memory.
+
+**`d7a60dd` — `MCR_STALE_THRESHOLD_MS 200 → 1000`.** Even with locked
+CRF, Hive's CRF patch line was "lighting up" intermittently — turned
+out to be unsolicited STREAM_INPUT `MEDIA_LOCKED/UNLOCKED` AECP pushes
+fired by `track_clock_lock` when the MCR stale watchdog briefly flipped
+`servo_locked` on packet-loss bursts > 200 ms. Widening to 1 s absorbs
+those without any audible drift (sub-ppm NCO tuning ⇒ sub-µs/s wander
+across 1 s).
+
+**`7199108` — I2S TX bit-clock from MCR NCO (task #60).** Replaced the
+audio-domain Verilog `i2s_tx` (running off the free PLL @ 12.288 MHz)
+with a sys-domain Migen `MCRI2STx` that derives BCK = `nco.phase[25]`
+(64 × fs), LRCK = `nco.phase[31]` (fs), and shifts data on each BCK
+falling edge — all phase-bits straight off the NCO that the PI servo
+is actively tuning. The PCM5102A DAC bit-clock now moves with the AVB
+talker by construction. Cycle-to-cycle jitter on BCK is ~20 ns; the
+PCM5102A's internal CRPLL averages that out.
+
+**`df4fb3e` — floorplan ON again, but in the OPPOSITE direction.** The
+gateware CRF extractor + MCRI2STx changed the overall placement pressure
+enough that nextpnr's free placement scattered USB cells too far from
+the ULPI pins again — back to error-71 / full-speed-only enumeration.
+The fix: re-enable `floorplan_usb.py`, but pin USB to **X≤30, Y=10-70**
+(*toward* the ULPI pins at X=1, Y=23-49) instead of the original X≥78
+(*away* from them). One commit reversed the entire `9bdae1b` intent for
+a structurally different reason — a reminder that floorplans aren't
+inherently good or bad: the *direction* matters, and it depends on
+what's competing for placement.
+
+### Today's commits
 
 ```
+df4fb3e floorplan: USB-near-ULPI (X<=30, Y=10-70), ON by default
+7199108 i2s: sample-lock TX bit-clock to MCR NCO (task #60)
+d7a60dd mcr: widen stale-watchdog 200→1000 ms — kills Hive cosmetic flicker
+a493962 Gateware CRF timestamp extractor — kills firmware-RX-latency jitter and 39 s drop
+3dc6abf docs: refresh README with current status + USB UAC2 + the full journey
 9bdae1b floorplan off by default: it was breaking USB ULPI sampling
 336fce4 tooling: bitstream archive script with git-log sidecar
 675fb9e Gigabit USB+AVB: TX-only sys-datapath fix + USB floorplan, seed 4
 ```
 
-USB + AVB coexist on one bitstream; verified working build archived to
-`bitstreams/`. Next focuses: USB ↔ AVB bridge (Phase 3.3), MCR-driven I2S
-TX clocking, and (when scale demands it) moving CPU RAM from BRAM to the
-on-board SDRAM via LiteDRAM to free ~190 KB BRAM for audio FIFOs.
+All on master; five working `.bit` files archived in `bitstreams/`.
+
+### Open / next
+
+- **#67 USB ↔ AVB bridge (DAW → USB → AAF on the wire).** The first
+  attempt in P3.3 added a gateware AsyncFIFO (cd_usb → sys); even with
+  the floorplan pulling its cells into the X≤30 region, *any* added
+  cd_usb-side logic re-broke 60 MHz ULPI HS chirp. Lesson: the
+  proximity floorplan that works for the USB wrapper is too marginal
+  to share with new cd_usb consumers. The cleaner path is to
+  regenerate `usb_avb_subsystem.v` from the avb-usb-host Amaranth
+  source with an internal FIFO + simple read interface, so the FIFO
+  is part of the wrapper's already-validated placement domain.
+  Reverted cleanly; master remains at `df4fb3e`.
+- **#58 MCR cs=0 → gPTP-tuned NCO** — when no CRF is patched, tune the
+  NCO from gPTP rate so the DAC stays sample-locked to the GM.
+- **Scaling** (when needed): move CPU RAM from BRAM to the on-board
+  SDRAM via LiteDRAM to free ~190 KB BRAM for audio FIFOs.
 
 ---
 
@@ -421,7 +499,9 @@ on-board SDRAM via LiteDRAM to free ~190 KB BRAM for audio FIFOs.
 ```
 avb-aes3/
 ├── avb_soc.py                   # LiteX SoC top-level (Python/Migen)
-├── floorplan_usb.py             # nextpnr --pre-place hook (opt-in via --floorplan)
+├── crf_extractor.py             # Gateware CRF (avtp_ts, local_ts) extractor
+├── avtp_extractor.py            # Stage 2a/b AVTP (AAF) per-sample extractor
+├── floorplan_usb.py             # nextpnr --pre-place hook (ON by default, --no-floorplan to skip)
 ├── LITEETH_PATCHES.md           # The 3 in-tree LiteEth patches (#3 is THE fix)
 ├── BENCHMARK_BASELINE.md        # Stage-0 firmware-on-audio baseline (2026-05-21)
 ├── bitstreams/

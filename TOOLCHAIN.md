@@ -266,7 +266,7 @@ specific commit.
 
 ## 8. Open follow-ups for this doc
 
-- **avb-usb-host** isn't pushed to GitHub yet. When it is, this doc
+- **avb-usb-host** is now pushed: https://github.com/Nickster90s/avb-usb-host (proven-good `top.bit` archived under LFS at commit `a9d701e`). Mirror the LiteEth `colorlight-i9plus-b50612d-fixes` branch when convenient so step 4 of §6 doesn't depend on local-only patches.
   should link to it (and the LiteEth patches branch should be mirrored
   too so step 4 above doesn't require local-only patches).
 - The 4× `pythondata-*` repos are version-sensitive in subtle ways; if

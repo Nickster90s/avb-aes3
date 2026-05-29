@@ -439,6 +439,21 @@ static void check_uart_cmd(void)
                    (unsigned long)main_i2s_lrck_count_read());
             break;
         }
+        case 'u': {
+            // Step the ULPI input IDELAY tap (0..31, wraps) and load it.
+            // Sweep to centre 60 MHz ULPI sampling in the data eye: press
+            // 'u', re-plug USB, check lsusb. The tap that enumerates
+            // (1209:eab1 at HIGH speed) is the eye. Note the working tap
+            // and pin it as the CSR reset in avb_soc.py for a one-build
+            // deterministic result. CSRs are main_-prefixed (top-level).
+            static uint8_t utap = 8;
+            utap = (utap + 1) & 0x1F;
+            main_ulpi_idelay_tap_write(utap);
+            main_ulpi_idelay_load_write(1);
+            printf("\n[ULPI] IDELAY tap = %u — re-plug USB + check lsusb\n",
+                   (unsigned)utap);
+            break;
+        }
         case 'r':
             printf("\nRebooting...\n");
             ctrl_reset_write(1);

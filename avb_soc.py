@@ -681,6 +681,42 @@ class AVBSoC(SoCCore):
         ulpi_data_ts = TSTriple(8)
         self.specials += ulpi_data_ts.get_tristate(ulpi.data)
 
+        # --- Runtime-tunable IDELAY on the ULPI INPUTS (deterministic
+        #     60 MHz sampling, placement-independent) ----------------------
+        # The ULPI bus is 60 MHz source-synchronous. yosys+nextpnr-xilinx
+        # inserts no auto-IDDR/IDELAY, so the IOB→first-flop routing delay
+        # (which varies every rebuild as the firmware ROM shuffles
+        # placement) shifts the sampling point in/out of the data eye →
+        # USB enumerates one build, full-speed/error-71 the next. IDELAYE2
+        # in VAR_LOAD mode puts a firmware-tunable delay right at each
+        # input pin so sampling is fixed by the tap, not by routing.
+        # Shares the CRG's existing S7IDELAYCTRL (cd_idelay 200 MHz) — do
+        # NOT add a second IDELAYCTRL (errors "more than one IDELAYCTRL for
+        # the default IODELAY_GROUP"). Firmware sweeps ulpi_idelay_tap
+        # (0..31, ~78 ps/tap) to centre the eye; the 'u' command steps it.
+        self.ulpi_idelay_tap  = CSRStorage(5, reset=8,
+            description="ULPI input IDELAY tap 0-31 (~78 ps each).")
+        self.ulpi_idelay_load = CSRStorage(1,
+            description="Write 1 to load ulpi_idelay_tap into all ULPI input IDELAYs.")
+        _ulpi_ld = self.ulpi_idelay_load.re
+        def _ulpi_idelay(sig_in):
+            out = Signal()
+            self.specials += Instance("IDELAYE2",
+                p_IDELAY_TYPE="VAR_LOAD", p_DELAY_SRC="IDATAIN",
+                p_HIGH_PERFORMANCE_MODE="TRUE", p_SIGNAL_PATTERN="DATA",
+                p_REFCLK_FREQUENCY=200.0, p_CINVCTRL_SEL="FALSE",
+                p_PIPE_SEL="FALSE", p_IDELAY_VALUE=0,
+                i_C=ClockSignal("sys"), i_LD=_ulpi_ld,
+                i_CNTVALUEIN=self.ulpi_idelay_tap.storage,
+                i_CE=0, i_INC=0, i_LDPIPEEN=0, i_REGRST=0,
+                i_IDATAIN=sig_in, o_DATAOUT=out)
+            return out
+        ulpi_dir_d  = _ulpi_idelay(ulpi.dir)
+        ulpi_nxt_d  = _ulpi_idelay(ulpi.nxt)
+        ulpi_data_d = Signal(8)
+        for _i in range(8):
+            self.comb += ulpi_data_d[_i].eq(_ulpi_idelay(ulpi_data_ts.i[_i]))
+
         # P3.3 (task #67): the wrapper now has an INTERNAL cd_usb→sys
         # AsyncFIFO (added in avb-usb-host/gateware/usb_avb_subsystem.py)
         # so we no longer expose the cd_usb-domain channel stream — the
@@ -699,9 +735,9 @@ class AVBSoC(SoCCore):
             i_clk       = ClockSignal("sys"),
             i_rst       = ResetSignal("sys"),
             i_usb_clk   = ClockSignal("usb"),
-            i_ulpi_dir_i   = ulpi.dir,
-            i_ulpi_nxt_i   = ulpi.nxt,
-            i_ulpi_data_i  = ulpi_data_ts.i,
+            i_ulpi_dir_i   = ulpi_dir_d,
+            i_ulpi_nxt_i   = ulpi_nxt_d,
+            i_ulpi_data_i  = ulpi_data_d,
             o_ulpi_data_o  = ulpi_data_ts.o,
             o_ulpi_data_oe = ulpi_data_ts.oe,
             o_ulpi_stp_o   = ulpi.stp,

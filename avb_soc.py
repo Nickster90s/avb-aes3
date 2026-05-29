@@ -681,13 +681,19 @@ class AVBSoC(SoCCore):
         ulpi_data_ts = TSTriple(8)
         self.specials += ulpi_data_ts.get_tristate(ulpi.data)
 
-        self.usb_ch_payload = usb_ch_payload = Signal(24)
-        self.usb_ch_channel = usb_ch_channel = Signal(3)
-        self.usb_ch_valid   = usb_ch_valid   = Signal()
-        self.usb_ch_first   = usb_ch_first   = Signal()
-        self.usb_ch_last    = usb_ch_last    = Signal()
-        usb_ch_ready        = Signal()
-        usb_feedback        = Signal(32)
+        # P3.3 (task #67): the wrapper now has an INTERNAL cd_usb→sys
+        # AsyncFIFO (added in avb-usb-host/gateware/usb_avb_subsystem.py)
+        # so we no longer expose the cd_usb-domain channel stream — the
+        # consumer reads sys-domain samples via the CSRs below. This
+        # keeps every cd_usb-side cell inside the wrapper hierarchy
+        # (matched by floorplan_usb.py) and avoids the ULPI-timing
+        # regression the prior external-FIFO attempt caused.
+        sample_lo_w  = Signal(32)
+        sample_hi_w  = Signal(32)
+        sample_rdy_w = Signal()
+        sample_pop_w = Signal()
+        sample_ovf_w = Signal(32)
+        usb_feedback = Signal(32)
 
         self.specials += Instance("usb_avb_subsystem",
             i_clk       = ClockSignal("sys"),
@@ -700,18 +706,34 @@ class AVBSoC(SoCCore):
             o_ulpi_data_oe = ulpi_data_ts.oe,
             o_ulpi_stp_o   = ulpi.stp,
             o_ulpi_rst_o   = ulpi.rst,
-            o_channel_stream_payload = usb_ch_payload,
-            o_channel_stream_channel = usb_ch_channel,
-            o_channel_stream_valid   = usb_ch_valid,
-            o_channel_stream_first   = usb_ch_first,
-            o_channel_stream_last    = usb_ch_last,
-            i_channel_stream_ready   = usb_ch_ready,
-            i_feedback_value         = usb_feedback,
+            o_sample_lo             = sample_lo_w,
+            o_sample_hi             = sample_hi_w,
+            o_sample_readable       = sample_rdy_w,
+            i_sample_pop            = sample_pop_w,
+            o_sample_overflow_count = sample_ovf_w,
+            i_feedback_value        = usb_feedback,
         )
-        # P3.2 temporary: drain the stream, nominal 48k feedback
-        # (6.0 samples/microframe in 10.14 = 0x18000). Replaced in P3.3/P3.4.
+
+        # Firmware-facing CSRs: drain pattern is
+        #   while (sample_readable) { lo=sample_lo; hi=sample_hi; pop=1; }
+        # sample_lo = 32-bit signed audio, MSB-aligned (= Milan AAF 32-bit
+        # INT format directly — no firmware shift needed). sample_hi:
+        # [27]=first, [26:24]=channel, rest reserved.
+        self.usb_sample_lo        = CSRStatus(32,  description="USB→AAF FIFO head — 32-bit signed sample, MSB-aligned.")
+        self.usb_sample_hi        = CSRStatus(32,  description="USB→AAF FIFO head — [27]=first [26:24]=channel.")
+        self.usb_sample_readable  = CSRStatus(1,   description="1 = at least one queued USB sample.")
+        self.usb_sample_pop       = CSRStorage(1,  description="Write 1 to advance the USB→AAF FIFO read pointer.")
+        self.usb_sample_overflow  = CSRStatus(32,  description="Samples dropped at the cd_usb-side FIFO write port.")
         self.comb += [
-            usb_ch_ready.eq(1),
+            self.usb_sample_lo      .status.eq(sample_lo_w),
+            self.usb_sample_hi      .status.eq(sample_hi_w),
+            self.usb_sample_readable.status.eq(sample_rdy_w),
+            sample_pop_w            .eq(self.usb_sample_pop.re),
+            self.usb_sample_overflow.status.eq(sample_ovf_w),
+
+            # Feedback stays nominal 48k (10.14 = 0x18000). P3.4 will
+            # drive this from MCR rate when CRF is bound; #58 covers the
+            # cs=0 fallback to gPTP-tuned NCO.
             usb_feedback.eq(0x0001_8000),
         ]
 

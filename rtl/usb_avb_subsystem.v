@@ -2,40 +2,46 @@
 
 (* top =  1  *)
 (* generator = "Amaranth" *)
-module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_data_oe, ulpi_stp_o, ulpi_rst_o, channel_stream_payload, channel_stream_channel, channel_stream_valid, channel_stream_first, channel_stream_last, channel_stream_ready, feedback_value, clk, rst, usb_clk);
+module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_data_oe, ulpi_stp_o, ulpi_rst_o, sample_lo, sample_hi, sample_readable, sample_pop, sample_overflow_count, feedback_value, clk, rst, usb_clk);
   reg \$auto$verilog_backend.cc:2334:dump_module$1  = 0;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:117" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:136" *)
   wire [7:0] \$12 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:117" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:136" *)
   wire [7:0] \$13 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *)
   wire \$15 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *)
   wire \$16 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:109" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:231" *)
+  wire \$19 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:237" *)
+  wire \$21 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:237" *)
+  wire \$23 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:238" *)
+  wire [32:0] \$25 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:238" *)
+  wire [32:0] \$26 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:253" *)
+  wire \$28 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:128" *)
   wire \$6 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *)
   wire \$8 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *)
   wire \$9 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:47" *)
-  output [2:0] channel_stream_channel;
-  wire [2:0] channel_stream_channel;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:49" *)
-  output channel_stream_first;
-  wire channel_stream_first;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:50" *)
-  output channel_stream_last;
-  wire channel_stream_last;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:46" *)
-  output [23:0] channel_stream_payload;
-  wire [23:0] channel_stream_payload;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:51" *)
-  input channel_stream_ready;
-  wire channel_stream_ready;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:48" *)
-  output channel_stream_valid;
-  wire channel_stream_valid;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:89" *)
+  wire [63:0] bridge_fifo_r_data;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:91" *)
+  wire bridge_fifo_r_en;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:90" *)
+  wire bridge_fifo_r_rdy;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:84" *)
+  wire [63:0] bridge_fifo_w_data;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:86" *)
+  wire bridge_fifo_w_en;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:85" *)
+  wire bridge_fifo_w_rdy;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/ir.py:508" *)
   input clk;
   wire clk;
@@ -43,7 +49,7 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   wire dm_pulldown;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire dp_pulldown;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:53" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:73" *)
   input [31:0] feedback_value;
   wire [31:0] feedback_value;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
@@ -61,9 +67,7 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
   wire out2ch_first;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
-  wire \out2ch_first$4 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
-  wire out2ch_last;
+  wire \out2ch_first$3 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
   wire [7:0] out2ch_payload;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
@@ -75,7 +79,15 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
   wire out2ch_valid;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
-  wire \out2ch_valid$3 ;
+  wire \out2ch_valid$4 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:244" *)
+  reg [31:0] overflow_sys = 32'd0;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:244" *)
+  reg [31:0] \overflow_sys$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:236" *)
+  reg [31:0] overflow_usb = 32'd0;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:236" *)
+  reg [31:0] \overflow_usb$next ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/ir.py:508" *)
   input rst;
   wire rst;
@@ -87,6 +99,21 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   wire rx_error;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire rx_valid;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:67" *)
+  output [31:0] sample_hi;
+  wire [31:0] sample_hi;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:66" *)
+  output [31:0] sample_lo;
+  wire [31:0] sample_lo;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:70" *)
+  output [31:0] sample_overflow_count;
+  wire [31:0] sample_overflow_count;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:69" *)
+  input sample_pop;
+  wire sample_pop;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:68" *)
+  output sample_readable;
+  wire sample_readable;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire session_valid;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
@@ -97,31 +124,31 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   wire tx_ready;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire tx_valid;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:60" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:80" *)
   input [7:0] ulpi_data_i;
   wire [7:0] ulpi_data_i;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:61" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:81" *)
   output [7:0] ulpi_data_o;
   wire [7:0] ulpi_data_o;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:62" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:82" *)
   output ulpi_data_oe;
   wire ulpi_data_oe;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:58" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:78" *)
   input ulpi_dir_i;
   wire ulpi_dir_i;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:59" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:79" *)
   input ulpi_nxt_i;
   wire ulpi_nxt_i;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:64" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:84" *)
   output ulpi_rst_o;
   wire ulpi_rst_o;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:63" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
   output ulpi_stp_o;
   wire ulpi_stp_o;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:57" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:77" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   wire \usb_clk$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/device.py:128" *)
   wire usb_connect;
@@ -135,45 +162,65 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   wire usb_isochronous_endpoint1__ready;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/__init__.py:58" *)
   wire usb_isochronous_endpoint1__valid;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire usb_session_end;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire vbus_valid;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:114" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:133" *)
   reg wrap_rst = 1'h1;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:114" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:133" *)
   reg \wrap_rst$next ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:115" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:134" *)
   reg [6:0] wrap_rstcnt = 7'h00;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:115" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:134" *)
   reg [6:0] \wrap_rstcnt$next ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire [1:0] xcvr_select;
-  assign \$9  = & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *) wrap_rstcnt;
-  assign \$8  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *) \$9 ;
-  assign \$13  = wrap_rstcnt + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:117" *) 1'h1;
-  assign \$16  = & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *) wrap_rstcnt;
-  assign \$15  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *) \$16 ;
+  assign \$9  = & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *) wrap_rstcnt;
+  assign \$8  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *) \$9 ;
+  assign \$13  = wrap_rstcnt + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:136" *) 1'h1;
+  assign \$16  = & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *) wrap_rstcnt;
+  assign \$15  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *) \$16 ;
+  assign \$19  = \out2ch_valid$4  & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:231" *) bridge_fifo_w_rdy;
+  assign \$21  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:237" *) bridge_fifo_w_rdy;
+  assign \$23  = \out2ch_valid$4  & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:237" *) \$21 ;
+  assign \$26  = overflow_usb + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:238" *) 1'h1;
+  assign \$28  = sample_pop & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:253" *) bridge_fifo_r_rdy;
   always @(posedge \usb_clk$1 )
     wrap_rstcnt <= \wrap_rstcnt$next ;
   always @(posedge \usb_clk$1 )
     wrap_rst <= \wrap_rst$next ;
-  assign \$6  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:109" *) ulpi_dir_i;
+  always @(posedge \usb_clk$1 )
+    overflow_usb <= \overflow_usb$next ;
+  always @(posedge clk)
+    overflow_sys <= \overflow_sys$next ;
+  assign \$6  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:128" *) ulpi_dir_i;
+  \usb_avb_subsystem.bridge_fifo  bridge_fifo (
+    .clk(clk),
+    .r_data(bridge_fifo_r_data),
+    .r_en(bridge_fifo_r_en),
+    .r_rdy(bridge_fifo_r_rdy),
+    .rst(rst),
+    .usb_clk(\usb_clk$1 ),
+    .usb_rst(1'h0),
+    .w_data(bridge_fifo_w_data),
+    .w_en(bridge_fifo_w_en),
+    .w_rdy(bridge_fifo_w_rdy)
+  );
   \usb_avb_subsystem.out2ch  out2ch (
     .channel_nr(out2ch_channel_nr),
     .clk(clk),
     .first(out2ch_first),
-    .\first$3 (\out2ch_first$4 ),
-    .last(out2ch_last),
+    .\first$2 (\out2ch_first$3 ),
     .payload(out2ch_payload),
     .\payload$1 (\out2ch_payload$2 ),
     .ready(out2ch_ready),
-    .\ready$4 (\out2ch_ready$5 ),
+    .\ready$4 (1'h1),
     .rst(rst),
     .valid(out2ch_valid),
-    .\valid$2 (\out2ch_valid$3 )
+    .\valid$3 (\out2ch_valid$4 )
   );
   ulpi_wrapper ulpi_wrap (
     .ulpi_clk60_i(\usb_clk$1 ),
@@ -222,8 +269,28 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   );
   always @* begin
     if (\$auto$verilog_backend.cc:2334:dump_module$1 ) begin end
+    \overflow_usb$next  = overflow_usb;
+    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:237" *)
+    if (\$23 ) begin
+      \overflow_usb$next  = \$26 [31:0];
+    end
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
+    if (usb_rst) begin
+      \overflow_usb$next  = 32'd0;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$1 ) begin end
+    \overflow_sys$next  = overflow_usb;
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
+    if (rst) begin
+      \overflow_sys$next  = 32'd0;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$1 ) begin end
     \wrap_rstcnt$next  = wrap_rstcnt;
-    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *)
+    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *)
     if (\$8 ) begin
       \wrap_rstcnt$next  = \$13 [6:0];
     end
@@ -236,7 +303,7 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
     if (\$auto$verilog_backend.cc:2334:dump_module$1 ) begin end
     \wrap_rst$next  = wrap_rst;
     (* full_case = 32'd1 *)
-    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:116" *)
+    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:135" *)
     if (\$15 ) begin
     end else begin
       \wrap_rst$next  = 1'h0;
@@ -247,14 +314,17 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
     end
   end
   assign \$12  = \$13 ;
+  assign \$25  = \$26 ;
   assign usb_rst = 1'h0;
   assign usb_connect = 1'h1;
-  assign \out2ch_ready$5  = channel_stream_ready;
-  assign channel_stream_last = out2ch_last;
-  assign channel_stream_first = \out2ch_first$4 ;
-  assign channel_stream_valid = \out2ch_valid$3 ;
-  assign channel_stream_channel = out2ch_channel_nr;
-  assign channel_stream_payload = \out2ch_payload$2 ;
+  assign bridge_fifo_r_en = \$28 ;
+  assign sample_readable = bridge_fifo_r_rdy;
+  assign sample_hi = bridge_fifo_r_data[63:32];
+  assign sample_lo = bridge_fifo_r_data[31:0];
+  assign sample_overflow_count = overflow_sys;
+  assign \out2ch_ready$5  = 1'h1;
+  assign bridge_fifo_w_en = \$19 ;
+  assign bridge_fifo_w_data = { 28'h0000000, \out2ch_first$3 , out2ch_channel_nr, \out2ch_payload$2 , 8'h00 };
   assign usb_isochronous_endpoint1__ready = out2ch_ready;
   assign out2ch_payload = usb_isochronous_endpoint1__payload;
   assign last = usb_isochronous_endpoint1__last;
@@ -271,8 +341,2152 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
 endmodule
 
 (* generator = "Amaranth" *)
-module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr, \valid$2 , \first$3 , last, \ready$4 , rst, clk, valid);
+module \usb_avb_subsystem.bridge_fifo (w_data, w_en, w_rdy, r_data, r_rdy, r_en, usb_rst, rst, clk, usb_clk);
   reg \$auto$verilog_backend.cc:2334:dump_module$2  = 0;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:421" *)
+  wire [11:0] \$1 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:463" *)
+  wire \$11 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:464" *)
+  wire \$13 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:463" *)
+  wire \$15 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:465" *)
+  wire \$17 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:463" *)
+  wire \$19 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:415" *)
+  wire \$2 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:466" *)
+  wire \$21 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:469" *)
+  wire [11:0] \$23 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:469" *)
+  wire [11:0] \$24 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:470" *)
+  wire [11:0] \$26 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:470" *)
+  wire [11:0] \$27 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:415" *)
+  wire \$29 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:480" *)
+  wire \$31 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:486" *)
+  wire \$33 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:421" *)
+  wire [11:0] \$4 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:427" *)
+  wire [11:0] \$6 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:416" *)
+  wire \$7 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:427" *)
+  wire [11:0] \$9 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/ir.py:508" *)
+  input clk;
+  wire clk;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:439" *)
+  reg [10:0] consume_cdc_consume_r_gry = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:439" *)
+  reg [10:0] \consume_cdc_consume_r_gry$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:440" *)
+  wire [10:0] consume_cdc_consume_w_gry;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:176" *)
+  wire [10:0] consume_dec_i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:177" *)
+  wire [10:0] consume_dec_o;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:149" *)
+  wire [10:0] consume_enc_i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:150" *)
+  wire [10:0] consume_enc_o;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:425" *)
+  reg [10:0] consume_r_bin = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:425" *)
+  reg [10:0] \consume_r_bin$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:426" *)
+  wire [10:0] consume_r_nxt;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:448" *)
+  reg [10:0] consume_w_bin = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:448" *)
+  reg [10:0] \consume_w_bin$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:431" *)
+  wire [10:0] produce_cdc_produce_r_gry;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:430" *)
+  reg [10:0] produce_cdc_produce_w_gry = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:430" *)
+  reg [10:0] \produce_cdc_produce_w_gry$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:176" *)
+  wire [10:0] produce_dec_i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:177" *)
+  wire [10:0] produce_dec_o;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:149" *)
+  wire [10:0] produce_enc_i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:150" *)
+  wire [10:0] produce_enc_o;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:454" *)
+  wire [10:0] produce_r_bin;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:419" *)
+  reg [10:0] produce_w_bin = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:419" *)
+  reg [10:0] \produce_w_bin$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:420" *)
+  wire [10:0] produce_w_nxt;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:89" *)
+  output [63:0] r_data;
+  wire [63:0] r_data;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:461" *)
+  reg r_empty;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:91" *)
+  input r_en;
+  wire r_en;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:92" *)
+  wire [10:0] r_level;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:90" *)
+  output r_rdy;
+  wire r_rdy;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:397" *)
+  reg r_rst = 1'h0;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:397" *)
+  reg \r_rst$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/ir.py:508" *)
+  input rst;
+  wire rst;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:501" *)
+  wire rst_cdc_r_rst;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:176" *)
+  wire [10:0] rst_dec_i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:177" *)
+  wire [10:0] rst_dec_o;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:474" *)
+  wire [9:0] storage_r_addr;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:474" *)
+  wire [63:0] storage_r_data;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:474" *)
+  wire storage_r_en;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:473" *)
+  wire [9:0] storage_w_addr;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:473" *)
+  wire [63:0] storage_w_data;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:473" *)
+  wire storage_w_en;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
+  input usb_clk;
+  wire usb_clk;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
+  input usb_rst;
+  wire usb_rst;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:84" *)
+  input [63:0] w_data;
+  wire [63:0] w_data;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:86" *)
+  input w_en;
+  wire w_en;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:460" *)
+  wire w_full;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:87" *)
+  reg [10:0] w_level = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:87" *)
+  reg [10:0] \w_level$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:85" *)
+  output w_rdy;
+  wire w_rdy;
+  reg [63:0] r_port [1023:0];
+  initial begin
+    r_port[0] = 64'h0000000000000000;
+    r_port[1] = 64'h0000000000000000;
+    r_port[2] = 64'h0000000000000000;
+    r_port[3] = 64'h0000000000000000;
+    r_port[4] = 64'h0000000000000000;
+    r_port[5] = 64'h0000000000000000;
+    r_port[6] = 64'h0000000000000000;
+    r_port[7] = 64'h0000000000000000;
+    r_port[8] = 64'h0000000000000000;
+    r_port[9] = 64'h0000000000000000;
+    r_port[10] = 64'h0000000000000000;
+    r_port[11] = 64'h0000000000000000;
+    r_port[12] = 64'h0000000000000000;
+    r_port[13] = 64'h0000000000000000;
+    r_port[14] = 64'h0000000000000000;
+    r_port[15] = 64'h0000000000000000;
+    r_port[16] = 64'h0000000000000000;
+    r_port[17] = 64'h0000000000000000;
+    r_port[18] = 64'h0000000000000000;
+    r_port[19] = 64'h0000000000000000;
+    r_port[20] = 64'h0000000000000000;
+    r_port[21] = 64'h0000000000000000;
+    r_port[22] = 64'h0000000000000000;
+    r_port[23] = 64'h0000000000000000;
+    r_port[24] = 64'h0000000000000000;
+    r_port[25] = 64'h0000000000000000;
+    r_port[26] = 64'h0000000000000000;
+    r_port[27] = 64'h0000000000000000;
+    r_port[28] = 64'h0000000000000000;
+    r_port[29] = 64'h0000000000000000;
+    r_port[30] = 64'h0000000000000000;
+    r_port[31] = 64'h0000000000000000;
+    r_port[32] = 64'h0000000000000000;
+    r_port[33] = 64'h0000000000000000;
+    r_port[34] = 64'h0000000000000000;
+    r_port[35] = 64'h0000000000000000;
+    r_port[36] = 64'h0000000000000000;
+    r_port[37] = 64'h0000000000000000;
+    r_port[38] = 64'h0000000000000000;
+    r_port[39] = 64'h0000000000000000;
+    r_port[40] = 64'h0000000000000000;
+    r_port[41] = 64'h0000000000000000;
+    r_port[42] = 64'h0000000000000000;
+    r_port[43] = 64'h0000000000000000;
+    r_port[44] = 64'h0000000000000000;
+    r_port[45] = 64'h0000000000000000;
+    r_port[46] = 64'h0000000000000000;
+    r_port[47] = 64'h0000000000000000;
+    r_port[48] = 64'h0000000000000000;
+    r_port[49] = 64'h0000000000000000;
+    r_port[50] = 64'h0000000000000000;
+    r_port[51] = 64'h0000000000000000;
+    r_port[52] = 64'h0000000000000000;
+    r_port[53] = 64'h0000000000000000;
+    r_port[54] = 64'h0000000000000000;
+    r_port[55] = 64'h0000000000000000;
+    r_port[56] = 64'h0000000000000000;
+    r_port[57] = 64'h0000000000000000;
+    r_port[58] = 64'h0000000000000000;
+    r_port[59] = 64'h0000000000000000;
+    r_port[60] = 64'h0000000000000000;
+    r_port[61] = 64'h0000000000000000;
+    r_port[62] = 64'h0000000000000000;
+    r_port[63] = 64'h0000000000000000;
+    r_port[64] = 64'h0000000000000000;
+    r_port[65] = 64'h0000000000000000;
+    r_port[66] = 64'h0000000000000000;
+    r_port[67] = 64'h0000000000000000;
+    r_port[68] = 64'h0000000000000000;
+    r_port[69] = 64'h0000000000000000;
+    r_port[70] = 64'h0000000000000000;
+    r_port[71] = 64'h0000000000000000;
+    r_port[72] = 64'h0000000000000000;
+    r_port[73] = 64'h0000000000000000;
+    r_port[74] = 64'h0000000000000000;
+    r_port[75] = 64'h0000000000000000;
+    r_port[76] = 64'h0000000000000000;
+    r_port[77] = 64'h0000000000000000;
+    r_port[78] = 64'h0000000000000000;
+    r_port[79] = 64'h0000000000000000;
+    r_port[80] = 64'h0000000000000000;
+    r_port[81] = 64'h0000000000000000;
+    r_port[82] = 64'h0000000000000000;
+    r_port[83] = 64'h0000000000000000;
+    r_port[84] = 64'h0000000000000000;
+    r_port[85] = 64'h0000000000000000;
+    r_port[86] = 64'h0000000000000000;
+    r_port[87] = 64'h0000000000000000;
+    r_port[88] = 64'h0000000000000000;
+    r_port[89] = 64'h0000000000000000;
+    r_port[90] = 64'h0000000000000000;
+    r_port[91] = 64'h0000000000000000;
+    r_port[92] = 64'h0000000000000000;
+    r_port[93] = 64'h0000000000000000;
+    r_port[94] = 64'h0000000000000000;
+    r_port[95] = 64'h0000000000000000;
+    r_port[96] = 64'h0000000000000000;
+    r_port[97] = 64'h0000000000000000;
+    r_port[98] = 64'h0000000000000000;
+    r_port[99] = 64'h0000000000000000;
+    r_port[100] = 64'h0000000000000000;
+    r_port[101] = 64'h0000000000000000;
+    r_port[102] = 64'h0000000000000000;
+    r_port[103] = 64'h0000000000000000;
+    r_port[104] = 64'h0000000000000000;
+    r_port[105] = 64'h0000000000000000;
+    r_port[106] = 64'h0000000000000000;
+    r_port[107] = 64'h0000000000000000;
+    r_port[108] = 64'h0000000000000000;
+    r_port[109] = 64'h0000000000000000;
+    r_port[110] = 64'h0000000000000000;
+    r_port[111] = 64'h0000000000000000;
+    r_port[112] = 64'h0000000000000000;
+    r_port[113] = 64'h0000000000000000;
+    r_port[114] = 64'h0000000000000000;
+    r_port[115] = 64'h0000000000000000;
+    r_port[116] = 64'h0000000000000000;
+    r_port[117] = 64'h0000000000000000;
+    r_port[118] = 64'h0000000000000000;
+    r_port[119] = 64'h0000000000000000;
+    r_port[120] = 64'h0000000000000000;
+    r_port[121] = 64'h0000000000000000;
+    r_port[122] = 64'h0000000000000000;
+    r_port[123] = 64'h0000000000000000;
+    r_port[124] = 64'h0000000000000000;
+    r_port[125] = 64'h0000000000000000;
+    r_port[126] = 64'h0000000000000000;
+    r_port[127] = 64'h0000000000000000;
+    r_port[128] = 64'h0000000000000000;
+    r_port[129] = 64'h0000000000000000;
+    r_port[130] = 64'h0000000000000000;
+    r_port[131] = 64'h0000000000000000;
+    r_port[132] = 64'h0000000000000000;
+    r_port[133] = 64'h0000000000000000;
+    r_port[134] = 64'h0000000000000000;
+    r_port[135] = 64'h0000000000000000;
+    r_port[136] = 64'h0000000000000000;
+    r_port[137] = 64'h0000000000000000;
+    r_port[138] = 64'h0000000000000000;
+    r_port[139] = 64'h0000000000000000;
+    r_port[140] = 64'h0000000000000000;
+    r_port[141] = 64'h0000000000000000;
+    r_port[142] = 64'h0000000000000000;
+    r_port[143] = 64'h0000000000000000;
+    r_port[144] = 64'h0000000000000000;
+    r_port[145] = 64'h0000000000000000;
+    r_port[146] = 64'h0000000000000000;
+    r_port[147] = 64'h0000000000000000;
+    r_port[148] = 64'h0000000000000000;
+    r_port[149] = 64'h0000000000000000;
+    r_port[150] = 64'h0000000000000000;
+    r_port[151] = 64'h0000000000000000;
+    r_port[152] = 64'h0000000000000000;
+    r_port[153] = 64'h0000000000000000;
+    r_port[154] = 64'h0000000000000000;
+    r_port[155] = 64'h0000000000000000;
+    r_port[156] = 64'h0000000000000000;
+    r_port[157] = 64'h0000000000000000;
+    r_port[158] = 64'h0000000000000000;
+    r_port[159] = 64'h0000000000000000;
+    r_port[160] = 64'h0000000000000000;
+    r_port[161] = 64'h0000000000000000;
+    r_port[162] = 64'h0000000000000000;
+    r_port[163] = 64'h0000000000000000;
+    r_port[164] = 64'h0000000000000000;
+    r_port[165] = 64'h0000000000000000;
+    r_port[166] = 64'h0000000000000000;
+    r_port[167] = 64'h0000000000000000;
+    r_port[168] = 64'h0000000000000000;
+    r_port[169] = 64'h0000000000000000;
+    r_port[170] = 64'h0000000000000000;
+    r_port[171] = 64'h0000000000000000;
+    r_port[172] = 64'h0000000000000000;
+    r_port[173] = 64'h0000000000000000;
+    r_port[174] = 64'h0000000000000000;
+    r_port[175] = 64'h0000000000000000;
+    r_port[176] = 64'h0000000000000000;
+    r_port[177] = 64'h0000000000000000;
+    r_port[178] = 64'h0000000000000000;
+    r_port[179] = 64'h0000000000000000;
+    r_port[180] = 64'h0000000000000000;
+    r_port[181] = 64'h0000000000000000;
+    r_port[182] = 64'h0000000000000000;
+    r_port[183] = 64'h0000000000000000;
+    r_port[184] = 64'h0000000000000000;
+    r_port[185] = 64'h0000000000000000;
+    r_port[186] = 64'h0000000000000000;
+    r_port[187] = 64'h0000000000000000;
+    r_port[188] = 64'h0000000000000000;
+    r_port[189] = 64'h0000000000000000;
+    r_port[190] = 64'h0000000000000000;
+    r_port[191] = 64'h0000000000000000;
+    r_port[192] = 64'h0000000000000000;
+    r_port[193] = 64'h0000000000000000;
+    r_port[194] = 64'h0000000000000000;
+    r_port[195] = 64'h0000000000000000;
+    r_port[196] = 64'h0000000000000000;
+    r_port[197] = 64'h0000000000000000;
+    r_port[198] = 64'h0000000000000000;
+    r_port[199] = 64'h0000000000000000;
+    r_port[200] = 64'h0000000000000000;
+    r_port[201] = 64'h0000000000000000;
+    r_port[202] = 64'h0000000000000000;
+    r_port[203] = 64'h0000000000000000;
+    r_port[204] = 64'h0000000000000000;
+    r_port[205] = 64'h0000000000000000;
+    r_port[206] = 64'h0000000000000000;
+    r_port[207] = 64'h0000000000000000;
+    r_port[208] = 64'h0000000000000000;
+    r_port[209] = 64'h0000000000000000;
+    r_port[210] = 64'h0000000000000000;
+    r_port[211] = 64'h0000000000000000;
+    r_port[212] = 64'h0000000000000000;
+    r_port[213] = 64'h0000000000000000;
+    r_port[214] = 64'h0000000000000000;
+    r_port[215] = 64'h0000000000000000;
+    r_port[216] = 64'h0000000000000000;
+    r_port[217] = 64'h0000000000000000;
+    r_port[218] = 64'h0000000000000000;
+    r_port[219] = 64'h0000000000000000;
+    r_port[220] = 64'h0000000000000000;
+    r_port[221] = 64'h0000000000000000;
+    r_port[222] = 64'h0000000000000000;
+    r_port[223] = 64'h0000000000000000;
+    r_port[224] = 64'h0000000000000000;
+    r_port[225] = 64'h0000000000000000;
+    r_port[226] = 64'h0000000000000000;
+    r_port[227] = 64'h0000000000000000;
+    r_port[228] = 64'h0000000000000000;
+    r_port[229] = 64'h0000000000000000;
+    r_port[230] = 64'h0000000000000000;
+    r_port[231] = 64'h0000000000000000;
+    r_port[232] = 64'h0000000000000000;
+    r_port[233] = 64'h0000000000000000;
+    r_port[234] = 64'h0000000000000000;
+    r_port[235] = 64'h0000000000000000;
+    r_port[236] = 64'h0000000000000000;
+    r_port[237] = 64'h0000000000000000;
+    r_port[238] = 64'h0000000000000000;
+    r_port[239] = 64'h0000000000000000;
+    r_port[240] = 64'h0000000000000000;
+    r_port[241] = 64'h0000000000000000;
+    r_port[242] = 64'h0000000000000000;
+    r_port[243] = 64'h0000000000000000;
+    r_port[244] = 64'h0000000000000000;
+    r_port[245] = 64'h0000000000000000;
+    r_port[246] = 64'h0000000000000000;
+    r_port[247] = 64'h0000000000000000;
+    r_port[248] = 64'h0000000000000000;
+    r_port[249] = 64'h0000000000000000;
+    r_port[250] = 64'h0000000000000000;
+    r_port[251] = 64'h0000000000000000;
+    r_port[252] = 64'h0000000000000000;
+    r_port[253] = 64'h0000000000000000;
+    r_port[254] = 64'h0000000000000000;
+    r_port[255] = 64'h0000000000000000;
+    r_port[256] = 64'h0000000000000000;
+    r_port[257] = 64'h0000000000000000;
+    r_port[258] = 64'h0000000000000000;
+    r_port[259] = 64'h0000000000000000;
+    r_port[260] = 64'h0000000000000000;
+    r_port[261] = 64'h0000000000000000;
+    r_port[262] = 64'h0000000000000000;
+    r_port[263] = 64'h0000000000000000;
+    r_port[264] = 64'h0000000000000000;
+    r_port[265] = 64'h0000000000000000;
+    r_port[266] = 64'h0000000000000000;
+    r_port[267] = 64'h0000000000000000;
+    r_port[268] = 64'h0000000000000000;
+    r_port[269] = 64'h0000000000000000;
+    r_port[270] = 64'h0000000000000000;
+    r_port[271] = 64'h0000000000000000;
+    r_port[272] = 64'h0000000000000000;
+    r_port[273] = 64'h0000000000000000;
+    r_port[274] = 64'h0000000000000000;
+    r_port[275] = 64'h0000000000000000;
+    r_port[276] = 64'h0000000000000000;
+    r_port[277] = 64'h0000000000000000;
+    r_port[278] = 64'h0000000000000000;
+    r_port[279] = 64'h0000000000000000;
+    r_port[280] = 64'h0000000000000000;
+    r_port[281] = 64'h0000000000000000;
+    r_port[282] = 64'h0000000000000000;
+    r_port[283] = 64'h0000000000000000;
+    r_port[284] = 64'h0000000000000000;
+    r_port[285] = 64'h0000000000000000;
+    r_port[286] = 64'h0000000000000000;
+    r_port[287] = 64'h0000000000000000;
+    r_port[288] = 64'h0000000000000000;
+    r_port[289] = 64'h0000000000000000;
+    r_port[290] = 64'h0000000000000000;
+    r_port[291] = 64'h0000000000000000;
+    r_port[292] = 64'h0000000000000000;
+    r_port[293] = 64'h0000000000000000;
+    r_port[294] = 64'h0000000000000000;
+    r_port[295] = 64'h0000000000000000;
+    r_port[296] = 64'h0000000000000000;
+    r_port[297] = 64'h0000000000000000;
+    r_port[298] = 64'h0000000000000000;
+    r_port[299] = 64'h0000000000000000;
+    r_port[300] = 64'h0000000000000000;
+    r_port[301] = 64'h0000000000000000;
+    r_port[302] = 64'h0000000000000000;
+    r_port[303] = 64'h0000000000000000;
+    r_port[304] = 64'h0000000000000000;
+    r_port[305] = 64'h0000000000000000;
+    r_port[306] = 64'h0000000000000000;
+    r_port[307] = 64'h0000000000000000;
+    r_port[308] = 64'h0000000000000000;
+    r_port[309] = 64'h0000000000000000;
+    r_port[310] = 64'h0000000000000000;
+    r_port[311] = 64'h0000000000000000;
+    r_port[312] = 64'h0000000000000000;
+    r_port[313] = 64'h0000000000000000;
+    r_port[314] = 64'h0000000000000000;
+    r_port[315] = 64'h0000000000000000;
+    r_port[316] = 64'h0000000000000000;
+    r_port[317] = 64'h0000000000000000;
+    r_port[318] = 64'h0000000000000000;
+    r_port[319] = 64'h0000000000000000;
+    r_port[320] = 64'h0000000000000000;
+    r_port[321] = 64'h0000000000000000;
+    r_port[322] = 64'h0000000000000000;
+    r_port[323] = 64'h0000000000000000;
+    r_port[324] = 64'h0000000000000000;
+    r_port[325] = 64'h0000000000000000;
+    r_port[326] = 64'h0000000000000000;
+    r_port[327] = 64'h0000000000000000;
+    r_port[328] = 64'h0000000000000000;
+    r_port[329] = 64'h0000000000000000;
+    r_port[330] = 64'h0000000000000000;
+    r_port[331] = 64'h0000000000000000;
+    r_port[332] = 64'h0000000000000000;
+    r_port[333] = 64'h0000000000000000;
+    r_port[334] = 64'h0000000000000000;
+    r_port[335] = 64'h0000000000000000;
+    r_port[336] = 64'h0000000000000000;
+    r_port[337] = 64'h0000000000000000;
+    r_port[338] = 64'h0000000000000000;
+    r_port[339] = 64'h0000000000000000;
+    r_port[340] = 64'h0000000000000000;
+    r_port[341] = 64'h0000000000000000;
+    r_port[342] = 64'h0000000000000000;
+    r_port[343] = 64'h0000000000000000;
+    r_port[344] = 64'h0000000000000000;
+    r_port[345] = 64'h0000000000000000;
+    r_port[346] = 64'h0000000000000000;
+    r_port[347] = 64'h0000000000000000;
+    r_port[348] = 64'h0000000000000000;
+    r_port[349] = 64'h0000000000000000;
+    r_port[350] = 64'h0000000000000000;
+    r_port[351] = 64'h0000000000000000;
+    r_port[352] = 64'h0000000000000000;
+    r_port[353] = 64'h0000000000000000;
+    r_port[354] = 64'h0000000000000000;
+    r_port[355] = 64'h0000000000000000;
+    r_port[356] = 64'h0000000000000000;
+    r_port[357] = 64'h0000000000000000;
+    r_port[358] = 64'h0000000000000000;
+    r_port[359] = 64'h0000000000000000;
+    r_port[360] = 64'h0000000000000000;
+    r_port[361] = 64'h0000000000000000;
+    r_port[362] = 64'h0000000000000000;
+    r_port[363] = 64'h0000000000000000;
+    r_port[364] = 64'h0000000000000000;
+    r_port[365] = 64'h0000000000000000;
+    r_port[366] = 64'h0000000000000000;
+    r_port[367] = 64'h0000000000000000;
+    r_port[368] = 64'h0000000000000000;
+    r_port[369] = 64'h0000000000000000;
+    r_port[370] = 64'h0000000000000000;
+    r_port[371] = 64'h0000000000000000;
+    r_port[372] = 64'h0000000000000000;
+    r_port[373] = 64'h0000000000000000;
+    r_port[374] = 64'h0000000000000000;
+    r_port[375] = 64'h0000000000000000;
+    r_port[376] = 64'h0000000000000000;
+    r_port[377] = 64'h0000000000000000;
+    r_port[378] = 64'h0000000000000000;
+    r_port[379] = 64'h0000000000000000;
+    r_port[380] = 64'h0000000000000000;
+    r_port[381] = 64'h0000000000000000;
+    r_port[382] = 64'h0000000000000000;
+    r_port[383] = 64'h0000000000000000;
+    r_port[384] = 64'h0000000000000000;
+    r_port[385] = 64'h0000000000000000;
+    r_port[386] = 64'h0000000000000000;
+    r_port[387] = 64'h0000000000000000;
+    r_port[388] = 64'h0000000000000000;
+    r_port[389] = 64'h0000000000000000;
+    r_port[390] = 64'h0000000000000000;
+    r_port[391] = 64'h0000000000000000;
+    r_port[392] = 64'h0000000000000000;
+    r_port[393] = 64'h0000000000000000;
+    r_port[394] = 64'h0000000000000000;
+    r_port[395] = 64'h0000000000000000;
+    r_port[396] = 64'h0000000000000000;
+    r_port[397] = 64'h0000000000000000;
+    r_port[398] = 64'h0000000000000000;
+    r_port[399] = 64'h0000000000000000;
+    r_port[400] = 64'h0000000000000000;
+    r_port[401] = 64'h0000000000000000;
+    r_port[402] = 64'h0000000000000000;
+    r_port[403] = 64'h0000000000000000;
+    r_port[404] = 64'h0000000000000000;
+    r_port[405] = 64'h0000000000000000;
+    r_port[406] = 64'h0000000000000000;
+    r_port[407] = 64'h0000000000000000;
+    r_port[408] = 64'h0000000000000000;
+    r_port[409] = 64'h0000000000000000;
+    r_port[410] = 64'h0000000000000000;
+    r_port[411] = 64'h0000000000000000;
+    r_port[412] = 64'h0000000000000000;
+    r_port[413] = 64'h0000000000000000;
+    r_port[414] = 64'h0000000000000000;
+    r_port[415] = 64'h0000000000000000;
+    r_port[416] = 64'h0000000000000000;
+    r_port[417] = 64'h0000000000000000;
+    r_port[418] = 64'h0000000000000000;
+    r_port[419] = 64'h0000000000000000;
+    r_port[420] = 64'h0000000000000000;
+    r_port[421] = 64'h0000000000000000;
+    r_port[422] = 64'h0000000000000000;
+    r_port[423] = 64'h0000000000000000;
+    r_port[424] = 64'h0000000000000000;
+    r_port[425] = 64'h0000000000000000;
+    r_port[426] = 64'h0000000000000000;
+    r_port[427] = 64'h0000000000000000;
+    r_port[428] = 64'h0000000000000000;
+    r_port[429] = 64'h0000000000000000;
+    r_port[430] = 64'h0000000000000000;
+    r_port[431] = 64'h0000000000000000;
+    r_port[432] = 64'h0000000000000000;
+    r_port[433] = 64'h0000000000000000;
+    r_port[434] = 64'h0000000000000000;
+    r_port[435] = 64'h0000000000000000;
+    r_port[436] = 64'h0000000000000000;
+    r_port[437] = 64'h0000000000000000;
+    r_port[438] = 64'h0000000000000000;
+    r_port[439] = 64'h0000000000000000;
+    r_port[440] = 64'h0000000000000000;
+    r_port[441] = 64'h0000000000000000;
+    r_port[442] = 64'h0000000000000000;
+    r_port[443] = 64'h0000000000000000;
+    r_port[444] = 64'h0000000000000000;
+    r_port[445] = 64'h0000000000000000;
+    r_port[446] = 64'h0000000000000000;
+    r_port[447] = 64'h0000000000000000;
+    r_port[448] = 64'h0000000000000000;
+    r_port[449] = 64'h0000000000000000;
+    r_port[450] = 64'h0000000000000000;
+    r_port[451] = 64'h0000000000000000;
+    r_port[452] = 64'h0000000000000000;
+    r_port[453] = 64'h0000000000000000;
+    r_port[454] = 64'h0000000000000000;
+    r_port[455] = 64'h0000000000000000;
+    r_port[456] = 64'h0000000000000000;
+    r_port[457] = 64'h0000000000000000;
+    r_port[458] = 64'h0000000000000000;
+    r_port[459] = 64'h0000000000000000;
+    r_port[460] = 64'h0000000000000000;
+    r_port[461] = 64'h0000000000000000;
+    r_port[462] = 64'h0000000000000000;
+    r_port[463] = 64'h0000000000000000;
+    r_port[464] = 64'h0000000000000000;
+    r_port[465] = 64'h0000000000000000;
+    r_port[466] = 64'h0000000000000000;
+    r_port[467] = 64'h0000000000000000;
+    r_port[468] = 64'h0000000000000000;
+    r_port[469] = 64'h0000000000000000;
+    r_port[470] = 64'h0000000000000000;
+    r_port[471] = 64'h0000000000000000;
+    r_port[472] = 64'h0000000000000000;
+    r_port[473] = 64'h0000000000000000;
+    r_port[474] = 64'h0000000000000000;
+    r_port[475] = 64'h0000000000000000;
+    r_port[476] = 64'h0000000000000000;
+    r_port[477] = 64'h0000000000000000;
+    r_port[478] = 64'h0000000000000000;
+    r_port[479] = 64'h0000000000000000;
+    r_port[480] = 64'h0000000000000000;
+    r_port[481] = 64'h0000000000000000;
+    r_port[482] = 64'h0000000000000000;
+    r_port[483] = 64'h0000000000000000;
+    r_port[484] = 64'h0000000000000000;
+    r_port[485] = 64'h0000000000000000;
+    r_port[486] = 64'h0000000000000000;
+    r_port[487] = 64'h0000000000000000;
+    r_port[488] = 64'h0000000000000000;
+    r_port[489] = 64'h0000000000000000;
+    r_port[490] = 64'h0000000000000000;
+    r_port[491] = 64'h0000000000000000;
+    r_port[492] = 64'h0000000000000000;
+    r_port[493] = 64'h0000000000000000;
+    r_port[494] = 64'h0000000000000000;
+    r_port[495] = 64'h0000000000000000;
+    r_port[496] = 64'h0000000000000000;
+    r_port[497] = 64'h0000000000000000;
+    r_port[498] = 64'h0000000000000000;
+    r_port[499] = 64'h0000000000000000;
+    r_port[500] = 64'h0000000000000000;
+    r_port[501] = 64'h0000000000000000;
+    r_port[502] = 64'h0000000000000000;
+    r_port[503] = 64'h0000000000000000;
+    r_port[504] = 64'h0000000000000000;
+    r_port[505] = 64'h0000000000000000;
+    r_port[506] = 64'h0000000000000000;
+    r_port[507] = 64'h0000000000000000;
+    r_port[508] = 64'h0000000000000000;
+    r_port[509] = 64'h0000000000000000;
+    r_port[510] = 64'h0000000000000000;
+    r_port[511] = 64'h0000000000000000;
+    r_port[512] = 64'h0000000000000000;
+    r_port[513] = 64'h0000000000000000;
+    r_port[514] = 64'h0000000000000000;
+    r_port[515] = 64'h0000000000000000;
+    r_port[516] = 64'h0000000000000000;
+    r_port[517] = 64'h0000000000000000;
+    r_port[518] = 64'h0000000000000000;
+    r_port[519] = 64'h0000000000000000;
+    r_port[520] = 64'h0000000000000000;
+    r_port[521] = 64'h0000000000000000;
+    r_port[522] = 64'h0000000000000000;
+    r_port[523] = 64'h0000000000000000;
+    r_port[524] = 64'h0000000000000000;
+    r_port[525] = 64'h0000000000000000;
+    r_port[526] = 64'h0000000000000000;
+    r_port[527] = 64'h0000000000000000;
+    r_port[528] = 64'h0000000000000000;
+    r_port[529] = 64'h0000000000000000;
+    r_port[530] = 64'h0000000000000000;
+    r_port[531] = 64'h0000000000000000;
+    r_port[532] = 64'h0000000000000000;
+    r_port[533] = 64'h0000000000000000;
+    r_port[534] = 64'h0000000000000000;
+    r_port[535] = 64'h0000000000000000;
+    r_port[536] = 64'h0000000000000000;
+    r_port[537] = 64'h0000000000000000;
+    r_port[538] = 64'h0000000000000000;
+    r_port[539] = 64'h0000000000000000;
+    r_port[540] = 64'h0000000000000000;
+    r_port[541] = 64'h0000000000000000;
+    r_port[542] = 64'h0000000000000000;
+    r_port[543] = 64'h0000000000000000;
+    r_port[544] = 64'h0000000000000000;
+    r_port[545] = 64'h0000000000000000;
+    r_port[546] = 64'h0000000000000000;
+    r_port[547] = 64'h0000000000000000;
+    r_port[548] = 64'h0000000000000000;
+    r_port[549] = 64'h0000000000000000;
+    r_port[550] = 64'h0000000000000000;
+    r_port[551] = 64'h0000000000000000;
+    r_port[552] = 64'h0000000000000000;
+    r_port[553] = 64'h0000000000000000;
+    r_port[554] = 64'h0000000000000000;
+    r_port[555] = 64'h0000000000000000;
+    r_port[556] = 64'h0000000000000000;
+    r_port[557] = 64'h0000000000000000;
+    r_port[558] = 64'h0000000000000000;
+    r_port[559] = 64'h0000000000000000;
+    r_port[560] = 64'h0000000000000000;
+    r_port[561] = 64'h0000000000000000;
+    r_port[562] = 64'h0000000000000000;
+    r_port[563] = 64'h0000000000000000;
+    r_port[564] = 64'h0000000000000000;
+    r_port[565] = 64'h0000000000000000;
+    r_port[566] = 64'h0000000000000000;
+    r_port[567] = 64'h0000000000000000;
+    r_port[568] = 64'h0000000000000000;
+    r_port[569] = 64'h0000000000000000;
+    r_port[570] = 64'h0000000000000000;
+    r_port[571] = 64'h0000000000000000;
+    r_port[572] = 64'h0000000000000000;
+    r_port[573] = 64'h0000000000000000;
+    r_port[574] = 64'h0000000000000000;
+    r_port[575] = 64'h0000000000000000;
+    r_port[576] = 64'h0000000000000000;
+    r_port[577] = 64'h0000000000000000;
+    r_port[578] = 64'h0000000000000000;
+    r_port[579] = 64'h0000000000000000;
+    r_port[580] = 64'h0000000000000000;
+    r_port[581] = 64'h0000000000000000;
+    r_port[582] = 64'h0000000000000000;
+    r_port[583] = 64'h0000000000000000;
+    r_port[584] = 64'h0000000000000000;
+    r_port[585] = 64'h0000000000000000;
+    r_port[586] = 64'h0000000000000000;
+    r_port[587] = 64'h0000000000000000;
+    r_port[588] = 64'h0000000000000000;
+    r_port[589] = 64'h0000000000000000;
+    r_port[590] = 64'h0000000000000000;
+    r_port[591] = 64'h0000000000000000;
+    r_port[592] = 64'h0000000000000000;
+    r_port[593] = 64'h0000000000000000;
+    r_port[594] = 64'h0000000000000000;
+    r_port[595] = 64'h0000000000000000;
+    r_port[596] = 64'h0000000000000000;
+    r_port[597] = 64'h0000000000000000;
+    r_port[598] = 64'h0000000000000000;
+    r_port[599] = 64'h0000000000000000;
+    r_port[600] = 64'h0000000000000000;
+    r_port[601] = 64'h0000000000000000;
+    r_port[602] = 64'h0000000000000000;
+    r_port[603] = 64'h0000000000000000;
+    r_port[604] = 64'h0000000000000000;
+    r_port[605] = 64'h0000000000000000;
+    r_port[606] = 64'h0000000000000000;
+    r_port[607] = 64'h0000000000000000;
+    r_port[608] = 64'h0000000000000000;
+    r_port[609] = 64'h0000000000000000;
+    r_port[610] = 64'h0000000000000000;
+    r_port[611] = 64'h0000000000000000;
+    r_port[612] = 64'h0000000000000000;
+    r_port[613] = 64'h0000000000000000;
+    r_port[614] = 64'h0000000000000000;
+    r_port[615] = 64'h0000000000000000;
+    r_port[616] = 64'h0000000000000000;
+    r_port[617] = 64'h0000000000000000;
+    r_port[618] = 64'h0000000000000000;
+    r_port[619] = 64'h0000000000000000;
+    r_port[620] = 64'h0000000000000000;
+    r_port[621] = 64'h0000000000000000;
+    r_port[622] = 64'h0000000000000000;
+    r_port[623] = 64'h0000000000000000;
+    r_port[624] = 64'h0000000000000000;
+    r_port[625] = 64'h0000000000000000;
+    r_port[626] = 64'h0000000000000000;
+    r_port[627] = 64'h0000000000000000;
+    r_port[628] = 64'h0000000000000000;
+    r_port[629] = 64'h0000000000000000;
+    r_port[630] = 64'h0000000000000000;
+    r_port[631] = 64'h0000000000000000;
+    r_port[632] = 64'h0000000000000000;
+    r_port[633] = 64'h0000000000000000;
+    r_port[634] = 64'h0000000000000000;
+    r_port[635] = 64'h0000000000000000;
+    r_port[636] = 64'h0000000000000000;
+    r_port[637] = 64'h0000000000000000;
+    r_port[638] = 64'h0000000000000000;
+    r_port[639] = 64'h0000000000000000;
+    r_port[640] = 64'h0000000000000000;
+    r_port[641] = 64'h0000000000000000;
+    r_port[642] = 64'h0000000000000000;
+    r_port[643] = 64'h0000000000000000;
+    r_port[644] = 64'h0000000000000000;
+    r_port[645] = 64'h0000000000000000;
+    r_port[646] = 64'h0000000000000000;
+    r_port[647] = 64'h0000000000000000;
+    r_port[648] = 64'h0000000000000000;
+    r_port[649] = 64'h0000000000000000;
+    r_port[650] = 64'h0000000000000000;
+    r_port[651] = 64'h0000000000000000;
+    r_port[652] = 64'h0000000000000000;
+    r_port[653] = 64'h0000000000000000;
+    r_port[654] = 64'h0000000000000000;
+    r_port[655] = 64'h0000000000000000;
+    r_port[656] = 64'h0000000000000000;
+    r_port[657] = 64'h0000000000000000;
+    r_port[658] = 64'h0000000000000000;
+    r_port[659] = 64'h0000000000000000;
+    r_port[660] = 64'h0000000000000000;
+    r_port[661] = 64'h0000000000000000;
+    r_port[662] = 64'h0000000000000000;
+    r_port[663] = 64'h0000000000000000;
+    r_port[664] = 64'h0000000000000000;
+    r_port[665] = 64'h0000000000000000;
+    r_port[666] = 64'h0000000000000000;
+    r_port[667] = 64'h0000000000000000;
+    r_port[668] = 64'h0000000000000000;
+    r_port[669] = 64'h0000000000000000;
+    r_port[670] = 64'h0000000000000000;
+    r_port[671] = 64'h0000000000000000;
+    r_port[672] = 64'h0000000000000000;
+    r_port[673] = 64'h0000000000000000;
+    r_port[674] = 64'h0000000000000000;
+    r_port[675] = 64'h0000000000000000;
+    r_port[676] = 64'h0000000000000000;
+    r_port[677] = 64'h0000000000000000;
+    r_port[678] = 64'h0000000000000000;
+    r_port[679] = 64'h0000000000000000;
+    r_port[680] = 64'h0000000000000000;
+    r_port[681] = 64'h0000000000000000;
+    r_port[682] = 64'h0000000000000000;
+    r_port[683] = 64'h0000000000000000;
+    r_port[684] = 64'h0000000000000000;
+    r_port[685] = 64'h0000000000000000;
+    r_port[686] = 64'h0000000000000000;
+    r_port[687] = 64'h0000000000000000;
+    r_port[688] = 64'h0000000000000000;
+    r_port[689] = 64'h0000000000000000;
+    r_port[690] = 64'h0000000000000000;
+    r_port[691] = 64'h0000000000000000;
+    r_port[692] = 64'h0000000000000000;
+    r_port[693] = 64'h0000000000000000;
+    r_port[694] = 64'h0000000000000000;
+    r_port[695] = 64'h0000000000000000;
+    r_port[696] = 64'h0000000000000000;
+    r_port[697] = 64'h0000000000000000;
+    r_port[698] = 64'h0000000000000000;
+    r_port[699] = 64'h0000000000000000;
+    r_port[700] = 64'h0000000000000000;
+    r_port[701] = 64'h0000000000000000;
+    r_port[702] = 64'h0000000000000000;
+    r_port[703] = 64'h0000000000000000;
+    r_port[704] = 64'h0000000000000000;
+    r_port[705] = 64'h0000000000000000;
+    r_port[706] = 64'h0000000000000000;
+    r_port[707] = 64'h0000000000000000;
+    r_port[708] = 64'h0000000000000000;
+    r_port[709] = 64'h0000000000000000;
+    r_port[710] = 64'h0000000000000000;
+    r_port[711] = 64'h0000000000000000;
+    r_port[712] = 64'h0000000000000000;
+    r_port[713] = 64'h0000000000000000;
+    r_port[714] = 64'h0000000000000000;
+    r_port[715] = 64'h0000000000000000;
+    r_port[716] = 64'h0000000000000000;
+    r_port[717] = 64'h0000000000000000;
+    r_port[718] = 64'h0000000000000000;
+    r_port[719] = 64'h0000000000000000;
+    r_port[720] = 64'h0000000000000000;
+    r_port[721] = 64'h0000000000000000;
+    r_port[722] = 64'h0000000000000000;
+    r_port[723] = 64'h0000000000000000;
+    r_port[724] = 64'h0000000000000000;
+    r_port[725] = 64'h0000000000000000;
+    r_port[726] = 64'h0000000000000000;
+    r_port[727] = 64'h0000000000000000;
+    r_port[728] = 64'h0000000000000000;
+    r_port[729] = 64'h0000000000000000;
+    r_port[730] = 64'h0000000000000000;
+    r_port[731] = 64'h0000000000000000;
+    r_port[732] = 64'h0000000000000000;
+    r_port[733] = 64'h0000000000000000;
+    r_port[734] = 64'h0000000000000000;
+    r_port[735] = 64'h0000000000000000;
+    r_port[736] = 64'h0000000000000000;
+    r_port[737] = 64'h0000000000000000;
+    r_port[738] = 64'h0000000000000000;
+    r_port[739] = 64'h0000000000000000;
+    r_port[740] = 64'h0000000000000000;
+    r_port[741] = 64'h0000000000000000;
+    r_port[742] = 64'h0000000000000000;
+    r_port[743] = 64'h0000000000000000;
+    r_port[744] = 64'h0000000000000000;
+    r_port[745] = 64'h0000000000000000;
+    r_port[746] = 64'h0000000000000000;
+    r_port[747] = 64'h0000000000000000;
+    r_port[748] = 64'h0000000000000000;
+    r_port[749] = 64'h0000000000000000;
+    r_port[750] = 64'h0000000000000000;
+    r_port[751] = 64'h0000000000000000;
+    r_port[752] = 64'h0000000000000000;
+    r_port[753] = 64'h0000000000000000;
+    r_port[754] = 64'h0000000000000000;
+    r_port[755] = 64'h0000000000000000;
+    r_port[756] = 64'h0000000000000000;
+    r_port[757] = 64'h0000000000000000;
+    r_port[758] = 64'h0000000000000000;
+    r_port[759] = 64'h0000000000000000;
+    r_port[760] = 64'h0000000000000000;
+    r_port[761] = 64'h0000000000000000;
+    r_port[762] = 64'h0000000000000000;
+    r_port[763] = 64'h0000000000000000;
+    r_port[764] = 64'h0000000000000000;
+    r_port[765] = 64'h0000000000000000;
+    r_port[766] = 64'h0000000000000000;
+    r_port[767] = 64'h0000000000000000;
+    r_port[768] = 64'h0000000000000000;
+    r_port[769] = 64'h0000000000000000;
+    r_port[770] = 64'h0000000000000000;
+    r_port[771] = 64'h0000000000000000;
+    r_port[772] = 64'h0000000000000000;
+    r_port[773] = 64'h0000000000000000;
+    r_port[774] = 64'h0000000000000000;
+    r_port[775] = 64'h0000000000000000;
+    r_port[776] = 64'h0000000000000000;
+    r_port[777] = 64'h0000000000000000;
+    r_port[778] = 64'h0000000000000000;
+    r_port[779] = 64'h0000000000000000;
+    r_port[780] = 64'h0000000000000000;
+    r_port[781] = 64'h0000000000000000;
+    r_port[782] = 64'h0000000000000000;
+    r_port[783] = 64'h0000000000000000;
+    r_port[784] = 64'h0000000000000000;
+    r_port[785] = 64'h0000000000000000;
+    r_port[786] = 64'h0000000000000000;
+    r_port[787] = 64'h0000000000000000;
+    r_port[788] = 64'h0000000000000000;
+    r_port[789] = 64'h0000000000000000;
+    r_port[790] = 64'h0000000000000000;
+    r_port[791] = 64'h0000000000000000;
+    r_port[792] = 64'h0000000000000000;
+    r_port[793] = 64'h0000000000000000;
+    r_port[794] = 64'h0000000000000000;
+    r_port[795] = 64'h0000000000000000;
+    r_port[796] = 64'h0000000000000000;
+    r_port[797] = 64'h0000000000000000;
+    r_port[798] = 64'h0000000000000000;
+    r_port[799] = 64'h0000000000000000;
+    r_port[800] = 64'h0000000000000000;
+    r_port[801] = 64'h0000000000000000;
+    r_port[802] = 64'h0000000000000000;
+    r_port[803] = 64'h0000000000000000;
+    r_port[804] = 64'h0000000000000000;
+    r_port[805] = 64'h0000000000000000;
+    r_port[806] = 64'h0000000000000000;
+    r_port[807] = 64'h0000000000000000;
+    r_port[808] = 64'h0000000000000000;
+    r_port[809] = 64'h0000000000000000;
+    r_port[810] = 64'h0000000000000000;
+    r_port[811] = 64'h0000000000000000;
+    r_port[812] = 64'h0000000000000000;
+    r_port[813] = 64'h0000000000000000;
+    r_port[814] = 64'h0000000000000000;
+    r_port[815] = 64'h0000000000000000;
+    r_port[816] = 64'h0000000000000000;
+    r_port[817] = 64'h0000000000000000;
+    r_port[818] = 64'h0000000000000000;
+    r_port[819] = 64'h0000000000000000;
+    r_port[820] = 64'h0000000000000000;
+    r_port[821] = 64'h0000000000000000;
+    r_port[822] = 64'h0000000000000000;
+    r_port[823] = 64'h0000000000000000;
+    r_port[824] = 64'h0000000000000000;
+    r_port[825] = 64'h0000000000000000;
+    r_port[826] = 64'h0000000000000000;
+    r_port[827] = 64'h0000000000000000;
+    r_port[828] = 64'h0000000000000000;
+    r_port[829] = 64'h0000000000000000;
+    r_port[830] = 64'h0000000000000000;
+    r_port[831] = 64'h0000000000000000;
+    r_port[832] = 64'h0000000000000000;
+    r_port[833] = 64'h0000000000000000;
+    r_port[834] = 64'h0000000000000000;
+    r_port[835] = 64'h0000000000000000;
+    r_port[836] = 64'h0000000000000000;
+    r_port[837] = 64'h0000000000000000;
+    r_port[838] = 64'h0000000000000000;
+    r_port[839] = 64'h0000000000000000;
+    r_port[840] = 64'h0000000000000000;
+    r_port[841] = 64'h0000000000000000;
+    r_port[842] = 64'h0000000000000000;
+    r_port[843] = 64'h0000000000000000;
+    r_port[844] = 64'h0000000000000000;
+    r_port[845] = 64'h0000000000000000;
+    r_port[846] = 64'h0000000000000000;
+    r_port[847] = 64'h0000000000000000;
+    r_port[848] = 64'h0000000000000000;
+    r_port[849] = 64'h0000000000000000;
+    r_port[850] = 64'h0000000000000000;
+    r_port[851] = 64'h0000000000000000;
+    r_port[852] = 64'h0000000000000000;
+    r_port[853] = 64'h0000000000000000;
+    r_port[854] = 64'h0000000000000000;
+    r_port[855] = 64'h0000000000000000;
+    r_port[856] = 64'h0000000000000000;
+    r_port[857] = 64'h0000000000000000;
+    r_port[858] = 64'h0000000000000000;
+    r_port[859] = 64'h0000000000000000;
+    r_port[860] = 64'h0000000000000000;
+    r_port[861] = 64'h0000000000000000;
+    r_port[862] = 64'h0000000000000000;
+    r_port[863] = 64'h0000000000000000;
+    r_port[864] = 64'h0000000000000000;
+    r_port[865] = 64'h0000000000000000;
+    r_port[866] = 64'h0000000000000000;
+    r_port[867] = 64'h0000000000000000;
+    r_port[868] = 64'h0000000000000000;
+    r_port[869] = 64'h0000000000000000;
+    r_port[870] = 64'h0000000000000000;
+    r_port[871] = 64'h0000000000000000;
+    r_port[872] = 64'h0000000000000000;
+    r_port[873] = 64'h0000000000000000;
+    r_port[874] = 64'h0000000000000000;
+    r_port[875] = 64'h0000000000000000;
+    r_port[876] = 64'h0000000000000000;
+    r_port[877] = 64'h0000000000000000;
+    r_port[878] = 64'h0000000000000000;
+    r_port[879] = 64'h0000000000000000;
+    r_port[880] = 64'h0000000000000000;
+    r_port[881] = 64'h0000000000000000;
+    r_port[882] = 64'h0000000000000000;
+    r_port[883] = 64'h0000000000000000;
+    r_port[884] = 64'h0000000000000000;
+    r_port[885] = 64'h0000000000000000;
+    r_port[886] = 64'h0000000000000000;
+    r_port[887] = 64'h0000000000000000;
+    r_port[888] = 64'h0000000000000000;
+    r_port[889] = 64'h0000000000000000;
+    r_port[890] = 64'h0000000000000000;
+    r_port[891] = 64'h0000000000000000;
+    r_port[892] = 64'h0000000000000000;
+    r_port[893] = 64'h0000000000000000;
+    r_port[894] = 64'h0000000000000000;
+    r_port[895] = 64'h0000000000000000;
+    r_port[896] = 64'h0000000000000000;
+    r_port[897] = 64'h0000000000000000;
+    r_port[898] = 64'h0000000000000000;
+    r_port[899] = 64'h0000000000000000;
+    r_port[900] = 64'h0000000000000000;
+    r_port[901] = 64'h0000000000000000;
+    r_port[902] = 64'h0000000000000000;
+    r_port[903] = 64'h0000000000000000;
+    r_port[904] = 64'h0000000000000000;
+    r_port[905] = 64'h0000000000000000;
+    r_port[906] = 64'h0000000000000000;
+    r_port[907] = 64'h0000000000000000;
+    r_port[908] = 64'h0000000000000000;
+    r_port[909] = 64'h0000000000000000;
+    r_port[910] = 64'h0000000000000000;
+    r_port[911] = 64'h0000000000000000;
+    r_port[912] = 64'h0000000000000000;
+    r_port[913] = 64'h0000000000000000;
+    r_port[914] = 64'h0000000000000000;
+    r_port[915] = 64'h0000000000000000;
+    r_port[916] = 64'h0000000000000000;
+    r_port[917] = 64'h0000000000000000;
+    r_port[918] = 64'h0000000000000000;
+    r_port[919] = 64'h0000000000000000;
+    r_port[920] = 64'h0000000000000000;
+    r_port[921] = 64'h0000000000000000;
+    r_port[922] = 64'h0000000000000000;
+    r_port[923] = 64'h0000000000000000;
+    r_port[924] = 64'h0000000000000000;
+    r_port[925] = 64'h0000000000000000;
+    r_port[926] = 64'h0000000000000000;
+    r_port[927] = 64'h0000000000000000;
+    r_port[928] = 64'h0000000000000000;
+    r_port[929] = 64'h0000000000000000;
+    r_port[930] = 64'h0000000000000000;
+    r_port[931] = 64'h0000000000000000;
+    r_port[932] = 64'h0000000000000000;
+    r_port[933] = 64'h0000000000000000;
+    r_port[934] = 64'h0000000000000000;
+    r_port[935] = 64'h0000000000000000;
+    r_port[936] = 64'h0000000000000000;
+    r_port[937] = 64'h0000000000000000;
+    r_port[938] = 64'h0000000000000000;
+    r_port[939] = 64'h0000000000000000;
+    r_port[940] = 64'h0000000000000000;
+    r_port[941] = 64'h0000000000000000;
+    r_port[942] = 64'h0000000000000000;
+    r_port[943] = 64'h0000000000000000;
+    r_port[944] = 64'h0000000000000000;
+    r_port[945] = 64'h0000000000000000;
+    r_port[946] = 64'h0000000000000000;
+    r_port[947] = 64'h0000000000000000;
+    r_port[948] = 64'h0000000000000000;
+    r_port[949] = 64'h0000000000000000;
+    r_port[950] = 64'h0000000000000000;
+    r_port[951] = 64'h0000000000000000;
+    r_port[952] = 64'h0000000000000000;
+    r_port[953] = 64'h0000000000000000;
+    r_port[954] = 64'h0000000000000000;
+    r_port[955] = 64'h0000000000000000;
+    r_port[956] = 64'h0000000000000000;
+    r_port[957] = 64'h0000000000000000;
+    r_port[958] = 64'h0000000000000000;
+    r_port[959] = 64'h0000000000000000;
+    r_port[960] = 64'h0000000000000000;
+    r_port[961] = 64'h0000000000000000;
+    r_port[962] = 64'h0000000000000000;
+    r_port[963] = 64'h0000000000000000;
+    r_port[964] = 64'h0000000000000000;
+    r_port[965] = 64'h0000000000000000;
+    r_port[966] = 64'h0000000000000000;
+    r_port[967] = 64'h0000000000000000;
+    r_port[968] = 64'h0000000000000000;
+    r_port[969] = 64'h0000000000000000;
+    r_port[970] = 64'h0000000000000000;
+    r_port[971] = 64'h0000000000000000;
+    r_port[972] = 64'h0000000000000000;
+    r_port[973] = 64'h0000000000000000;
+    r_port[974] = 64'h0000000000000000;
+    r_port[975] = 64'h0000000000000000;
+    r_port[976] = 64'h0000000000000000;
+    r_port[977] = 64'h0000000000000000;
+    r_port[978] = 64'h0000000000000000;
+    r_port[979] = 64'h0000000000000000;
+    r_port[980] = 64'h0000000000000000;
+    r_port[981] = 64'h0000000000000000;
+    r_port[982] = 64'h0000000000000000;
+    r_port[983] = 64'h0000000000000000;
+    r_port[984] = 64'h0000000000000000;
+    r_port[985] = 64'h0000000000000000;
+    r_port[986] = 64'h0000000000000000;
+    r_port[987] = 64'h0000000000000000;
+    r_port[988] = 64'h0000000000000000;
+    r_port[989] = 64'h0000000000000000;
+    r_port[990] = 64'h0000000000000000;
+    r_port[991] = 64'h0000000000000000;
+    r_port[992] = 64'h0000000000000000;
+    r_port[993] = 64'h0000000000000000;
+    r_port[994] = 64'h0000000000000000;
+    r_port[995] = 64'h0000000000000000;
+    r_port[996] = 64'h0000000000000000;
+    r_port[997] = 64'h0000000000000000;
+    r_port[998] = 64'h0000000000000000;
+    r_port[999] = 64'h0000000000000000;
+    r_port[1000] = 64'h0000000000000000;
+    r_port[1001] = 64'h0000000000000000;
+    r_port[1002] = 64'h0000000000000000;
+    r_port[1003] = 64'h0000000000000000;
+    r_port[1004] = 64'h0000000000000000;
+    r_port[1005] = 64'h0000000000000000;
+    r_port[1006] = 64'h0000000000000000;
+    r_port[1007] = 64'h0000000000000000;
+    r_port[1008] = 64'h0000000000000000;
+    r_port[1009] = 64'h0000000000000000;
+    r_port[1010] = 64'h0000000000000000;
+    r_port[1011] = 64'h0000000000000000;
+    r_port[1012] = 64'h0000000000000000;
+    r_port[1013] = 64'h0000000000000000;
+    r_port[1014] = 64'h0000000000000000;
+    r_port[1015] = 64'h0000000000000000;
+    r_port[1016] = 64'h0000000000000000;
+    r_port[1017] = 64'h0000000000000000;
+    r_port[1018] = 64'h0000000000000000;
+    r_port[1019] = 64'h0000000000000000;
+    r_port[1020] = 64'h0000000000000000;
+    r_port[1021] = 64'h0000000000000000;
+    r_port[1022] = 64'h0000000000000000;
+    r_port[1023] = 64'h0000000000000000;
+  end
+  always @(posedge usb_clk) begin
+    if (storage_w_en)
+      r_port[storage_w_addr] <= storage_w_data;
+  end
+  reg [63:0] _0_;
+  always @(posedge clk) begin
+    _0_ <= r_port[storage_r_addr];
+  end
+  initial _0_ = 64'h0000000000000000;
+  assign storage_r_data = _0_;
+  assign \$9  = consume_r_bin + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:427" *) \$7 ;
+  assign \$11  = produce_cdc_produce_w_gry[10] != (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:463" *) consume_cdc_consume_w_gry[10];
+  assign \$13  = produce_cdc_produce_w_gry[9] != (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:464" *) consume_cdc_consume_w_gry[9];
+  assign \$15  = \$11  & (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:463" *) \$13 ;
+  assign \$17  = produce_cdc_produce_w_gry[8:0] == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:465" *) consume_cdc_consume_w_gry[8:0];
+  assign \$19  = \$15  & (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:463" *) \$17 ;
+  assign \$21  = consume_cdc_consume_r_gry == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:466" *) produce_cdc_produce_r_gry;
+  assign \$24  = produce_w_bin - (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:469" *) consume_w_bin;
+  assign \$27  = produce_r_bin - (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:470" *) consume_r_bin;
+  assign \$2  = w_rdy & (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:415" *) w_en;
+  assign \$29  = w_rdy & (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:415" *) w_en;
+  assign \$31  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:480" *) w_full;
+  assign \$33  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:486" *) r_empty;
+  always @(posedge usb_clk)
+    produce_w_bin <= \produce_w_bin$next ;
+  always @(posedge usb_clk)
+    produce_cdc_produce_w_gry <= \produce_cdc_produce_w_gry$next ;
+  always @(posedge usb_clk)
+    consume_w_bin <= \consume_w_bin$next ;
+  always @(posedge usb_clk)
+    w_level <= \w_level$next ;
+  always @(posedge clk)
+    consume_r_bin <= \consume_r_bin$next ;
+  always @(posedge clk)
+    consume_cdc_consume_r_gry <= \consume_cdc_consume_r_gry$next ;
+  always @(posedge clk)
+    r_rst <= \r_rst$next ;
+  assign \$4  = produce_w_bin + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:421" *) \$2 ;
+  assign \$7  = r_rdy & (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:416" *) r_en;
+  \usb_avb_subsystem.bridge_fifo.consume_cdc  consume_cdc (
+    .consume_r_gry(consume_cdc_consume_r_gry),
+    .consume_w_gry(consume_cdc_consume_w_gry),
+    .usb_clk(usb_clk),
+    .usb_rst(usb_rst)
+  );
+  \usb_avb_subsystem.bridge_fifo.consume_dec  consume_dec (
+    .i(consume_dec_i),
+    .o(consume_dec_o)
+  );
+  \usb_avb_subsystem.bridge_fifo.consume_enc  consume_enc (
+    .i(consume_enc_i),
+    .o(consume_enc_o)
+  );
+  \usb_avb_subsystem.bridge_fifo.produce_cdc  produce_cdc (
+    .clk(clk),
+    .produce_r_gry(produce_cdc_produce_r_gry),
+    .produce_w_gry(produce_cdc_produce_w_gry),
+    .rst(rst)
+  );
+  \usb_avb_subsystem.bridge_fifo.produce_dec  produce_dec (
+    .i(produce_dec_i),
+    .o(produce_dec_o)
+  );
+  \usb_avb_subsystem.bridge_fifo.produce_enc  produce_enc (
+    .i(produce_enc_i),
+    .o(produce_enc_o)
+  );
+  \usb_avb_subsystem.bridge_fifo.rst_cdc  rst_cdc (
+    .clk(clk),
+    .r_rst(rst_cdc_r_rst),
+    .usb_rst(usb_rst)
+  );
+  \usb_avb_subsystem.bridge_fifo.rst_dec  rst_dec (
+    .i(rst_dec_i),
+    .o(rst_dec_o)
+  );
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    \produce_w_bin$next  = produce_w_nxt;
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
+    if (usb_rst) begin
+      \produce_w_bin$next  = 11'h000;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    r_empty = \$21 ;
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:512" *)
+    if (rst_cdc_r_rst) begin
+      r_empty = 1'h1;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    \w_level$next  = \$24 [10:0];
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
+    if (usb_rst) begin
+      \w_level$next  = 11'h000;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    (* full_case = 32'd1 *)
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:512" *)
+    if (rst_cdc_r_rst) begin
+      \r_rst$next  = 1'h1;
+    end else begin
+      \r_rst$next  = 1'h0;
+    end
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
+    if (rst) begin
+      \r_rst$next  = 1'h0;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    \consume_r_bin$next  = consume_r_nxt;
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:512" *)
+    if (rst_cdc_r_rst) begin
+      \consume_r_bin$next  = rst_dec_o;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    \produce_cdc_produce_w_gry$next  = produce_enc_o;
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
+    if (usb_rst) begin
+      \produce_cdc_produce_w_gry$next  = 11'h000;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    \consume_cdc_consume_r_gry$next  = consume_enc_o;
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:512" *)
+    if (rst_cdc_r_rst) begin
+      \consume_cdc_consume_r_gry$next  = produce_cdc_produce_r_gry;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    \consume_w_bin$next  = consume_dec_o;
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
+    if (usb_rst) begin
+      \consume_w_bin$next  = 11'h000;
+    end
+  end
+  assign \$1  = \$4 ;
+  assign \$6  = \$9 ;
+  assign \$23  = \$24 ;
+  assign \$26  = \$27 ;
+  assign rst_dec_i = produce_cdc_produce_r_gry;
+  assign r_rdy = \$33 ;
+  assign storage_r_en = 1'h1;
+  assign r_data = storage_r_data;
+  assign storage_r_addr = consume_r_nxt[9:0];
+  assign w_rdy = \$31 ;
+  assign storage_w_en = \$29 ;
+  assign storage_w_data = w_data;
+  assign storage_w_addr = produce_w_bin[9:0];
+  assign r_level = \$27 [10:0];
+  assign w_full = \$19 ;
+  assign produce_r_bin = produce_dec_o;
+  assign produce_dec_i = produce_cdc_produce_r_gry;
+  assign consume_dec_i = consume_cdc_consume_w_gry;
+  assign consume_enc_i = consume_r_nxt;
+  assign produce_enc_i = produce_w_nxt;
+  assign consume_r_nxt = \$9 [10:0];
+  assign produce_w_nxt = \$4 [10:0];
+endmodule
+
+(* generator = "Amaranth" *)
+module \usb_avb_subsystem.bridge_fifo.consume_cdc (usb_rst, consume_r_gry, consume_w_gry, usb_clk);
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:439" *)
+  input [10:0] consume_r_gry;
+  wire [10:0] consume_r_gry;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:440" *)
+  output [10:0] consume_w_gry;
+  wire [10:0] consume_w_gry;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
+  reg [10:0] stage0 = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
+  wire [10:0] \stage0$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
+  reg [10:0] stage1 = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
+  wire [10:0] \stage1$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
+  input usb_clk;
+  wire usb_clk;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
+  input usb_rst;
+  wire usb_rst;
+  always @(posedge usb_clk)
+    stage0 <= \stage0$next ;
+  always @(posedge usb_clk)
+    stage1 <= \stage1$next ;
+  assign consume_w_gry = stage1;
+  assign \stage1$next  = stage0;
+  assign \stage0$next  = consume_r_gry;
+endmodule
+
+(* generator = "Amaranth" *)
+module \usb_avb_subsystem.bridge_fifo.consume_dec (o, i);
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$1 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$101 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$103 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$105 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$107 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$109 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$11 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$111 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$113 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$115 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$117 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$119 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$121 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$123 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$125 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$127 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$129 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$13 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$131 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$15 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$17 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$19 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$21 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$23 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$25 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$27 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$29 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$3 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$31 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$33 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$35 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$37 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$39 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$41 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$43 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$45 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$47 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$49 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$5 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$51 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$53 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$55 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$57 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$59 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$61 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$63 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$65 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$67 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$69 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$7 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$71 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$73 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$75 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$77 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$79 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$81 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$83 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$85 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$87 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$89 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$9 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$91 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$93 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$95 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$97 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$99 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:176" *)
+  input [10:0] i;
+  wire [10:0] i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:177" *)
+  output [10:0] o;
+  wire [10:0] o;
+  assign \$9  = \$7  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$99  = \$97  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$101  = \$99  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$103  = \$101  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$105  = \$103  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$107  = \$105  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[2];
+  assign \$109  = \$107  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[1];
+  assign \$113  = \$111  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$115  = \$113  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$117  = \$115  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$11  = \$9  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$119  = \$117  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$121  = \$119  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$123  = \$121  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$125  = \$123  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$127  = \$125  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[2];
+  assign \$129  = \$127  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[1];
+  assign \$131  = \$129  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[0];
+  assign \$15  = \$13  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$17  = \$15  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$19  = \$17  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$23  = \$21  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$25  = \$23  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$27  = \$25  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$29  = \$27  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$33  = \$31  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$35  = \$33  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$37  = \$35  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$39  = \$37  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$41  = \$39  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$45  = \$43  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$47  = \$45  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$49  = \$47  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$51  = \$49  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$53  = \$51  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$55  = \$53  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$5  = \$3  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$59  = \$57  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$61  = \$59  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$63  = \$61  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$65  = \$63  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$67  = \$65  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$69  = \$67  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$71  = \$69  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$75  = \$73  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$77  = \$75  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$79  = \$77  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$81  = \$79  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$83  = \$81  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$85  = \$83  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$87  = \$85  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$89  = \$87  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[2];
+  assign \$93  = \$91  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$95  = \$93  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$97  = \$95  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign o[0] = \$131 ;
+  assign o[1] = \$109 ;
+  assign o[2] = \$89 ;
+  assign o[3] = \$71 ;
+  assign o[4] = \$55 ;
+  assign o[5] = \$41 ;
+  assign o[6] = \$29 ;
+  assign o[7] = \$19 ;
+  assign o[8] = \$11 ;
+  assign o[9] = \$5 ;
+  assign o[10] = \$1 ;
+  assign \$1  = i[10];
+  assign \$3  = i[10];
+  assign \$7  = i[10];
+  assign \$13  = i[10];
+  assign \$21  = i[10];
+  assign \$31  = i[10];
+  assign \$43  = i[10];
+  assign \$57  = i[10];
+  assign \$73  = i[10];
+  assign \$91  = i[10];
+  assign \$111  = i[10];
+endmodule
+
+(* generator = "Amaranth" *)
+module \usb_avb_subsystem.bridge_fifo.consume_enc (o, i);
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:154" *)
+  wire [10:0] \$1 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:149" *)
+  input [10:0] i;
+  wire [10:0] i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:150" *)
+  output [10:0] o;
+  wire [10:0] o;
+  assign \$1  = i ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:154" *) i[10:1];
+  assign o = \$1 ;
+endmodule
+
+(* generator = "Amaranth" *)
+module \usb_avb_subsystem.bridge_fifo.produce_cdc (clk, produce_w_gry, produce_r_gry, rst);
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/ir.py:508" *)
+  input clk;
+  wire clk;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:431" *)
+  output [10:0] produce_r_gry;
+  wire [10:0] produce_r_gry;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:430" *)
+  input [10:0] produce_w_gry;
+  wire [10:0] produce_w_gry;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/ir.py:508" *)
+  input rst;
+  wire rst;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
+  reg [10:0] stage0 = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
+  wire [10:0] \stage0$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
+  reg [10:0] stage1 = 11'h000;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
+  wire [10:0] \stage1$next ;
+  always @(posedge clk)
+    stage0 <= \stage0$next ;
+  always @(posedge clk)
+    stage1 <= \stage1$next ;
+  assign produce_r_gry = stage1;
+  assign \stage1$next  = stage0;
+  assign \stage0$next  = produce_w_gry;
+endmodule
+
+(* generator = "Amaranth" *)
+module \usb_avb_subsystem.bridge_fifo.produce_dec (o, i);
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$1 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$101 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$103 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$105 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$107 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$109 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$11 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$111 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$113 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$115 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$117 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$119 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$121 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$123 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$125 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$127 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$129 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$13 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$131 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$15 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$17 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$19 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$21 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$23 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$25 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$27 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$29 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$3 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$31 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$33 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$35 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$37 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$39 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$41 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$43 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$45 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$47 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$49 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$5 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$51 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$53 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$55 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$57 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$59 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$61 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$63 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$65 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$67 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$69 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$7 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$71 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$73 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$75 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$77 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$79 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$81 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$83 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$85 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$87 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$89 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$9 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$91 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$93 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$95 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$97 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$99 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:176" *)
+  input [10:0] i;
+  wire [10:0] i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:177" *)
+  output [10:0] o;
+  wire [10:0] o;
+  assign \$9  = \$7  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$99  = \$97  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$101  = \$99  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$103  = \$101  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$105  = \$103  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$107  = \$105  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[2];
+  assign \$109  = \$107  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[1];
+  assign \$113  = \$111  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$115  = \$113  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$117  = \$115  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$11  = \$9  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$119  = \$117  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$121  = \$119  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$123  = \$121  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$125  = \$123  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$127  = \$125  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[2];
+  assign \$129  = \$127  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[1];
+  assign \$131  = \$129  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[0];
+  assign \$15  = \$13  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$17  = \$15  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$19  = \$17  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$23  = \$21  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$25  = \$23  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$27  = \$25  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$29  = \$27  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$33  = \$31  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$35  = \$33  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$37  = \$35  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$39  = \$37  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$41  = \$39  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$45  = \$43  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$47  = \$45  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$49  = \$47  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$51  = \$49  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$53  = \$51  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$55  = \$53  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$5  = \$3  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$59  = \$57  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$61  = \$59  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$63  = \$61  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$65  = \$63  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$67  = \$65  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$69  = \$67  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$71  = \$69  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$75  = \$73  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$77  = \$75  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$79  = \$77  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$81  = \$79  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$83  = \$81  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$85  = \$83  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$87  = \$85  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$89  = \$87  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[2];
+  assign \$93  = \$91  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$95  = \$93  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$97  = \$95  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign o[0] = \$131 ;
+  assign o[1] = \$109 ;
+  assign o[2] = \$89 ;
+  assign o[3] = \$71 ;
+  assign o[4] = \$55 ;
+  assign o[5] = \$41 ;
+  assign o[6] = \$29 ;
+  assign o[7] = \$19 ;
+  assign o[8] = \$11 ;
+  assign o[9] = \$5 ;
+  assign o[10] = \$1 ;
+  assign \$1  = i[10];
+  assign \$3  = i[10];
+  assign \$7  = i[10];
+  assign \$13  = i[10];
+  assign \$21  = i[10];
+  assign \$31  = i[10];
+  assign \$43  = i[10];
+  assign \$57  = i[10];
+  assign \$73  = i[10];
+  assign \$91  = i[10];
+  assign \$111  = i[10];
+endmodule
+
+(* generator = "Amaranth" *)
+module \usb_avb_subsystem.bridge_fifo.produce_enc (o, i);
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:154" *)
+  wire [10:0] \$1 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:149" *)
+  input [10:0] i;
+  wire [10:0] i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:150" *)
+  output [10:0] o;
+  wire [10:0] o;
+  assign \$1  = i ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:154" *) i[10:1];
+  assign o = \$1 ;
+endmodule
+
+(* generator = "Amaranth" *)
+module \usb_avb_subsystem.bridge_fifo.rst_cdc (clk, r_rst, usb_rst);
+  reg \$auto$verilog_backend.cc:2334:dump_module$3  = 0;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:163" *)
+  wire async_ff_clk;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:163" *)
+  wire async_ff_rst;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/ir.py:508" *)
+  input clk;
+  wire clk;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/fifo.py:501" *)
+  output r_rst;
+  wire r_rst;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:164" *)
+  reg stage0 = 1'h1;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:164" *)
+  reg \stage0$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:164" *)
+  reg stage1 = 1'h1;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:164" *)
+  reg \stage1$next ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
+  input usb_rst;
+  wire usb_rst;
+  always @(posedge async_ff_clk, posedge async_ff_rst)
+    if (async_ff_rst) stage0 <= 1'h1;
+    else stage0 <= \stage0$next ;
+  always @(posedge async_ff_clk, posedge async_ff_rst)
+    if (async_ff_rst) stage1 <= 1'h1;
+    else stage1 <= \stage1$next ;
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$3 ) begin end
+    \stage0$next  = 1'h0;
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
+    if (async_ff_rst) begin
+      \stage0$next  = 1'h1;
+    end
+  end
+  always @* begin
+    if (\$auto$verilog_backend.cc:2334:dump_module$3 ) begin end
+    \stage1$next  = stage0;
+    (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
+    if (async_ff_rst) begin
+      \stage1$next  = 1'h1;
+    end
+  end
+  assign r_rst = stage1;
+  assign async_ff_clk = clk;
+  assign async_ff_rst = usb_rst;
+endmodule
+
+(* generator = "Amaranth" *)
+module \usb_avb_subsystem.bridge_fifo.rst_dec (o, i);
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$1 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$101 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$103 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$105 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$107 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$109 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$11 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$111 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$113 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$115 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$117 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$119 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$121 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$123 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$125 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$127 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$129 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$13 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$131 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$15 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$17 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$19 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$21 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$23 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$25 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$27 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$29 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$3 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$31 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$33 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$35 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$37 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$39 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$41 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$43 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$45 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$47 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$49 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$5 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$51 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$53 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$55 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$57 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$59 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$61 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$63 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$65 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$67 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$69 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$7 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$71 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$73 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$75 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$77 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$79 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$81 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$83 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$85 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$87 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$89 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$9 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$91 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$93 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$95 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$97 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *)
+  wire \$99 ;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:176" *)
+  input [10:0] i;
+  wire [10:0] i;
+  (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:177" *)
+  output [10:0] o;
+  wire [10:0] o;
+  assign \$9  = \$7  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$99  = \$97  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$101  = \$99  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$103  = \$101  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$105  = \$103  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$107  = \$105  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[2];
+  assign \$109  = \$107  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[1];
+  assign \$113  = \$111  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$115  = \$113  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$117  = \$115  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$11  = \$9  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$119  = \$117  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$121  = \$119  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$123  = \$121  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$125  = \$123  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$127  = \$125  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[2];
+  assign \$129  = \$127  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[1];
+  assign \$131  = \$129  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[0];
+  assign \$15  = \$13  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$17  = \$15  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$19  = \$17  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$23  = \$21  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$25  = \$23  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$27  = \$25  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$29  = \$27  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$33  = \$31  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$35  = \$33  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$37  = \$35  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$39  = \$37  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$41  = \$39  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$45  = \$43  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$47  = \$45  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$49  = \$47  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$51  = \$49  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$53  = \$51  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$55  = \$53  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$5  = \$3  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$59  = \$57  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$61  = \$59  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$63  = \$61  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$65  = \$63  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$67  = \$65  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$69  = \$67  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$71  = \$69  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$75  = \$73  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$77  = \$75  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$79  = \$77  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign \$81  = \$79  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[6];
+  assign \$83  = \$81  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[5];
+  assign \$85  = \$83  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[4];
+  assign \$87  = \$85  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[3];
+  assign \$89  = \$87  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[2];
+  assign \$93  = \$91  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[9];
+  assign \$95  = \$93  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[8];
+  assign \$97  = \$95  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:183" *) i[7];
+  assign o[0] = \$131 ;
+  assign o[1] = \$109 ;
+  assign o[2] = \$89 ;
+  assign o[3] = \$71 ;
+  assign o[4] = \$55 ;
+  assign o[5] = \$41 ;
+  assign o[6] = \$29 ;
+  assign o[7] = \$19 ;
+  assign o[8] = \$11 ;
+  assign o[9] = \$5 ;
+  assign o[10] = \$1 ;
+  assign \$1  = i[10];
+  assign \$3  = i[10];
+  assign \$7  = i[10];
+  assign \$13  = i[10];
+  assign \$21  = i[10];
+  assign \$31  = i[10];
+  assign \$43  = i[10];
+  assign \$57  = i[10];
+  assign \$73  = i[10];
+  assign \$91  = i[10];
+  assign \$111  = i[10];
+endmodule
+
+(* generator = "Amaranth" *)
+module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr, \first$2 , \valid$3 , \ready$4 , rst, clk, valid);
+  reg \$auto$verilog_backend.cc:2334:dump_module$4  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
   wire \$10 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:82" *)
@@ -317,10 +2531,10 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
   input first;
   wire first;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
-  output \first$3 ;
-  reg \first$3  = 1'h0;
+  output \first$2 ;
+  reg \first$2  = 1'h0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
-  reg \first$3$next ;
+  reg \first$2$next ;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:46" *)
   reg [1:0] fsm_state = 2'h0;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:46" *)
@@ -328,7 +2542,6 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:16" *)
   reg garbage_seen_out;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
-  output last;
   reg last = 1'h0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
   reg \last$next ;
@@ -373,10 +2586,10 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
   input valid;
   wire valid;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
-  output \valid$2 ;
-  reg \valid$2  = 1'h0;
+  output \valid$3 ;
+  reg \valid$3  = 1'h0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/stream/__init__.py:59" *)
-  reg \valid$2$next ;
+  reg \valid$3$next ;
   assign \$10  = usb_valid & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *) out_ready;
   assign \$12  = ! (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:82" *) out_channel_nr;
   assign \$14  = usb_valid & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *) out_ready;
@@ -390,9 +2603,9 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
   assign \$31  = usb_valid & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *) out_ready;
   assign \$33  = usb_valid & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *) out_ready;
   always @(posedge clk)
-    \valid$2  <= \valid$2$next ;
+    \valid$3  <= \valid$3$next ;
   always @(posedge clk)
-    \first$3  <= \first$3$next ;
+    \first$2  <= \first$2$next ;
   always @(posedge clk)
     last <= \last$next ;
   always @(posedge clk)
@@ -407,7 +2620,7 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
     channel_nr <= \channel_nr$next ;
   assign \$8  = usb_valid & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *) out_ready;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
     if (\$25 ) begin
@@ -456,7 +2669,7 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
     garbage_seen_out = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
     if (\$27 ) begin
@@ -492,7 +2705,7 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
     \out_sample$next  = out_sample;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
     if (\$29 ) begin
@@ -528,7 +2741,7 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
     \payload$1$next  = \payload$1 ;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
     if (\$31 ) begin
@@ -564,7 +2777,7 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
     \channel_nr$next  = channel_nr;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
     if (\$33 ) begin
@@ -600,8 +2813,8 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
-    \valid$2$next  = 1'h0;
+    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    \valid$3$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
     if (\$8 ) begin
       (* full_case = 32'd1 *)
@@ -626,18 +2839,18 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
             (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:73" *)
             if (usb_first) begin
             end else begin
-              \valid$2$next  = 1'h1;
+              \valid$3$next  = 1'h1;
             end
       endcase
     end
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
     if (rst) begin
-      \valid$2$next  = 1'h0;
+      \valid$3$next  = 1'h0;
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
-    \first$3$next  = 1'h0;
+    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    \first$2$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
     if (\$10 ) begin
       (* full_case = 32'd1 *)
@@ -662,17 +2875,17 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
             (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:73" *)
             if (usb_first) begin
             end else begin
-              \first$3$next  = \$12 ;
+              \first$2$next  = \$12 ;
             end
       endcase
     end
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
     if (rst) begin
-      \first$3$next  = 1'h0;
+      \first$2$next  = 1'h0;
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
     \last$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
     if (\$14 ) begin
@@ -708,7 +2921,7 @@ module \usb_avb_subsystem.out2ch (first, payload, ready, \payload$1 , channel_nr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$2 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
     \out_channel_nr$next  = out_channel_nr;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_stream_to_channels.py:45" *)
     if (\$18 ) begin
@@ -774,7 +2987,7 @@ endmodule
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb (session_end, isochronous_endpoint1__valid, isochronous_endpoint1__first, isochronous_endpoint1__last, isochronous_endpoint1__payload, isochronous_endpoint1__ready, connect, usb_rst, tx_data, tx_valid, op_mode, xcvr_select, term_select, dp_pulldown, dm_pulldown, line_state, rx_data, rx_valid, tx_ready, rx_active, usb_clk
 );
-  reg \$auto$verilog_backend.cc:2334:dump_module$3  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$5  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/device.py:244" *)
   wire \$63 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/device.py:247" *)
@@ -1225,10 +3438,10 @@ module \usb_avb_subsystem.usb (session_end, isochronous_endpoint1__valid, isochr
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   output tx_valid;
   wire tx_valid;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
@@ -1565,7 +3778,7 @@ module \usb_avb_subsystem.usb (session_end, isochronous_endpoint1__valid, isochr
     .\valid$6 (handshake_generator_valid)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$3 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
     \address$next  = address;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/device.py:327" *)
     if (endpoint_mux_address_changed) begin
@@ -1581,7 +3794,7 @@ module \usb_avb_subsystem.usb (session_end, isochronous_endpoint1__valid, isochr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$3 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
     \configuration$next  = configuration;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/device.py:329" *)
     if (endpoint_mux_config_changed) begin
@@ -1597,7 +3810,7 @@ module \usb_avb_subsystem.usb (session_end, isochronous_endpoint1__valid, isochr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$3 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
     \frame_number$next  = frame_number;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/device.py:399" *)
     if (token_detector_new_frame) begin
@@ -1609,7 +3822,7 @@ module \usb_avb_subsystem.usb (session_end, isochronous_endpoint1__valid, isochr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$3 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
     new_frame = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/device.py:399" *)
     if (token_detector_new_frame) begin
@@ -1617,7 +3830,7 @@ module \usb_avb_subsystem.usb (session_end, isochronous_endpoint1__valid, isochr
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$3 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
     \microframe_number$next  = microframe_number;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/device.py:399" *)
     if (token_detector_new_frame) begin
@@ -1708,7 +3921,7 @@ endmodule
 module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx_active, crc, tx_allowed, tx_timeout, rx_timeout, ack, nak, stall, nyet, pid, address, endpoint, new_token, ready_for_response, frame, new_frame, is_in, is_out
 , is_setup, is_ping, valid, next, payload, rx_ready_for_response, rx_invalid, speed, active_config, address_changed, new_address, config_changed, new_config, \ack$1 , \nak$2 , \stall$3 , start, \start$4 , clear_endpoint_halt_out, \valid$5 , tx_pid_toggle
 , \payload$6 , first, last, ready, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$4  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$6  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:197" *)
   wire \$100 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:254" *)
@@ -2154,10 +4367,10 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
   wire tx_timeout;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:150" *)
   wire \tx_timeout$64 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:69" *)
@@ -2374,7 +4587,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
     .value(setup_decoder_value)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
     \ack$1  = \$66 ;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:198" *)
     casez (fsm_state)
@@ -2407,7 +4620,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:198" *)
     casez (fsm_state)
@@ -2477,7 +4690,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
     request_mux_data_requested = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:198" *)
     casez (fsm_state)
@@ -2495,7 +4708,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
     \request_mux_valid$11  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:198" *)
     casez (fsm_state)
@@ -2517,7 +4730,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
     request_mux_next = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:198" *)
     casez (fsm_state)
@@ -2539,7 +4752,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
     \request_mux_payload$12  = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:198" *)
     casez (fsm_state)
@@ -2561,7 +4774,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
     request_mux_rx_ready_for_response = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:198" *)
     casez (fsm_state)
@@ -2583,7 +4796,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
     request_mux_rx_invalid = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:198" *)
     casez (fsm_state)
@@ -2605,7 +4818,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint (usb_rst, rx_data, rx_valid, rx
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$4 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
     request_mux_status_requested = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/control.py:198" *)
     casez (fsm_state)
@@ -2697,7 +4910,7 @@ endmodule
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst, recipient, \type , request, value, index, length, received, data_requested, status_requested, ack, active_config, claim, valid, first, last, payload, ready, tx_data_pid, \ack$1 , stall
 , address_changed, new_address, config_changed, new_config, clear_endpoint_halt, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$5  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$7  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:116" *)
   wire \$11 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
@@ -2720,11 +4933,11 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
   wire \$27 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:135" *)
   wire \$29 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:158" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:177" *)
   wire \$30 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:159" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:178" *)
   wire \$32 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:158" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:177" *)
   wire \$34 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:116" *)
   wire \$36 ;
@@ -2742,7 +4955,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
   wire \$47 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
   wire \$49 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:158" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:177" *)
   wire \$5 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
   wire \$51 ;
@@ -2764,7 +4977,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
   wire \$67 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
   wire \$69 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:159" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:178" *)
   wire \$7 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
   wire \$71 ;
@@ -2786,7 +4999,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
   wire \$87 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
   wire \$89 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:158" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:177" *)
   wire \$9 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/control.py:40" *)
   wire [7:0] \$91 ;
@@ -2917,10 +5130,10 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/interface.py:30" *)
   input [1:0] \type ;
   wire [1:0] \type ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/__init__.py:58" *)
@@ -2929,7 +5142,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/interface.py:30" *)
   input [15:0] value;
   wire [15:0] value;
-  assign \$9  = \$5  & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:158" *) \$7 ;
+  assign \$9  = \$5  & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:177" *) \$7 ;
   assign \$99  = ack & (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:216" *) expecting_ack;
   always @(posedge usb_clk)
     get_descriptor_start_position <= \get_descriptor_start_position$next ;
@@ -2948,9 +5161,9 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
   assign \$25  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:229" *) tx_data_pid;
   assign \$27  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *) \type ;
   assign \$2  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *) \type ;
-  assign \$30  = ! (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:158" *) \type ;
-  assign \$32  = request == (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:159" *) 6'h0b;
-  assign \$34  = \$30  & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:158" *) \$32 ;
+  assign \$30  = ! (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:177" *) \type ;
+  assign \$32  = request == (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:178" *) 6'h0b;
+  assign \$34  = \$30  & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:177" *) \$32 ;
   assign \$29  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:135" *) \$36 ;
   assign \$39  = data_requested | (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:255" *) status_requested;
   assign \$41  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *) \type ;
@@ -2962,7 +5175,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
   assign \$53  = recipient != (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:170" *) 3'h2;
   assign \$55  = | (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:171" *) value;
   assign \$57  = \$53  | (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:170" *) \$55 ;
-  assign \$5  = ! (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:158" *) \type ;
+  assign \$5  = ! (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:177" *) \type ;
   assign \$59  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *) \type ;
   assign \$61  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *) \type ;
   assign \$63  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *) \type ;
@@ -2973,7 +5186,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
   assign \$73  = recipient != (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:170" *) 3'h2;
   assign \$75  = | (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:171" *) value;
   assign \$77  = \$73  | (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:170" *) \$75 ;
-  assign \$7  = request == (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:159" *) 6'h0b;
+  assign \$7  = request == (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:178" *) 6'h0b;
   assign \$79  = data_requested | (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:255" *) status_requested;
   assign \$81  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *) \type ;
   assign \$83  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *) \type ;
@@ -3012,7 +5225,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     .valid(transmitter_valid)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     transmitter_ready = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$61 ) begin
@@ -3050,7 +5263,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     transmitter_datum_0 = 8'h00;
     transmitter_datum_1 = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
@@ -3089,7 +5302,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     transmitter_max_length = 2'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$65 ) begin
@@ -3127,7 +5340,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     transmitter_start = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$67 ) begin
@@ -3171,7 +5384,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     \ack$1  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$69 ) begin
@@ -3218,7 +5431,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     stall = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$71 ) begin
@@ -3270,7 +5483,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     clear_endpoint_halt = 6'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$81 ) begin
@@ -3297,7 +5510,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     address_changed = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$83 ) begin
@@ -3326,7 +5539,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     new_address = 7'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$85 ) begin
@@ -3355,7 +5568,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     claim = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$2 ) begin
@@ -3363,7 +5576,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     config_changed = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$87 ) begin
@@ -3396,7 +5609,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     new_config = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$89 ) begin
@@ -3429,7 +5642,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     get_descriptor_ready = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$93 ) begin
@@ -3463,7 +5676,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     get_descriptor_start = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$95 ) begin
@@ -3500,7 +5713,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     \expecting_ack$next  = expecting_ack;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$97 ) begin
@@ -3551,7 +5764,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     \get_descriptor_start_position$next  = get_descriptor_start_position;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$14 ) begin
@@ -3592,7 +5805,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     \tx_data_pid$next  = tx_data_pid;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$21 ) begin
@@ -3633,7 +5846,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$27 ) begin
@@ -3737,7 +5950,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     valid = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$41 ) begin
@@ -3789,7 +6002,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     first = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$49 ) begin
@@ -3827,7 +6040,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     last = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$51 ) begin
@@ -3879,7 +6092,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler (usb_rst
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$5 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
     payload = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/standard.py:113" *)
     if (\$59 ) begin
@@ -3925,7 +6138,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_descriptor (usb_rst, value, length, start_position, valid, first, last, payload, ready, stall, start, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$6  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$8  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:405" *)
   wire [16:0] \$10 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:445" *)
@@ -4142,10 +6355,10 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
   wire [10:0] start_position;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:358" *)
   wire [7:0] type_number;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/__init__.py:58" *)
@@ -4378,7 +6591,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
   assign \$83  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:526" *) \$94 ;
   assign \$98  = position_in_stream + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:528" *) 1'h1;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     valid = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4409,7 +6622,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     payload = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4436,7 +6649,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     first = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4463,7 +6676,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     last = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4494,7 +6707,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:396" *)
     if (\$4 ) begin
@@ -4508,7 +6721,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     \bytes_sent$next  = bytes_sent;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4545,7 +6758,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     rom_r_addr = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4586,7 +6799,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4656,7 +6869,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     \position_in_stream$next  = position_in_stream;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4693,7 +6906,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     stall = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4720,7 +6933,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     \descriptor_data_base_address$next  = descriptor_data_base_address;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4759,7 +6972,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$6 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
     \descriptor_length$next  = descriptor_length;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
@@ -4814,7 +7027,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.transmitter (usb_rst, valid, first, last, payload, ready, datum_0, datum_1, max_length, start, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$7  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$9  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:407" *)
   wire \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:410" *)
@@ -4901,10 +7114,10 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.transmit
   wire start_position;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:422" *)
   reg \start_position$17 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/__init__.py:58" *)
@@ -4936,7 +7149,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.transmit
     fsm_state <= \fsm_state$next ;
   assign \$7  = + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:404" *) position_in_stream;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:425" *)
     if (\$18 ) begin
@@ -4946,7 +7159,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.transmit
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
     \position_in_stream$next  = position_in_stream;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:436" *)
     casez (fsm_state)
@@ -4971,7 +7184,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.transmit
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:436" *)
     casez (fsm_state)
@@ -5005,7 +7218,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.transmit
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
     payload = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:436" *)
     casez (fsm_state)
@@ -5027,7 +7240,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.transmit
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$7 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
     done = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:436" *)
     casez (fsm_state)
@@ -5056,7 +7269,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, recipient, \type , is_in_request, request, value, index, length, data_requested, status_requested, rx_ready_for_response, claim, valid, first, last, payload, ready, ack, stall, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$8  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$10  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
   wire \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:133" *)
@@ -5347,10 +7560,10 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/interface.py:30" *)
   input [1:0] \type ;
   wire [1:0] \type ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/__init__.py:58" *)
@@ -5485,7 +7698,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     .valid(transmitter_valid)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     \interface_settings_changed$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$1 ) begin
@@ -5500,7 +7713,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     claim = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$13 ) begin
@@ -5515,7 +7728,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     transmitter_datum_0 = 8'h00;
     transmitter_datum_1 = 8'h00;
     transmitter_datum_2 = 8'h00;
@@ -5551,7 +7764,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     \output_interface_altsetting_nr$next  = output_interface_altsetting_nr;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$25 ) begin
@@ -5572,7 +7785,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     transmitter_max_length = 14'h0000;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$129 ) begin
@@ -5595,7 +7808,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     stall = 1'h0;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
@@ -5643,7 +7856,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     transmitter_start = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$183 ) begin
@@ -5666,7 +7879,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     \input_interface_altsetting_nr$next  = input_interface_altsetting_nr;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$37 ) begin
@@ -5690,7 +7903,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     ack = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$49 ) begin
@@ -5720,7 +7933,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     valid = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$61 ) begin
@@ -5744,7 +7957,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     last = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$73 ) begin
@@ -5768,7 +7981,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     first = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$85 ) begin
@@ -5785,7 +7998,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     payload = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$91 ) begin
@@ -5802,7 +8015,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers (usb_rst, r
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
     transmitter_ready = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/gateware/requesthandlers.py:38" *)
     if (\$97 ) begin
@@ -5823,7 +8036,7 @@ endmodule
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers.transmitter (usb_rst, valid, first, last, payload, ready, datum_0, datum_1, datum_2, datum_3, datum_4, datum_5, datum_6, datum_7, datum_8, datum_9, datum_10, datum_11, datum_12, datum_13, max_length
 , start, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$9  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$11  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:407" *)
   wire \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:410" *)
@@ -5946,10 +8159,10 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers.transmitter
   wire [3:0] start_position;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:422" *)
   reg [3:0] \start_position$17 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/__init__.py:58" *)
@@ -5982,7 +8195,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers.transmitter
   assign \$5  = position_in_stream == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:409" *) 4'hd;
   assign \$7  = + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:404" *) position_in_stream;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$11 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:425" *)
     if (\$18 ) begin
@@ -5992,7 +8205,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers.transmitter
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$11 ) begin end
     \position_in_stream$next  = position_in_stream;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:436" *)
     casez (fsm_state)
@@ -6017,7 +8230,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers.transmitter
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$11 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:436" *)
     casez (fsm_state)
@@ -6051,7 +8264,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers.transmitter
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$11 ) begin end
     payload = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:436" *)
     casez (fsm_state)
@@ -6097,7 +8310,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.UAC2RequestHandlers.transmitter
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$9 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$11 ) begin end
     done = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/generator.py:436" *)
     casez (fsm_state)
@@ -6129,7 +8342,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
 , rx_invalid, status_requested, \recipient$6 , \type$7 , \request$8 , \value$9 , \index$10 , \length$11 , \received$12 , \data_requested$13 , \status_requested$14 , \ack$15 , \active_config$16 , \recipient$17 , \type$18 , \is_in_request$19 , \request$20 , \value$21 , \index$22 , \length$23 , \data_requested$24 
 , \status_requested$25 , \rx_ready_for_response$26 , claim, \claim$27 , \valid$28 , \first$29 , \last$30 , \payload$31 , \ready$32 , \tx_data_pid$33 , \ack$34 , \stall$35 , \address_changed$36 , \new_address$37 , \config_changed$38 , \new_config$39 , \clear_endpoint_halt$40 , \valid$41 , \first$42 , \last$43 , \payload$44 
 , \ready$45 , \ack$46 , \stall$47 , recipient);
-  reg \$auto$verilog_backend.cc:2334:dump_module$10  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$12  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:53" *)
   output ack;
   reg ack;
@@ -6607,7 +8820,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     .status_requested(stall_handler_status_requested)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6624,7 +8837,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6641,7 +8854,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6658,7 +8871,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6675,7 +8888,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6692,7 +8905,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6709,7 +8922,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     \ready$45  = 1'h0;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
@@ -6723,7 +8936,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     \ready$142  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:415" *)
     if (encoder_n) begin
@@ -6731,7 +8944,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6748,7 +8961,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6765,7 +8978,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6782,7 +8995,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6799,7 +9012,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     \ready$32  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6809,7 +9022,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux (\type , is_in_requ
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$10 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:409" *)
     casez (encoder_o)
@@ -6946,7 +9159,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux.encoder (o, n, i);
-  reg \$auto$verilog_backend.cc:2334:dump_module$11  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$13  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:34" *)
   input [1:0] i;
   wire [1:0] i;
@@ -6957,7 +9170,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux.encoder (o, n, i);
   output o;
   reg o;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$11 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
     o = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:40" *)
     casez (i)
@@ -6970,7 +9183,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux.encoder (o, n, i);
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$11 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
     n = 1'h0;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:40" *)
@@ -6990,7 +9203,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux.stall_handler (status_requested, stall, data_requested);
-  reg \$auto$verilog_backend.cc:2334:dump_module$12  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$14  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:448" *)
   wire \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:73" *)
@@ -7004,7 +9217,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.request_mux.stall_handler (stat
   wire status_requested;
   assign \$1  = data_requested | (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:448" *) status_requested;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$12 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
     stall = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:448" *)
     if (\$1 ) begin
@@ -7016,7 +9229,7 @@ endmodule
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data, rx_valid, rx_active, start, crc, pid, new_token, speed, tx_allowed, \start$1 , recipient, \type , is_in_request, request, value, index, length, received, ack, usb_clk
 );
-  reg \$auto$verilog_backend.cc:2334:dump_module$13  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$15  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:250" *)
   wire \$10 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:250" *)
@@ -7141,10 +9354,10 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data
   reg [1:0] \type  = 2'h0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/interface.py:30" *)
   reg [1:0] \type$next ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/request/interface.py:30" *)
@@ -7204,7 +9417,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data
     .usb_rst(usb_rst)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
     \index$next  = index;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:201" *)
     casez (fsm_state)
@@ -7229,7 +9442,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
     \length$next  = length;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:201" *)
     casez (fsm_state)
@@ -7254,7 +9467,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
     ack = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:201" *)
     casez (fsm_state)
@@ -7285,7 +9498,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
     \received$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:201" *)
     casez (fsm_state)
@@ -7310,7 +9523,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:201" *)
     casez (fsm_state)
@@ -7360,7 +9573,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
     \recipient$next  = recipient;
     \type$next  = \type ;
     \is_in_request$next  = is_in_request;
@@ -7389,7 +9602,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
     \request$next  = request;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:201" *)
     casez (fsm_state)
@@ -7414,7 +9627,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder (usb_rst, rx_data
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$13 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
     \value$next  = value;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/request.py:201" *)
     casez (fsm_state)
@@ -7445,7 +9658,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb_rst, rx_data, rx_valid, rx_active, start, crc, new_packet, length, packet_0, packet_1, packet_2, packet_3, packet_4, packet_5, packet_6, packet_7, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$14  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$16  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1041" *)
   wire \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1041" *)
@@ -7679,10 +9892,10 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:74" *)
   output start;
   reg start;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   assign \$9  = rx_data[3:0] == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1003" *) \$7 ;
@@ -7788,7 +10001,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
   assign \$96  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1041" *) rx_active;
   assign \$98  = last_word_crc == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1043" *) last_word;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \new_packet$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -7817,7 +10030,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     start = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -7832,7 +10045,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \last_word$next  = last_word;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -7863,7 +10076,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \last_word_crc$next  = last_word_crc;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -7894,7 +10107,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \last_byte_crc$next  = last_byte_crc;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -7925,7 +10138,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \packet_id$next  = packet_id;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -7954,7 +10167,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \length$next  = length;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -7983,7 +10196,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \fsm_state$next  = fsm_state;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
@@ -8043,7 +10256,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \packet_0$next  = packet_0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8072,7 +10285,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \packet_1$next  = packet_1;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8101,7 +10314,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \packet_2$next  = packet_2;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8130,7 +10343,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \packet_3$next  = packet_3;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8159,7 +10372,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \packet_4$next  = packet_4;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8188,7 +10401,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \packet_5$next  = packet_5;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8217,7 +10430,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \packet_6$next  = packet_6;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8246,7 +10459,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \packet_7$next  = packet_7;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8275,7 +10488,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \active_pid$next  = active_pid;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8301,7 +10514,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \position_in_packet$next  = position_in_packet;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:985" *)
     casez (fsm_state)
@@ -8339,7 +10552,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.setup_decoder.data_handler (usb
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$14 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
     \$signal$next  = \$signal ;
     \$signal$48$next  = \$signal$48 ;
     \$signal$49$next  = \$signal$49 ;
@@ -8416,7 +10629,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint, ready_for_response, new_frame, is_in, valid, tx_pid_toggle, payload, first, last, ready, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$15  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$17  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:185" *)
   wire [12:0] \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:162" *)
@@ -8530,10 +10743,10 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoint.py:104" *)
   output [1:0] tx_pid_toggle;
   wire [1:0] tx_pid_toggle;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/__init__.py:58" *)
@@ -8578,7 +10791,7 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
     fsm_state <= \fsm_state$next ;
   assign \$7  = bytes_left_in_packet <= (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:160" *) 1'h1;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
     \bytes_left_in_frame$next  = bytes_left_in_frame;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:96" *)
     if (new_frame) begin
@@ -8604,7 +10817,7 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
     \bytes_left_in_packet$next  = bytes_left_in_packet;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:96" *)
     if (new_frame) begin
@@ -8634,7 +10847,7 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
     last = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:133" *)
     casez (fsm_state)
@@ -8653,7 +10866,7 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
     \next_data_pid$next  = next_data_pid;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:96" *)
     if (new_frame) begin
@@ -8690,7 +10903,7 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
     \address$next  = address;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:133" *)
     casez (fsm_state)
@@ -8709,7 +10922,7 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
     \first$next  = first;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:133" *)
     casez (fsm_state)
@@ -8740,7 +10953,7 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
     next_address = 12'h000;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:133" *)
     casez (fsm_state)
@@ -8761,7 +10974,7 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:133" *)
     casez (fsm_state)
@@ -8799,7 +11012,7 @@ module \usb_avb_subsystem.usb.USBIsochronousInMemoryEndpoint (usb_rst, endpoint,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$15 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
     valid = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:133" *)
     casez (fsm_state)
@@ -8831,7 +11044,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint (isochronous_endpoint1__valid, isochronous_endpoint1__first, isochronous_endpoint1__last, isochronous_endpoint1__payload, isochronous_endpoint1__ready, usb_rst, endpoint, is_out, valid, next, payload, rx_complete, rx_invalid, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$16  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$18  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:515" *)
   wire \$10 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:516" *)
@@ -8939,10 +11152,10 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint (isochronous_endpo
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoint.py:100" *)
   input rx_invalid;
   wire rx_invalid;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:69" *)
@@ -8994,7 +11207,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint (isochronous_endpo
     .write_en(fifo_write_en)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$16 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$18 ) begin end
     \is_first_byte$next  = is_first_byte;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoints/isochronous.py:506" *)
     if (\$4 ) begin
@@ -9026,7 +11239,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector (usb_rst, valid, next, payload, complete_in, invalid_in, \payload$1 , last, first, \next$2 , \valid$3 , complete_out, invalid_out, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$17  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$19  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:212" *)
   wire \$10 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:228" *)
@@ -9119,10 +11332,10 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
   reg [7:0] \payload$1  = 8'h00;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:69" *)
   reg [7:0] \payload$1$next ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:69" *)
@@ -9173,7 +11386,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
   assign \$6  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:228" *) valid;
   assign \$8  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:228" *) valid;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \valid$3$next  = \valid$3 ;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9192,7 +11405,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \first$next  = first;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9224,7 +11437,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9253,7 +11466,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \payload$1$next  = \payload$1 ;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9281,7 +11494,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \last$next  = last;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9307,7 +11520,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \next$2$next  = \next$2 ;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9340,7 +11553,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \buffered_complete$next  = buffered_complete;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9359,7 +11572,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \buffered_invalid$next  = buffered_invalid;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9378,7 +11591,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \complete_out$next  = complete_out;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9401,7 +11614,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \invalid_out$next  = invalid_out;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9424,7 +11637,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \buffered_byte$next  = buffered_byte;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9449,7 +11662,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.boundary_detector 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$17 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
     \is_first_byte$next  = is_first_byte;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:167" *)
     casez (fsm_state)
@@ -9477,7 +11690,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, write_data, write_en, space_available, write_commit, write_discard, empty, read_data, read_en, read_commit, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$18  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$20  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:120" *)
   wire \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:144" *)
@@ -9575,10 +11788,10 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, wri
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:99" *)
   output [8:0] space_available;
   reg [8:0] space_available;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:95" *)
@@ -10085,7 +12298,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, wri
   assign \$5  = current_write_pointer == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:137" *) 9'h1c0;
   assign \$8  = current_write_pointer + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:140" *) 1'h1;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$18 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
     \committed_read_pointer$next  = committed_read_pointer;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:189" *)
     if (read_commit) begin
@@ -10097,7 +12310,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, wri
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$18 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:208" *)
     if (full) begin
@@ -10109,7 +12322,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, wri
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$18 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:137" *)
     if (\$5 ) begin
@@ -10119,7 +12332,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, wri
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$18 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
     \current_write_pointer$next  = current_write_pointer;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:144" *)
     if (\$12 ) begin
@@ -10135,7 +12348,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, wri
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$18 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
     \committed_write_pointer$next  = committed_write_pointer;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:148" *)
     if (write_commit) begin
@@ -10147,7 +12360,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, wri
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$18 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:169" *)
     if (\$14 ) begin
@@ -10157,7 +12370,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, wri
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$18 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:178" *)
     if (\$21 ) begin
@@ -10167,7 +12380,7 @@ module \usb_avb_subsystem.usb.USBIsochronousOutStreamEndpoint.fifo (usb_rst, wri
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$18 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
     \current_read_pointer$next  = current_read_pointer;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/memory.py:185" *)
     if (\$25 ) begin
@@ -10198,7 +12411,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.data_crc (usb_rst, rx_data, rx_valid, tx_valid, tx_data, start, crc, \start$1 , \crc$2 , \start$3 , \crc$4 , usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$19  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$21  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:585" *)
   wire \$10 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:596" *)
@@ -10513,10 +12726,10 @@ module \usb_avb_subsystem.usb.data_crc (usb_rst, rx_data, rx_valid, tx_valid, tx
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:561" *)
   input tx_valid;
   wire tx_valid;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   assign \$100  = \$96  ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:596" *) \$98 ;
@@ -10661,7 +12874,7 @@ module \usb_avb_subsystem.usb.data_crc (usb_rst, rx_data, rx_valid, tx_valid, tx
   assign \$96  = rx_data[1] ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:585" *) rx_data[2];
   assign \$98  = \crc$5 [13] ^ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:585" *) \crc$5 [14];
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$19 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$21 ) begin end
     \crc$5$next  = \crc$5 ;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:624" *)
     if (\$8 ) begin
@@ -10689,7 +12902,7 @@ module \usb_avb_subsystem.usb.endpoint_mux (usb_rst, pid, address, endpoint, new
 , \is_ping$25 , \valid$26 , \next$27 , \payload$28 , \rx_ready_for_response$29 , \rx_invalid$30 , \speed$31 , \active_config$32 , \endpoint$33 , \is_out$34 , \valid$35 , \next$36 , \payload$37 , \rx_complete$38 , \rx_invalid$39 , \endpoint$40 , \ready_for_response$41 , \new_frame$42 , \is_in$43 , \address_changed$44 , \new_address$45 
 , \config_changed$46 , \new_config$47 , \ack$48 , \nak$49 , \stall$50 , \start$51 , \start$52 , clear_endpoint_halt_out, \valid$53 , \valid$54 , \tx_pid_toggle$55 , \tx_pid_toggle$56 , \payload$57 , \payload$58 , \first$59 , \first$60 , \last$61 , \last$62 , \ready$63 , \ready$64 , usb_clk
 );
-  reg \$auto$verilog_backend.cc:2334:dump_module$20  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$22  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoint.py:194" *)
   wire \$127 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoint.py:194" *)
@@ -11199,10 +13412,10 @@ module \usb_avb_subsystem.usb.endpoint_mux (usb_rst, pid, address, endpoint, new
   wire \tx_timeout$9 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:150" *)
   wire \tx_timeout$95 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:69" *)
@@ -11248,7 +13461,7 @@ module \usb_avb_subsystem.usb.endpoint_mux (usb_rst, pid, address, endpoint, new
     .\valid$3 (\valid$54 )
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$22 ) begin end
     \past_valid$next  = { \valid$54 , 1'h0, \valid$53  };
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
     if (usb_rst) begin
@@ -11256,7 +13469,7 @@ module \usb_avb_subsystem.usb.endpoint_mux (usb_rst, pid, address, endpoint, new
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$22 ) begin end
     tx_pid_toggle = 2'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoint.py:279" *)
     if (\$187 ) begin
@@ -11268,7 +13481,7 @@ module \usb_avb_subsystem.usb.endpoint_mux (usb_rst, pid, address, endpoint, new
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$22 ) begin end
     address_changed = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoint.py:173" *)
     if (\address_changed$44 ) begin
@@ -11280,7 +13493,7 @@ module \usb_avb_subsystem.usb.endpoint_mux (usb_rst, pid, address, endpoint, new
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$22 ) begin end
     new_address = 7'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoint.py:173" *)
     if (\address_changed$44 ) begin
@@ -11292,7 +13505,7 @@ module \usb_avb_subsystem.usb.endpoint_mux (usb_rst, pid, address, endpoint, new
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$22 ) begin end
     config_changed = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoint.py:173" *)
     if (\config_changed$46 ) begin
@@ -11304,7 +13517,7 @@ module \usb_avb_subsystem.usb.endpoint_mux (usb_rst, pid, address, endpoint, new
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$20 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$22 ) begin end
     new_config = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/endpoint.py:173" *)
     if (\config_changed$46 ) begin
@@ -11469,7 +13682,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.endpoint_mux.tx_mux (first, last, payload, ready, \valid$1 , \valid$2 , \valid$3 , \payload$4 , \payload$5 , \first$6 , \first$7 , \last$8 , \last$9 , \ready$10 , \ready$11 , valid);
-  reg \$auto$verilog_backend.cc:2334:dump_module$21  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$23  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/utils/bus.py:133" *)
   wire \$13 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/utils/bus.py:133" *)
@@ -11557,7 +13770,7 @@ module \usb_avb_subsystem.usb.endpoint_mux.tx_mux (first, last, payload, ready, 
     .o(encoder_o)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$21 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$23 ) begin end
     payload = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/utils/bus.py:112" *)
     casez (encoder_o)
@@ -11593,7 +13806,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.endpoint_mux.tx_mux.encoder (o, i);
-  reg \$auto$verilog_backend.cc:2334:dump_module$22  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$24  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:34" *)
   input [2:0] i;
   wire [2:0] i;
@@ -11603,7 +13816,7 @@ module \usb_avb_subsystem.usb.endpoint_mux.tx_mux.encoder (o, i);
   output [1:0] o;
   reg [1:0] o;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$22 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$24 ) begin end
     o = 2'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:40" *)
     casez (i)
@@ -11619,7 +13832,7 @@ module \usb_avb_subsystem.usb.endpoint_mux.tx_mux.encoder (o, i);
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$22 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$24 ) begin end
     n = 1'h0;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:40" *)
@@ -11642,7 +13855,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.handshake_detector (usb_rst, rx_data, rx_valid, ack, nak, stall, nyet, rx_active, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$23  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$25  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:492" *)
   wire \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:496" *)
@@ -11712,10 +13925,10 @@ module \usb_avb_subsystem.usb.handshake_detector (usb_rst, rx_data, rx_valid, ac
   reg stall = 1'h0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:53" *)
   reg \stall$next ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   assign \$9  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:492" *) rx_active;
@@ -11747,7 +13960,7 @@ module \usb_avb_subsystem.usb.handshake_detector (usb_rst, rx_data, rx_valid, ac
   assign \$5  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:492" *) rx_active;
   assign \$7  = active_pid == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:495" *) 4'ha;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$23 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
     \ack$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:459" *)
     casez (fsm_state)
@@ -11773,7 +13986,7 @@ module \usb_avb_subsystem.usb.handshake_detector (usb_rst, rx_data, rx_valid, ac
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$23 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
     \nak$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:459" *)
     casez (fsm_state)
@@ -11799,7 +14012,7 @@ module \usb_avb_subsystem.usb.handshake_detector (usb_rst, rx_data, rx_valid, ac
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$23 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
     \stall$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:459" *)
     casez (fsm_state)
@@ -11825,7 +14038,7 @@ module \usb_avb_subsystem.usb.handshake_detector (usb_rst, rx_data, rx_valid, ac
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$23 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
     \nyet$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:459" *)
     casez (fsm_state)
@@ -11851,7 +14064,7 @@ module \usb_avb_subsystem.usb.handshake_detector (usb_rst, rx_data, rx_valid, ac
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$23 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
     \fsm_state$next  = fsm_state;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:459" *)
@@ -11901,7 +14114,7 @@ module \usb_avb_subsystem.usb.handshake_detector (usb_rst, rx_data, rx_valid, ac
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$23 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
     \active_pid$next  = active_pid;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:459" *)
     casez (fsm_state)
@@ -11930,7 +14143,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.handshake_generator (usb_rst, issue_ack, issue_nak, issue_stall, valid, data, ready, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$24  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$26  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:54" *)
   output [7:0] data;
   reg [7:0] data = 8'h00;
@@ -11952,10 +14165,10 @@ module \usb_avb_subsystem.usb.handshake_generator (usb_rst, issue_ack, issue_nak
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:54" *)
   input ready;
   wire ready;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:54" *)
@@ -11966,7 +14179,7 @@ module \usb_avb_subsystem.usb.handshake_generator (usb_rst, issue_ack, issue_nak
   always @(posedge usb_clk)
     fsm_state <= \fsm_state$next ;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$24 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1277" *)
     casez (fsm_state)
@@ -11981,7 +14194,7 @@ module \usb_avb_subsystem.usb.handshake_generator (usb_rst, issue_ack, issue_nak
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$24 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
     \data$next  = data;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1277" *)
     casez (fsm_state)
@@ -12009,7 +14222,7 @@ module \usb_avb_subsystem.usb.handshake_generator (usb_rst, issue_ack, issue_nak
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$24 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
     \fsm_state$next  = fsm_state;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1277" *)
@@ -12048,7 +14261,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next, payload, packet_complete, crc_mismatch, ready_for_response, active_pid, rx_active, start, crc, \start$1 , tx_allowed, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$25  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$27  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:772" *)
   wire \$10 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:777" *)
@@ -12166,10 +14379,10 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:150" *)
   input tx_allowed;
   wire tx_allowed;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/stream.py:69" *)
@@ -12218,7 +14431,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
   assign \$6  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:853" *) rx_active;
   assign \$8  = last_word_crc == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:856" *) data_pipeline;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     \packet_complete$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12255,7 +14468,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     \crc_mismatch$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12294,7 +14507,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     payload = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12324,7 +14537,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     \packet_id$next  = packet_id;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12361,7 +14574,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     \start$1  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12394,7 +14607,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     ready_for_response = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12428,7 +14641,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     next = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12458,7 +14671,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     start = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12473,7 +14686,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12555,7 +14768,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     \active_pid$next  = active_pid;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12581,7 +14794,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     \data_pipeline$next  = data_pipeline;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12623,7 +14836,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     \last_byte_crc$next  = last_byte_crc;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12663,7 +14876,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     \last_word_crc$next  = last_word_crc;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12700,7 +14913,7 @@ module \usb_avb_subsystem.usb.receiver (usb_rst, rx_data, rx_valid, valid, next,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$25 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
     valid = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:758" *)
     casez (fsm_state)
@@ -12730,7 +14943,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected, line_state, disconnect, bus_reset, low_speed_only, full_speed_only, operating_mode, current_speed, termination_select, suspended, valid, data, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$26  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$28  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:29" *)
   wire [18:0] \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:267" *)
@@ -12988,10 +15201,10 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
   reg [17:0] timer = 18'h00000;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:147" *)
   reg [17:0] \timer$next ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:54" *)
@@ -13124,7 +15337,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
   assign \$95  = timer == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:267" *) 18'h2bf20;
   assign \$97  = full_speed_only | (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:280" *) low_speed_only;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     \timer$next  = \$2 [17:0];
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
     casez (fsm_state)
@@ -13245,7 +15458,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     \line_state_time$next  = \$37 [17:0];
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
     casez (fsm_state)
@@ -13345,7 +15558,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     data = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
     casez (fsm_state)
@@ -13380,7 +15593,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     \valid_pairs$next  = valid_pairs;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
     casez (fsm_state)
@@ -13446,7 +15659,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     suspended = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
     casez (fsm_state)
@@ -13513,7 +15726,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     \tddis$next  = tddis;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
@@ -13598,7 +15811,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:170" *)
     if (\$63 ) begin
@@ -13610,7 +15823,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     \current_speed$next  = current_speed;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
@@ -13701,7 +15914,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     \fsm_state$next  = fsm_state;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
@@ -13911,7 +16124,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     bus_reset = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
     casez (fsm_state)
@@ -14001,7 +16214,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     \was_hs_pre_suspend$next  = was_hs_pre_suspend;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
     casez (fsm_state)
@@ -14077,7 +16290,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     \operating_mode$next  = operating_mode;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
@@ -14162,7 +16375,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     \termination_select$next  = termination_select;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
@@ -14244,7 +16457,7 @@ module \usb_avb_subsystem.usb.reset_sequencer (usb_rst, bus_busy, vbus_connected
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$26 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
     valid = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/reset.py:184" *)
     casez (fsm_state)
@@ -14285,7 +16498,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.timer (usb_rst, speed, start, tx_allowed, \start$1 , \tx_allowed$2 , tx_timeout, rx_timeout, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$27  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$29  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1431" *)
   wire \$10 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1438" *)
@@ -14359,10 +16572,10 @@ module \usb_avb_subsystem.usb.timer (usb_rst, speed, start, tx_allowed, \start$1
   wire \tx_timeout$40 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1408" *)
   reg tx_to_rx_timeout;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   assign \$10  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1431" *) speed;
@@ -14386,7 +16599,7 @@ module \usb_avb_subsystem.usb.timer (usb_rst, speed, start, tx_allowed, \start$1
   assign \$5  = counter < (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1423" *) 10'h281;
   assign \$8  = counter + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1424" *) 1'h1;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$29 ) begin end
     \counter$next  = counter;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1421" *)
     if (\$3 ) begin
@@ -14400,7 +16613,7 @@ module \usb_avb_subsystem.usb.timer (usb_rst, speed, start, tx_allowed, \start$1
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$29 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1431" *)
     if (\$10 ) begin
@@ -14412,7 +16625,7 @@ module \usb_avb_subsystem.usb.timer (usb_rst, speed, start, tx_allowed, \start$1
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$29 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1431" *)
     if (\$20 ) begin
@@ -14424,7 +16637,7 @@ module \usb_avb_subsystem.usb.timer (usb_rst, speed, start, tx_allowed, \start$1
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$27 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$29 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1431" *)
     if (\$30 ) begin
@@ -14446,7 +16659,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_valid, speed, pid, \address$1 , endpoint, new_token, ready_for_response, frame, new_frame, is_in, is_out, is_setup, is_ping, rx_active, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$28  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$30  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:366" *)
   wire \$10 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:305" *)
@@ -14723,10 +16936,10 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
   reg [10:0] token_data = 11'h000;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:262" *)
   reg [10:0] \token_data$next ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   assign \$100  = ~ (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:305" *) rx_active;
@@ -14854,7 +17067,7 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
     .usb_rst(usb_rst)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
     \token_data$next  = token_data;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:294" *)
     casez (fsm_state)
@@ -14892,7 +17105,7 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
     \frame$next  = frame;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:294" *)
     casez (fsm_state)
@@ -14929,7 +17142,7 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
     \pid$next  = pid;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:294" *)
     casez (fsm_state)
@@ -14974,7 +17187,7 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
     \address$1$next  = \address$1 ;
     \endpoint$next  = endpoint;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:294" *)
@@ -15018,7 +17231,7 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
     timer_start = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:294" *)
     casez (fsm_state)
@@ -15056,7 +17269,7 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
     \new_frame$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:294" *)
     casez (fsm_state)
@@ -15093,7 +17306,7 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
     \new_token$next  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:294" *)
     casez (fsm_state)
@@ -15135,7 +17348,7 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:294" *)
     casez (fsm_state)
@@ -15208,7 +17421,7 @@ module \usb_avb_subsystem.usb.token_detector (usb_rst, address, rx_data, rx_vali
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$28 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
     \current_pid$next  = current_pid;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:294" *)
     casez (fsm_state)
@@ -15243,7 +17456,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.token_detector.timer (usb_rst, speed, tx_allowed, start, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$29  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$31  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1423" *)
   wire \$1 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1434" *)
@@ -15303,10 +17516,10 @@ module \usb_avb_subsystem.usb.token_detector.timer (usb_rst, speed, tx_allowed, 
   wire tx_timeout;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1408" *)
   reg tx_to_rx_timeout;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   assign \$10  = counter == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1434" *) 1'h1;
@@ -15329,7 +17542,7 @@ module \usb_avb_subsystem.usb.token_detector.timer (usb_rst, speed, tx_allowed, 
   assign \$6  = ! (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1431" *) speed;
   assign \$8  = speed == (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1438" *) 2'h1;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$29 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$31 ) begin end
     \counter$next  = counter;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1421" *)
     if (start) begin
@@ -15343,7 +17556,7 @@ module \usb_avb_subsystem.usb.token_detector.timer (usb_rst, speed, tx_allowed, 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$29 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$31 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1431" *)
     if (\$6 ) begin
@@ -15355,7 +17568,7 @@ module \usb_avb_subsystem.usb.token_detector.timer (usb_rst, speed, tx_allowed, 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$29 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$31 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1431" *)
     if (\$16 ) begin
@@ -15367,7 +17580,7 @@ module \usb_avb_subsystem.usb.token_detector.timer (usb_rst, speed, tx_allowed, 
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$29 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$31 ) begin end
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1431" *)
     if (\$26 ) begin
@@ -15386,7 +17599,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload, ready, data_pid, start, data, \valid$1 , \ready$2 , crc, usb_clk);
-  reg \$auto$verilog_backend.cc:2334:dump_module$30  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$32  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1202" *)
   wire \$11 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1202" *)
@@ -15444,10 +17657,10 @@ module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload,
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:74" *)
   output start;
   reg start;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_clk;
   wire usb_clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:83" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:102" *)
   input usb_rst;
   wire usb_rst;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/stream/__init__.py:58" *)
@@ -15472,7 +17685,7 @@ module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload,
   assign \$5  = last & (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1161" *) valid;
   assign \$7  = first & (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1155" *) valid;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
     ready = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1143" *)
     casez (fsm_state)
@@ -15491,7 +17704,7 @@ module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
     \current_data_pid$next  = current_data_pid;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1143" *)
     casez (fsm_state)
@@ -15517,7 +17730,7 @@ module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
     \is_zlp$next  = is_zlp;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1143" *)
     casez (fsm_state)
@@ -15537,7 +17750,7 @@ module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
     \fsm_state$next  = fsm_state;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1143" *)
     casez (fsm_state)
@@ -15591,7 +17804,7 @@ module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload,
     end
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
     start = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1143" *)
     casez (fsm_state)
@@ -15606,7 +17819,7 @@ module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
     data = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1143" *)
     casez (fsm_state)
@@ -15633,7 +17846,7 @@ module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
     \valid$1  = 1'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1143" *)
     casez (fsm_state)
@@ -15660,7 +17873,7 @@ module \usb_avb_subsystem.usb.transmitter (usb_rst, valid, first, last, payload,
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$30 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
     \remaining_crc$next  = remaining_crc;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/packet.py:1143" *)
     casez (fsm_state)
@@ -15690,7 +17903,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.tx_multiplexer (valid, ready, \valid$1 , \data$2 , \data$3 , \valid$4 , \ready$5 , \valid$6 , \data$7 , \ready$8 , data);
-  reg \$auto$verilog_backend.cc:2334:dump_module$31  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$33  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/utils/bus.py:133" *)
   wire \$11 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/utils/bus.py:133" *)
@@ -15743,7 +17956,7 @@ module \usb_avb_subsystem.usb.tx_multiplexer (valid, ready, \valid$1 , \data$2 ,
     .o(encoder_o)
   );
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$31 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$33 ) begin end
     data = 8'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/utils/bus.py:112" *)
     casez (encoder_o)
@@ -15770,7 +17983,7 @@ endmodule
 
 (* generator = "Amaranth" *)
 module \usb_avb_subsystem.usb.tx_multiplexer.encoder (o, i);
-  reg \$auto$verilog_backend.cc:2334:dump_module$32  = 0;
+  reg \$auto$verilog_backend.cc:2334:dump_module$34  = 0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:34" *)
   input [2:0] i;
   wire [2:0] i;
@@ -15780,7 +17993,7 @@ module \usb_avb_subsystem.usb.tx_multiplexer.encoder (o, i);
   output [1:0] o;
   reg [1:0] o;
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$34 ) begin end
     o = 2'h0;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:40" *)
     casez (i)
@@ -15796,7 +18009,7 @@ module \usb_avb_subsystem.usb.tx_multiplexer.encoder (o, i);
     endcase
   end
   always @* begin
-    if (\$auto$verilog_backend.cc:2334:dump_module$32 ) begin end
+    if (\$auto$verilog_backend.cc:2334:dump_module$34 ) begin end
     n = 1'h0;
     (* full_case = 32'd1 *)
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/coding.py:40" *)

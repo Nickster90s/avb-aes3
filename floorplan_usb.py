@@ -49,7 +49,7 @@ import os
 # Eth TX cluster (X=51-62) is well clear of X<=40.
 USB_REGION = "usb_fp"
 USB_PREFIX = "usb_avb_subsystem"          # clean + $flatten\ -escaped names
-UX0, UY0, UX1, UY1 = 0, 10, 30, 70
+UX0, UY0, UX1, UY1 = 0, 0, 45, 156
 _u = os.environ.get("NEXTPNR_USB_REGION", "").strip()
 if _u:
     UX0, UY0, UX1, UY1 = (int(v) for v in _u.split(","))
@@ -82,21 +82,88 @@ ctx.createRectangularRegion(USB_REGION, UX0, UY0, UX1, UY1)
 if _eth_on:
     ctx.createRectangularRegion(ETH_REGION, EX0, EY0, EX1, EY1)
 
+# ---------------------------------------------------------------------------
+# NET-CONNECTIVITY matching (the fix, 2026-05-28).
+#
+# Matching cells by name (`USB_PREFIX in cname`) catches only ~2% of the
+# USB subsystem (388 / 18019 cells). yosys+ABC rename the bulk of the
+# combinational logic to anonymous forms like `$auto$alumacc.cc:...` and
+# `$abc$...$lut$aiger...` that DON'T carry the `usb_avb_subsystem`
+# hierarchy — so the floorplan was leaving ~95% of USB cells (incl. the
+# cd_usb-critical get_descriptor compare) to float wherever the placer
+# liked. That's why USB enumeration was a per-build lottery and why the
+# get_descriptor path spilled to X74 and dropped cd_usb to 54.5 MHz.
+#
+# But the NETS keep their hierarchy names (1584 / 22860 match the
+# prefix). And `net.driver.cell` + `net.users[i].cell` reach the actual
+# cells — including the anonymous `$auto$`/`$abc aiger` ones connected to
+# USB nets. So: walk every usb-named net, pull its driver + all user
+# cells into the region. This catches the floating soup by connectivity
+# instead of by name.
+#
+# IOBs / already-located cells can't be region-constrained; constrain in
+# a try/except and skip failures (the ULPI pins keep their pinned LOC).
+# ---------------------------------------------------------------------------
+_constrained = set()
+
+# Only region-constrain FABRIC LOGIC. BRAM / DSP / IOB / clock primitives
+# live in fixed device columns; pinning them into a narrow rectangle makes
+# the analytic placer thrash trying to legalise (the same 90-min hang the
+# eth-box LUTRAM caused). The cd_usb critical path is the get_descriptor
+# LUT/carry compare — fabric logic — so constraining LUT/FF/CARRY is what
+# matters; the 3 USB BRAMs + 11 ULPI IOBs float to their natural columns.
+_CONSTRAIN_TYPES = ("SLICE_LUTX", "SLICE_FFX", "CARRY4", "SELMUX2")
+def _constrainable(cell):
+    t = getattr(cell, "type", "") or ""
+    return any(t.startswith(p) for p in _CONSTRAIN_TYPES)
+
+def _pull(cell, region):
+    """Constrain a fabric-logic cell into a region; dedup + skip the rest."""
+    if cell is None or not _constrainable(cell):
+        return 0
+    nm = cell.name
+    if nm in _constrained:
+        return 0
+    try:
+        ctx.constrainCellToRegion(nm, region)
+        _constrained.add(nm)
+        return 1
+    except Exception:
+        return 0   # already-located / packed — leave it be
+
 nu = ne = 0
+
+# Pass 1 — direct name match (fast path for the cells that DO carry the
+# prefix: named FFs, ROM-derived ABC luts).
 for cname, cell in ctx.cells:
     if USB_PREFIX in cname:
-        ctx.constrainCellToRegion(cname, USB_REGION)
-        nu += 1
+        nu += _pull(cell, USB_REGION)
     elif _eth_on and _matches_eth(cname):
-        ctx.constrainCellToRegion(cname, ETH_REGION)
-        ne += 1
+        if cname not in _constrained:
+            try:
+                ctx.constrainCellToRegion(cname, ETH_REGION)
+                _constrained.add(cname)
+                ne += 1
+            except Exception:
+                pass
 
-print("[floorplan_usb] USB: %d cells -> %s (X %d..%d, Y %d..%d)"
-      % (nu, USB_REGION, UX0, UX1, UY0, UY1))
+# Pass 2 — net connectivity: pull driver + users of every usb-named net.
+# This is what catches the anonymous combinational soup.
+nnets = 0
+for nname, net in ctx.nets:
+    if USB_PREFIX not in nname:
+        continue
+    nnets += 1
+    drv = getattr(net, "driver", None)
+    if drv is not None:
+        nu += _pull(getattr(drv, "cell", None), USB_REGION)
+    for u in getattr(net, "users", []):
+        nu += _pull(getattr(u, "cell", None), USB_REGION)
+
+print("[floorplan_usb] USB: %d cells (via %d nets + name match) -> %s (X %d..%d, Y %d..%d)"
+      % (nu, nnets, USB_REGION, UX0, UX1, UY0, UY1))
 if _eth_on:
     print("[floorplan_usb] eth TX: %d cells -> %s (X %d..%d, Y %d..%d)"
           % (ne, ETH_REGION, EX0, EX1, EY0, EY1))
 if nu == 0:
-    print("[floorplan_usb] WARNING: 0 USB cells matched — name changed? no-op.")
-if _eth_on and ne == 0:
-    print("[floorplan_usb] WARNING: 0 eth TX cells matched — check substrings.")
+    print("[floorplan_usb] WARNING: 0 USB cells matched — prefix changed? no-op.")

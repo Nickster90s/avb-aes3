@@ -6244,13 +6244,13 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:415" *)
   wire \$52 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:531" *)
-  wire [8:0] \$55 ;
+  wire [7:0] \$55 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:531" *)
   wire [9:0] \$56 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:531" *)
   wire [9:0] \$57 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:531" *)
-  wire [8:0] \$59 ;
+  wire [7:0] \$59 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:395" *)
   wire [16:0] \$6 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:445" *)
@@ -6302,9 +6302,9 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:406" *)
   reg [15:0] \bytes_sent$next ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:410" *)
-  reg [7:0] descriptor_data_base_address = 8'h00;
+  reg [6:0] descriptor_data_base_address = 7'h00;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:410" *)
-  reg [7:0] \descriptor_data_base_address$next ;
+  reg [6:0] \descriptor_data_base_address$next ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:409" *)
   reg [15:0] descriptor_length = 16'h0000;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:409" *)
@@ -6339,7 +6339,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
   input ready;
   wire ready;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:372" *)
-  reg [7:0] rom_r_addr;
+  reg [6:0] rom_r_addr;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:372" *)
   wire [31:0] rom_r_data;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:372" *)
@@ -6367,25 +6367,25 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:186" *)
   input [15:0] value;
   wire [15:0] value;
-  reg [31:0] rom_read_port [132:0];
+  reg [31:0] rom_read_port [114:0];
   initial begin
     rom_read_port[0] = 32'd0;
     rom_read_port[1] = 32'd65552;
     rom_read_port[2] = 32'd65556;
     rom_read_port[3] = 32'd262168;
     rom_read_port[4] = 32'd1179688;
-    rom_read_port[5] = 32'd25624636;
-    rom_read_port[6] = 32'd262596;
-    rom_read_port[7] = 32'd1573320;
-    rom_read_port[8] = 32'd3146208;
-    rom_read_port[9] = 32'd262672;
+    rom_read_port[5] = 32'd20774972;
+    rom_read_port[6] = 32'd262524;
+    rom_read_port[7] = 32'd1573248;
+    rom_read_port[8] = 32'd3146136;
+    rom_read_port[9] = 32'd262600;
     rom_read_port[10] = 32'd302055426;
     rom_read_port[11] = 32'd4009886016;
     rom_read_port[12] = 32'd152220138;
     rom_read_port[13] = 32'd16777474;
     rom_read_port[14] = 32'd50397184;
-    rom_read_port[15] = 32'd151160577;
-    rom_read_port[16] = 32'd67174528;
+    rom_read_port[15] = 32'd151141633;
+    rom_read_port[16] = 32'd50397312;
     rom_read_port[17] = 32'd4194831104;
     rom_read_port[18] = 32'd50397216;
     rom_read_port[19] = 32'd590848;
@@ -6396,7 +6396,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     rom_read_port[24] = 32'd604635393;
     rom_read_port[25] = 32'd16777233;
     rom_read_port[26] = 32'd604111361;
-    rom_read_port[27] = 32'd16777474;
+    rom_read_port[27] = 32'd16777480;
     rom_read_port[28] = 32'd0;
     rom_read_port[29] = 32'd0;
     rom_read_port[30] = 32'd203686659;
@@ -6416,7 +6416,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     rom_read_port[44] = 32'd35651600;
     rom_read_port[45] = 32'd604045824;
     rom_read_port[46] = 32'd16842752;
-    rom_read_port[47] = 32'd131072;
+    rom_read_port[47] = 32'd131840;
     rom_read_port[48] = 32'd6;
     rom_read_port[49] = 32'd604111108;
     rom_read_port[50] = 32'd403113217;
@@ -6463,45 +6463,27 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
     rom_read_port[91] = 32'd2181423104;
     rom_read_port[92] = 32'd17310977;
     rom_read_port[93] = 32'd0;
-    rom_read_port[94] = 32'd590851;
-    rom_read_port[95] = 32'd131331;
-    rom_read_port[96] = 32'd1828;
-    rom_read_port[97] = 32'd16777537;
-    rom_read_port[98] = 32'd599043;
-    rom_read_port[99] = 32'd16843010;
-    rom_read_port[100] = 32'd16778788;
-    rom_read_port[101] = 32'd33686016;
-    rom_read_port[102] = 32'd103023105;
-    rom_read_port[103] = 32'd50333988;
-    rom_read_port[104] = 32'd50463745;
-    rom_read_port[105] = 32'd50397193;
-    rom_read_port[106] = 32'd84083264;
-    rom_read_port[107] = 32'd0;
-    rom_read_port[108] = 32'd86311169;
-    rom_read_port[109] = 32'd50922883;
-    rom_read_port[110] = 32'd37748736;
-    rom_read_port[111] = 32'd1317;
-    rom_read_port[112] = 32'd16843008;
-    rom_read_port[113] = 32'd67307780;
-    rom_read_port[114] = 32'd402867456;
-    rom_read_port[115] = 32'd1979737344;
-    rom_read_port[116] = 32'd1845523456;
-    rom_read_port[117] = 32'd1929399296;
-    rom_read_port[118] = 32'd1761634048;
-    rom_read_port[119] = 32'd1744860160;
-    rom_read_port[120] = 32'd805522944;
-    rom_read_port[121] = 32'd754995968;
-    rom_read_port[122] = 32'd1694528000;
-    rom_read_port[123] = 32'd1761633536;
-    rom_read_port[124] = 32'd1929388032;
-    rom_read_port[125] = 32'd1090541056;
-    rom_read_port[126] = 32'd1107304448;
-    rom_read_port[127] = 32'd1392539392;
-    rom_read_port[128] = 32'd1761637376;
-    rom_read_port[129] = 32'd1660971008;
-    rom_read_port[130] = 32'd1862301184;
-    rom_read_port[131] = 32'd1694528000;
-    rom_read_port[132] = 32'd67317760;
+    rom_read_port[94] = 32'd0;
+    rom_read_port[95] = 32'd67307780;
+    rom_read_port[96] = 32'd402867456;
+    rom_read_port[97] = 32'd1979737344;
+    rom_read_port[98] = 32'd1845523456;
+    rom_read_port[99] = 32'd1929399296;
+    rom_read_port[100] = 32'd1761634048;
+    rom_read_port[101] = 32'd1744860160;
+    rom_read_port[102] = 32'd805522944;
+    rom_read_port[103] = 32'd754995968;
+    rom_read_port[104] = 32'd1694528000;
+    rom_read_port[105] = 32'd1761633536;
+    rom_read_port[106] = 32'd1929388032;
+    rom_read_port[107] = 32'd1090541056;
+    rom_read_port[108] = 32'd1107304448;
+    rom_read_port[109] = 32'd1392539392;
+    rom_read_port[110] = 32'd1761637376;
+    rom_read_port[111] = 32'd1660971008;
+    rom_read_port[112] = 32'd1862301184;
+    rom_read_port[113] = 32'd1694528000;
+    rom_read_port[114] = 32'd67317760;
   end
   reg [31:0] _0_;
   always @(posedge usb_clk) begin
@@ -6557,7 +6539,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
   assign \$24  = bytes_sent + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:529" *) 1'h1;
   assign \$26  = index >= (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:466" *) rom_r_data[31:16];
   assign \$2  = length - (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:395" *) start_position;
-  assign \$29  = rom_r_data[9:2] + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:472" *) index;
+  assign \$29  = rom_r_data[8:2] + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:472" *) index;
   assign \$32  = rom_r_data + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:487" *) position_in_stream;
   assign \$39  = descriptor_data_base_address + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:514" *) \$37 ;
   assign \$42  = + (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:405" *) position_in_stream;
@@ -6759,17 +6741,17 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
   end
   always @* begin
     if (\$auto$verilog_backend.cc:2334:dump_module$8 ) begin end
-    rom_r_addr = 8'h00;
+    rom_r_addr = 7'h00;
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:422" *)
     casez (fsm_state)
       /* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:425" */
       /* \amaranth.decoding  = "IDLE/0" */
       3'h0:
-          rom_r_addr = type_number;
+          rom_r_addr = type_number[6:0];
       /* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:438" */
       /* \amaranth.decoding  = "START/1" */
       3'h1:
-          rom_r_addr = type_number;
+          rom_r_addr = type_number[6:0];
       /* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:459" */
       /* \amaranth.decoding  = "LOOKUP_TYPE/2" */
       3'h2:
@@ -6777,22 +6759,22 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
           (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:466" *)
           if (\$26 ) begin
           end else begin
-            rom_r_addr = \$29 [7:0];
+            rom_r_addr = \$29 [6:0];
           end
       /* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:483" */
       /* \amaranth.decoding  = "LOOKUP_DESCRIPTOR/4" */
       3'h4:
-          rom_r_addr = \$34 [7:0];
+          rom_r_addr = \$34 [6:0];
       /* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:506" */
       /* \amaranth.decoding  = "SEND_DESCRIPTOR/5" */
       3'h5:
         begin
-          rom_r_addr = \$39 [7:0];
+          rom_r_addr = \$39 [6:0];
           (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:523" *)
           if (ready) begin
             (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:526" *)
             if (\$41 ) begin
-              rom_r_addr = \$59 [7:0];
+              rom_r_addr = \$59 [6:0];
             end
           end
         end
@@ -6952,7 +6934,7 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
       /* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:483" */
       /* \amaranth.decoding  = "LOOKUP_DESCRIPTOR/4" */
       3'h4:
-          \descriptor_data_base_address$next  = rom_r_data[9:2];
+          \descriptor_data_base_address$next  = rom_r_data[8:2];
       /* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:506" */
       /* \amaranth.decoding  = "SEND_DESCRIPTOR/5" */
       3'h5:
@@ -6962,13 +6944,13 @@ module \usb_avb_subsystem.usb.USBControlEndpoint.StandardRequestHandler.get_desc
             (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/usb/usb2/descriptor.py:526" *)
             if (\$104 ) begin
             end else begin
-              \descriptor_data_base_address$next  = 8'h00;
+              \descriptor_data_base_address$next  = 7'h00;
             end
           end
     endcase
     (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/xfrm.py:503" *)
     if (usb_rst) begin
-      \descriptor_data_base_address$next  = 8'h00;
+      \descriptor_data_base_address$next  = 7'h00;
     end
   end
   always @* begin

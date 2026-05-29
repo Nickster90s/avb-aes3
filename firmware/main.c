@@ -968,6 +968,12 @@ int main(void)
         mcr_pump_hw(&mcr);        // flood-proof servo feed from gateware CRF FIFO
         mcr_servo_update(&mcr);   // also consume any CPU-path CRF sample
         mcr_watchdog_tick(&mcr, gptp_uptime_ms());
+        // CRF data-flow re-bootstrap: if the CRF listener is ACMP-connected
+        // but no CRF has arrived for a few seconds, re-trigger the talker
+        // (Auvitran expires its CRF talker on its own MSRP LeaveAll). Uses
+        // mcr.rx_count as the flow indicator.
+        avdecc_crf_flow_watchdog(&avdecc, LISTENER_UID_CRF,
+                                 mcr.rx_count, gptp_uptime_ms());
 
         // DAC writer: pace AAF RX ch 0/1 → I2S TX at the audio sample
         // rate. mcr_sample_count ticks at fs (48 kHz) — driven by the

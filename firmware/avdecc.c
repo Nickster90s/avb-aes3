@@ -460,6 +460,111 @@ static void send_connect_tx_command(avdecc_state_t *s, const avdecc_resolve_t *r
     s->acmp_tx_count++;
 }
 
+// Send an ACMP DISCONNECT_TX_COMMAND to a talker — clears its stale
+// talker/listener state before we re-bootstrap with CONNECT_TX. Used by
+// the CRF data-flow watchdog. Carries the known stream_id (unlike the
+// slow-path CONNECT_TX query which sends stream_id=0).
+static void send_disconnect_tx_command(avdecc_state_t *s,
+                                       const avdecc_resolve_t *r,
+                                       const uint8_t *stream_id)
+{
+    uint8_t *frame = avdecc_tx_buf();
+    uint8_t *p = avdecc_eth_hdr(frame, s->src_mac);
+
+    memset(p, 0, ACMPDU_LEN);
+    p[0] = AVTP_SUBTYPE_ACMP;
+    p[1] = ACMP_MSG_DISCONNECT_TX_COMMAND;
+    av_put_be16(p + 2, ACMP_CONTROL_DATA_LEN);
+    if (stream_id) memcpy(p + ACMP_OFF_STREAM_ID, stream_id, 8);
+    memcpy(p + ACMP_OFF_CONTROLLER_ID, s->entity_id, 8);
+    memcpy(p + ACMP_OFF_TALKER_ID,     r->talker_id, 8);
+    memcpy(p + ACMP_OFF_LISTENER_ID,   s->entity_id, 8);
+    av_put_be16(p + ACMP_OFF_TALKER_UID,   r->talker_uid);
+    av_put_be16(p + ACMP_OFF_LISTENER_UID, r->listener_uid);
+    av_put_be16(p + ACMP_OFF_SEQ_ID, r->our_seq_id);
+
+    avdecc_eth_send(14 + ACMPDU_LEN);
+    s->acmp_tx_count++;
+}
+
+// CRF data-flow re-bootstrap watchdog (mirror of avb_session_mgr2's
+// forceCrfRefresh + 5 s bootstrap watchdog). Auvitran's CRF talker
+// expires on its own side (MSRP LeaveAll / internal state) and stops
+// sourcing the stream even while our ACMP connection still reads
+// "connected" — Hive then shows the connection green but with a red
+// arrow / no black dot, and the MCR starves. Recovery: when CRF data
+// stalls while connected, DISCONNECT_TX to clear the talker's stale
+// state, then re-issue CONNECT_TX every few seconds to re-trigger it
+// until the stream resumes.
+//
+// `rx_count` is the listener's running CRF-frame counter (mcr.rx_count),
+// fed from main.c. `now_ms` is gptp_uptime_ms(). Call once per loop.
+#define CRF_WD_STALL_MS   3000    // no CRF for 3 s while connected = stalled
+#define CRF_WD_RETRY_MS   5000    // re-issue CONNECT_TX every 5 s
+
+void avdecc_crf_flow_watchdog(avdecc_state_t *s, uint16_t luid,
+                              uint32_t rx_count, uint32_t now_ms)
+{
+    if (luid >= AVDECC_MAX_LISTENERS) return;
+    avdecc_listener_stream_t *l = &s->listeners[luid];
+
+    // Not connected → idle; re-baseline so a fresh connect starts clean.
+    if (!l->connected) {
+        s->crf_wd_init     = 0;
+        s->crf_wd_recovery = 0;
+        return;
+    }
+    if (!s->crf_wd_init) {                 // first call after connect
+        s->crf_wd_init        = 1;
+        s->crf_wd_rx_snapshot = rx_count;
+        s->crf_wd_flow_ms     = now_ms;
+        s->crf_wd_recovery    = 0;
+        return;
+    }
+
+    if (rx_count != s->crf_wd_rx_snapshot) {       // CRF flowing
+        s->crf_wd_rx_snapshot = rx_count;
+        s->crf_wd_flow_ms     = now_ms;
+        if (s->crf_wd_recovery) {
+            printf("[ACMP] CRF flow restored (uid=%u)\n", (unsigned)luid);
+            s->crf_wd_recovery = 0;
+        }
+        return;
+    }
+
+    uint32_t stalled = now_ms - s->crf_wd_flow_ms;
+    if (stalled > 2000000000u) {                   // wrap guard
+        s->crf_wd_flow_ms = now_ms;
+        return;
+    }
+    if (stalled < CRF_WD_STALL_MS) return;          // not stalled long enough
+
+    // Stalled while connected — re-bootstrap the bound talker.
+    avdecc_resolve_t r;
+    memset(&r, 0, sizeof(r));
+    r.listener_uid = (uint8_t)luid;
+    memcpy(r.talker_id, l->talker_id, 8);
+    r.talker_uid   = l->talker_uid;
+    r.our_seq_id   = s->next_acmp_seq++;
+
+    if (!s->crf_wd_recovery) {
+        // Enter recovery: clear the talker's stale state first.
+        send_disconnect_tx_command(s, &r, l->stream_id);
+        s->crf_wd_recovery      = 1;
+        s->crf_wd_last_retry_ms = now_ms;
+        printf("[ACMP] CRF stalled %lus while connected — DISCONNECT_TX to "
+               "talker, rebootstrapping\n", (unsigned long)(stalled / 1000));
+        return;
+    }
+    // In recovery: re-issue CONNECT_TX every CRF_WD_RETRY_MS until flow returns.
+    if (now_ms - s->crf_wd_last_retry_ms >= CRF_WD_RETRY_MS) {
+        send_connect_tx_command(s, &r);
+        s->crf_wd_last_retry_ms = now_ms;
+        printf("[ACMP] CRF rebootstrap — CONNECT_TX to talker (seq=%u)\n",
+               (unsigned)r.our_seq_id);
+    }
+}
+
 // Build and send the deferred CONNECT_RX_RESPONSE to the original
 // controller, using the talker's resolved stream_id / dest_mac / vlan.
 // The original controller's sequence_id is echoed back so it matches

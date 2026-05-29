@@ -353,6 +353,13 @@ typedef struct {
     avdecc_resolve_t resolves[AVDECC_MAX_LISTENERS];
     uint16_t next_acmp_seq;         // free-running counter for our outgoing ACMP commands
 
+    // CRF data-flow re-bootstrap watchdog state (see avdecc_crf_flow_watchdog).
+    uint32_t crf_wd_rx_snapshot;    // last observed listener rx_count
+    uint32_t crf_wd_flow_ms;        // last time rx_count advanced
+    uint32_t crf_wd_last_retry_ms;  // last CONNECT_TX re-issue
+    uint8_t  crf_wd_recovery;       // 1 = in re-bootstrap (DISCONNECT sent)
+    uint8_t  crf_wd_init;           // baseline captured since connect
+
     // Registered unsolicited-notification controllers (IEEE 1722.1-2013
     // §7.4.37). REGISTER_UNSOLICITED_NOTIFICATION adds a (controller_eid,
     // src_mac) tuple; on state changes (clock lock flip, listener
@@ -419,6 +426,12 @@ void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len);
 
 // Poll — sends periodic ADP advertisements.
 void avdecc_poll(avdecc_state_t *s);
+
+// CRF data-flow re-bootstrap watchdog. Call once per main loop with the
+// listener's running CRF rx-frame count (mcr.rx_count) and gptp_uptime_ms().
+// Re-triggers a stalled-but-connected talker (Auvitran LeaveAll expiry).
+void avdecc_crf_flow_watchdog(avdecc_state_t *s, uint16_t luid,
+                              uint32_t rx_count, uint32_t now_ms);
 
 // Send ADP departing message (call before shutdown).
 void avdecc_depart(avdecc_state_t *s);

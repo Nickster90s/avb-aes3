@@ -729,20 +729,45 @@ void srp_poll(srp_state_t *s)
         s->last_leaveall_ms = now_ms;
     }
 
-    // (a) Age out talker_registered. If we haven't seen a matching
-    // TalkerAdvertise in 3× LeaveAll intervals (~30 s by default), the
-    // talker is presumed gone — clear the flag and notify upper layers.
-    // Without this, talker_registered stayed sticky forever even after
-    // the talker disconnected from the wire.
+    // (a) Age out talker_registered as a DIAGNOSTIC ONLY. If we haven't
+    // seen a matching TalkerAdvertise in 3× LeaveAll (~30 s), clear the
+    // "talker seen" flag so status reflects reality — but do NOT touch
+    // listener_substate.
+    //
+    // WHY (2026-05-29): downgrading listener_substate → ASKFAILED here
+    // was self-defeating. Auvitran (Milan talker) only sources the CRF
+    // stream while it sees our Listener=READY (see
+    // feedback_listener_ready_immediate). When a transient advertise gap
+    // tripped this age-out we declared AskingFailed → Auvitran stopped
+    // advertising/sourcing the CRF (sid …:00:04) → we never re-matched →
+    // permanent deadlock: Hive shows ACMP CONNECTED but the bridge prunes
+    // the stream (red arrow, no black dot), MCR starved, lock lost.
+    //
+    // The reference stacks (GenAVB srp/msrp.c, avb_session_mgr2's
+    // send_ready) keep the Listener READY for as long as the listener
+    // WANTS the stream (while listener_enabled / AVDECC-connected), and
+    // only drop it on explicit teardown. listener_substate is now owned
+    // by srp_listener_enable() — the talker-advertise age-out no longer
+    // steers it.
     if (s->talker_registered) {
         uint32_t age = now_ms - s->talker_last_seen_ms;
         if (age > 2000000000) age = 0;          // wrap guard
         if (age >= (3u * MRP_LEAVEALL_PERIOD_MS)) {
-            printf("[SRP] Talker timed out (no advertise in %u ms) — "
-                   "clearing registration\n", (unsigned)age);
-            s->talker_registered  = 0;
-            s->listener_substate  = MSRP_LISTENER_ASKFAILED;
+            printf("[SRP] Talker advertise gap %u ms — clearing 'seen' flag "
+                   "(listener stays READY)\n", (unsigned)age);
+            s->talker_registered = 0;
         }
+    }
+
+    // (a') Keepalive: while the listener is enabled (AVDECC-connected),
+    // hold the substate at READY. Mirrors avb_session_mgr2's periodic
+    // "force-refresh the CRF listener attachment" — keeps telling the
+    // bridge/talker we want the stream so Auvitran sources it (and
+    // re-sources it the moment it returns after any gap). Only
+    // srp_listener_enable(enable=0) on AVDECC DISCONNECT clears it.
+    if (s->listener_enabled && s->listener_substate != MSRP_LISTENER_READY) {
+        s->listener_substate  = MSRP_LISTENER_READY;
+        s->listener_new_count = 0;   // re-emit MRPDU_NEW on re-assert
     }
 
     // Age out the per-stream registrar table on the same schedule.

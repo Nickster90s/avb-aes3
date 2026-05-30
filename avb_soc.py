@@ -754,9 +754,10 @@ class AVBSoC(SoCCore):
         #   while (sample_readable) { lo=sample_lo; hi=sample_hi; pop=1; }
         # sample_lo = 32-bit signed audio, MSB-aligned (= Milan AAF 32-bit
         # INT format directly — no firmware shift needed). sample_hi:
-        # [27]=first, [26:24]=channel, rest reserved.
+        # [3]=first, [2:0]=channel, rest reserved (channel_nr at FIFO
+        # word bits 32..34, first at bit 35; sample_hi=word[63:32]).
         self.usb_sample_lo        = CSRStatus(32,  description="USB→AAF FIFO head — 32-bit signed sample, MSB-aligned.")
-        self.usb_sample_hi        = CSRStatus(32,  description="USB→AAF FIFO head — [27]=first [26:24]=channel.")
+        self.usb_sample_hi        = CSRStatus(32,  description="USB→AAF FIFO head — [3]=first [2:0]=channel.")
         self.usb_sample_readable  = CSRStatus(1,   description="1 = at least one queued USB sample.")
         self.usb_sample_pop       = CSRStorage(1,  description="Write 1 to advance the USB→AAF FIFO read pointer.")
         self.usb_sample_overflow  = CSRStatus(32,  description="Samples dropped at the cd_usb-side FIFO write port.")

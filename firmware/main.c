@@ -114,6 +114,7 @@ static uint32_t rx_avb_stream_mcast;
 // — distinguishes "no CRF frames arriving" from "CRF arriving but mcr
 // rejects on stream_id mismatch". Sampled in the 's' status print.
 static uint32_t rx_avtp_crf, rx_avtp_aaf;
+static uint32_t usb_to_aaf_frames;   // USB→AAF bridge frames pushed (#67)
 static uint8_t  rx_crf_last_sid[8];   // last CRF stream_id we saw on the wire
 
 // Benchmark / rate-window state for the 'b' UART command. Lets us
@@ -541,6 +542,7 @@ static void check_uart_cmd(void)
             printf("\n[AAF] bound=%d rx_en=%d tx_en=%d\n"
                    "  rx: count=%lu seq_err=%lu other=%lu fmt_err=%lu lvl=%lu\n"
                    "  tx: count=%lu underrun=%lu lvl=%lu seq=%u\n"
+                   "  usb-bridge: frames=%lu fifo_ovf=%lu\n"
                    "  last_pres_ts=%08lx\n",
                    aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
                    (unsigned long)aaf.rx_count, (unsigned long)aaf.rx_seq_errors,
@@ -550,6 +552,8 @@ static void check_uart_cmd(void)
                    (unsigned long)aaf.tx_underrun_count,
                    (unsigned long)aaf_tx_level(&aaf),
                    aaf.tx_seq,
+                   (unsigned long)usb_to_aaf_frames,
+                   (unsigned long)main_usb_sample_overflow_read(),
                    (unsigned long)aaf.last_presentation_ts);
             break;
         case 't': {
@@ -865,6 +869,54 @@ static void on_listener_disconnect(uint16_t uid)
 }
 
 // ---------------------------------------------------------------------------
+// USB → AAF bridge drain (task #67)
+//
+// The USB UAC2 device's gateware AsyncFIFO captures host-playback audio as
+// per-channel samples; main_usb_sample_* exposes the FIFO to the CPU:
+//   sample_lo = 32-bit signed sample, MSB-aligned (= Milan AAF 32-bit INT)
+//   sample_hi = [3]=first(channel-0-of-frame)  [2:0]=channel index
+//   (the FIFO word packs channel_nr at word bits 32..34 and first at bit
+//    35; sample_hi is word[63:32], so they land at hi[2:0] and hi[3].)
+// We reassemble per-channel samples into an 8-channel block and hand it to
+// aaf_tx_push(); aaf_tx_poll() then paces it onto the AVB wire. The 'first'
+// bit delimits frames, so this works whether the host opened the stereo or
+// the 8-channel alt-setting (missing channels stay 0).
+// ---------------------------------------------------------------------------
+static void usb_aaf_drain(void)
+{
+    static int32_t  block[AAF_CHANNELS];
+    static uint8_t  have = 0;          // accumulated at least one channel
+    // Drain capacity must exceed the USB rate (8ch×48k = 384k samples/s).
+    // The main loop runs ~1.4 kHz under load, so 512/pass ≈ 716k samples/s
+    // gives comfortable margin — guard=256 was just under and overflowed.
+    // The full FIFO is 1024 deep, so this can also empty a backlog quickly.
+    int guard = 512;
+
+    while (main_usb_sample_readable_read() && guard--) {
+        uint32_t lo = main_usb_sample_lo_read();
+        uint32_t hi = main_usb_sample_hi_read();
+        main_usb_sample_pop_write(1);
+
+        uint8_t ch    = hi & 0x7;
+        uint8_t first = (hi >> 3) & 1;
+
+        // A new frame starts: flush the previous one (pad-with-zero for any
+        // channels the host didn't send, e.g. stereo alt-setting), then
+        // clear for the new frame. Only feed the AAF talker when its TX is
+        // actually enabled (stream patched); otherwise just drain so the
+        // gateware FIFO doesn't overflow.
+        if (first && have) {
+            if (aaf.tx_enabled)
+                aaf_tx_push(&aaf, block);
+            for (int i = 0; i < AAF_CHANNELS; i++) block[i] = 0;
+            usb_to_aaf_frames++;
+        }
+        if (ch < AAF_CHANNELS) block[ch] = (int32_t)lo;
+        have = 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -1041,6 +1093,7 @@ int main(void)
             }
             dac_last_sample_tick += processed;
         }
+        usb_aaf_drain();          // USB UAC2 playback → AAF talker (#67)
         aaf_tx_poll(&aaf);
         check_uart_cmd();
     }

@@ -37,7 +37,7 @@ from litex.soc.cores.clock import *
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder import *
 from litex.soc.cores.led import LedChaser
-from litex.soc.interconnect.csr import CSRStatus, CSRStorage, AutoCSR
+from litex.soc.interconnect.csr import CSR, CSRStatus, CSRStorage, AutoCSR
 
 from liteeth.phy.s7rgmii import LiteEthPHYRGMII
 import sys, os
@@ -750,22 +750,28 @@ class AVBSoC(SoCCore):
             i_feedback_value        = usb_feedback,
         )
 
-        # Firmware-facing CSRs: drain pattern is
-        #   while (sample_readable) { lo=sample_lo; hi=sample_hi; pop=1; }
-        # sample_lo = 32-bit signed audio, MSB-aligned (= Milan AAF 32-bit
-        # INT format directly — no firmware shift needed). sample_hi:
-        # [3]=first, [2:0]=channel, rest reserved (channel_nr at FIFO
-        # word bits 32..34, first at bit 35; sample_hi=word[63:32]).
-        self.usb_sample_lo        = CSRStatus(32,  description="USB→AAF FIFO head — 32-bit signed sample, MSB-aligned.")
-        self.usb_sample_hi        = CSRStatus(32,  description="USB→AAF FIFO head — [3]=first [2:0]=channel.")
-        self.usb_sample_readable  = CSRStatus(1,   description="1 = at least one queued USB sample.")
-        self.usb_sample_pop       = CSRStorage(1,  description="Write 1 to advance the USB→AAF FIFO read pointer.")
-        self.usb_sample_overflow  = CSRStatus(32,  description="Samples dropped at the cd_usb-side FIFO write port.")
+        # Firmware-facing drain: 2 CSR ops/sample (read packed head, then
+        # pulse pop) — half the original 4 (readable+lo+hi+pop), using the
+        # proven CSRStorage pop. The earlier 1-op auto-pop-on-read had a
+        # read/advance race that corrupted the head, so this keeps an
+        # explicit pop. Packed 32-bit data word:
+        #   [2:0]   channel index (0..7)
+        #   [3]     first (channel-0-of-frame marker)
+        #   [4]     valid (1 = FIFO non-empty; head is real)
+        #   [7:5]   reserved
+        #   [31:8]  24-bit audio, MSB-aligned → (v & 0xFFFFFF00) is the
+        #           32-bit signed sample (= Milan AAF 32-bit INT), no shift.
+        # Firmware: while(guard){ v=usb_sample_data; if(!(v&0x10)) break;
+        #            ...; usb_sample_pop=1; }
+        self.usb_sample_data     = CSRStatus(32, description="USB→AAF FIFO head: [31:8]audio [4]valid [3]first [2:0]ch.")
+        self.usb_sample_pop      = CSRStorage(1, description="Write 1 to advance the USB→AAF FIFO read pointer.")
+        self.usb_sample_overflow = CSRStatus(32, description="Samples dropped at the cd_usb-side FIFO write port.")
         self.comb += [
-            self.usb_sample_lo      .status.eq(sample_lo_w),
-            self.usb_sample_hi      .status.eq(sample_hi_w),
-            self.usb_sample_readable.status.eq(sample_rdy_w),
-            sample_pop_w            .eq(self.usb_sample_pop.re),
+            self.usb_sample_data.status.eq(Cat(sample_hi_w[0:4],   # [3:0] channel+first
+                                               sample_rdy_w,        # [4]   valid
+                                               Signal(3),           # [7:5] reserved
+                                               sample_lo_w[8:32])), # [31:8] audio MSB-aligned
+            sample_pop_w.eq(self.usb_sample_pop.re),
             self.usb_sample_overflow.status.eq(sample_ovf_w),
 
             # Feedback stays nominal 48k (10.14 = 0x18000). P3.4 will

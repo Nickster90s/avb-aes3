@@ -45,6 +45,26 @@ The floorplan (#below) and skid buffer (#2) are kept (harmless, marginal)
 but are NO LONGER the mechanism — this patch is. See memory
 feedback_eth_tx_sys_datapath.
 
+## 4. mac/__init__.py — deferred wishbone TX connect (2026-05-30, #67)
+The wishbone-mode MAC hard-wired `interface.source.connect(core.sink)` in
+`__init__`, leaving no seam to insert a second TX talker. Moved that one
+connect into a new `do_finalize()`, guarded by `self.tx_wired`:
+
+```python
+# in __init__, wishbone branch — replaces the direct TX connect:
+self.comb += self.core.source.connect(self.interface.sink)
+self._wishbone_tx = True
+def do_finalize(self):
+    if getattr(self, "_wishbone_tx", False) and not getattr(self, "tx_wired", False):
+        self.comb += self.interface.source.connect(self.core.sink)
+```
+
+Backward compatible: if nobody sets `mac.tx_wired`, finalize wires the
+default direct path exactly as before. avb_soc.py sets `mac.tx_wired = True`
+and drives `core.sink` through a frame-atomic `TXFrameArbiter`
+(firmware SRAM reader + gateware AAF packetizer) — see `aaf_packetizer.py`.
+This is the injection seam for the gateware USB→AAF talker (#67).
+
 ## (historical) NEXT LEVER notes — superseded by patch #3
 region-constrain the USB block via nextpnr --pre-place (floorplan_usb.py);
 recovered 114 MHz only. Kept for context.

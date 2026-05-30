@@ -51,6 +51,7 @@ from liteeth.core.ptp import LiteEthTSU
 # against CSR-configured slots; 3-stage pipelined for timing closure.
 from avtp_extractor import AVTPSampleExtractor
 from crf_extractor  import CRFTimestampExtractor
+from aaf_packetizer import AAFPacketizer, TXFrameArbiter
 
 from migen.genlib.fifo import SyncFIFO, AsyncFIFO
 
@@ -587,7 +588,12 @@ class AVBSoC(SoCCore):
                 tx_sof.eq(0),
             ),
         ]
-        self.comb += self.tsu.tsu.tx_latch.eq(tx_sof)
+        # tx_latch is gated to firmware (control-plane) frames only — see the
+        # TXFrameArbiter wiring further down. The gateware AAF talker pushes
+        # 8000 frames/s through this same core.sink; without the gate it would
+        # clobber the gPTP egress timestamp firmware reads after each Sync /
+        # Pdelay. tx_sof is referenced there (it is an __init__-scope Signal).
+        self._tx_sof = tx_sof
 
         # Media Clock Recovery NCO — driven by firmware PI servo on CRF.
         self.mcr = MCRNco(sys_clk_freq, fs=48000)
@@ -771,7 +777,6 @@ class AVBSoC(SoCCore):
                                                sample_rdy_w,        # [4]   valid
                                                Signal(3),           # [7:5] reserved
                                                sample_lo_w[8:32])), # [31:8] audio MSB-aligned
-            sample_pop_w.eq(self.usb_sample_pop.re),
             self.usb_sample_overflow.status.eq(sample_ovf_w),
 
             # Feedback stays nominal 48k (10.14 = 0x18000). P3.4 will
@@ -779,6 +784,36 @@ class AVBSoC(SoCCore):
             # cs=0 fallback to gPTP-tuned NCO.
             usb_feedback.eq(0x0001_8000),
         ]
+
+        # Gateware AAF TX packetizer (task #67 / D2-in-gateware). Drains the
+        # SAME USB sample handshake firmware uses, assembles AVTP-AAF frames,
+        # stamps presentation_time from the TSU, and emits on its own MAC TX
+        # stream — keeping the CPU out of the per-sample audio path. Paced by
+        # mcr.sample_strobe, so when firmware servos the NCO to CRF (cs=1,
+        # locked) the stream rate IS the CRF media clock (see module header).
+        self.submodules.aaf_pkt = aaf_pkt = AAFPacketizer(
+            mcr               = self.mcr,
+            tsu               = self.tsu.tsu,
+            usb_sample_lo     = sample_lo_w,
+            usb_sample_hi     = sample_hi_w,
+            usb_readable      = sample_rdy_w,
+        )
+        # USB FIFO pop is owned by the gateware when aaf_pkt.enable is set,
+        # else by firmware's usb_sample_pop CSR (drain fallback preserved).
+        self.comb += sample_pop_w.eq(
+            Mux(aaf_pkt.enable.storage, aaf_pkt.usb_pop, self.usb_sample_pop.re))
+
+        # Frame-atomic TX mux: firmware SRAM reader (priority) + gateware AAF
+        # talker → MAC core sink. Claim the wishbone-TX seam (see the LiteEth
+        # do_finalize hook) so we, not the library, drive core.sink.
+        mac.tx_wired = True
+        self.submodules.tx_arbiter = tx_arbiter = TXFrameArbiter(
+            [mac.interface.source, aaf_pkt.source], dw=32)
+        self.comb += tx_arbiter.source.connect(mac.core.sink)
+
+        # gPTP TX timestamp: latch ONLY on firmware (port 0) frames so the AAF
+        # talker can't overwrite the egress timestamp firmware reads.
+        self.comb += self.tsu.tsu.tx_latch.eq(self._tx_sof & tx_arbiter.firmware_granted)
 
         # LED.
         self.leds = LedChaser(

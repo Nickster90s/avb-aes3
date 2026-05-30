@@ -6,3 +6,4 @@ firmware/firmware.elf.map
 firmware/firmware.bin
 __pycache__/
 *.pyc
+*.vcd

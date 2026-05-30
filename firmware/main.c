@@ -115,6 +115,9 @@ static uint32_t rx_avb_stream_mcast;
 // rejects on stream_id mismatch". Sampled in the 's' status print.
 static uint32_t rx_avtp_crf, rx_avtp_aaf;
 static uint32_t usb_to_aaf_frames;   // USB→AAF bridge frames pushed (#67)
+static uint8_t  aaf_gw_enabled;      // 1 = gateware aaf_pkt owns the USB→AVB AAF stream
+static void     aaf_gw_set(uint8_t on);          // defined below usb_aaf_drain
+static void     aaf_gw_push_binding(void);
 static uint8_t  rx_crf_last_sid[8];   // last CRF stream_id we saw on the wire
 
 // Benchmark / rate-window state for the 'b' UART command. Lets us
@@ -543,6 +546,7 @@ static void check_uart_cmd(void)
                    "  rx: count=%lu seq_err=%lu other=%lu fmt_err=%lu lvl=%lu\n"
                    "  tx: count=%lu underrun=%lu lvl=%lu seq=%u\n"
                    "  usb-bridge: frames=%lu fifo_ovf=%lu\n"
+                   "  aaf_pkt(gw): en=%d pkts=%lu underrun=%lu ovr=%lu fifo=%lu\n"
                    "  last_pres_ts=%08lx\n",
                    aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
                    (unsigned long)aaf.rx_count, (unsigned long)aaf.rx_seq_errors,
@@ -554,6 +558,11 @@ static void check_uart_cmd(void)
                    aaf.tx_seq,
                    (unsigned long)usb_to_aaf_frames,
                    (unsigned long)main_usb_sample_overflow_read(),
+                   aaf_gw_enabled,
+                   (unsigned long)aaf_pkt_packet_count_read(),
+                   (unsigned long)aaf_pkt_underrun_count_read(),
+                   (unsigned long)aaf_pkt_overrun_count_read(),
+                   (unsigned long)aaf_pkt_fifo_level_read(),
                    (unsigned long)aaf.last_presentation_ts);
             break;
         case 't': {
@@ -780,12 +789,14 @@ static void on_talker_connect(uint16_t uid, const uint8_t *listener_entity_id)
     if (uid != TALKER_UID_AAF) return;
     aaf_tx_enable(&aaf, 1);
     srp_talker_enable(&srp, 1);
-    printf("[main] AAF talker started via AVDECC\n");
+    aaf_gw_set(1);            // hand the USB→AVB stream to gateware (CPU out of path)
+    printf("[main] AAF talker started via AVDECC (gateware packetizer)\n");
 }
 
 static void on_talker_disconnect(uint16_t uid)
 {
     if (uid != TALKER_UID_AAF) return;
+    aaf_gw_set(0);            // release the stream before tearing down the binding
     aaf_tx_enable(&aaf, 0);
     srp_talker_enable(&srp, 0);
     printf("[main] AAF talker stopped via AVDECC\n");
@@ -883,6 +894,50 @@ static void on_listener_disconnect(uint16_t uid)
 // bit delimits frames, so this works whether the host opened the stereo or
 // the 8-channel alt-setting (missing channels stay 0).
 // ---------------------------------------------------------------------------
+// --- Gateware AAF TX packetizer (aaf_pkt) control ----------------------------
+// When enabled, the gateware sources the USB→AVB AAF stream straight from the
+// USB sample FIFO, paced by the MCR media clock (= CRF rate when cs=1 + locked,
+// see aaf_packetizer.py). The CPU is then OUT of the per-sample path: firmware
+// must NOT run the software AAF TX (aaf_tx_poll — double-talker on the same
+// stream_id) nor usb_aaf_drain (the gateware owns the FIFO pop). Identical wire
+// bytes either way, so the binding pushed here is exactly aaf's software TX
+// binding. Disabled (default) leaves the proven firmware path untouched.
+static void aaf_gw_push_binding(void)
+{
+    aaf_pkt_src_mac_hi_write(((uint32_t)aaf.src_mac[0] << 8) | aaf.src_mac[1]);
+    aaf_pkt_src_mac_lo_write(((uint32_t)aaf.src_mac[2] << 24) |
+                             ((uint32_t)aaf.src_mac[3] << 16) |
+                             ((uint32_t)aaf.src_mac[4] <<  8) |
+                              (uint32_t)aaf.src_mac[5]);
+    aaf_pkt_dst_mac_hi_write(((uint32_t)aaf.dest_mac[0] << 8) | aaf.dest_mac[1]);
+    aaf_pkt_dst_mac_lo_write(((uint32_t)aaf.dest_mac[2] << 24) |
+                             ((uint32_t)aaf.dest_mac[3] << 16) |
+                             ((uint32_t)aaf.dest_mac[4] <<  8) |
+                              (uint32_t)aaf.dest_mac[5]);
+    aaf_pkt_stream_id_hi_write(((uint32_t)aaf.stream_id[0] << 24) |
+                               ((uint32_t)aaf.stream_id[1] << 16) |
+                               ((uint32_t)aaf.stream_id[2] <<  8) |
+                                (uint32_t)aaf.stream_id[3]);
+    aaf_pkt_stream_id_lo_write(((uint32_t)aaf.stream_id[4] << 24) |
+                               ((uint32_t)aaf.stream_id[5] << 16) |
+                               ((uint32_t)aaf.stream_id[6] <<  8) |
+                                (uint32_t)aaf.stream_id[7]);
+    aaf_pkt_vlan_tci_write(((uint32_t)(aaf.tx_pcp & 0x07) << 13) |
+                            (aaf.tx_vid & 0x0FFF));
+    // pres_offset keeps its 2 ms CSR reset value (matches AAF_PRESENTATION_OFFSET_NS).
+}
+
+static void aaf_gw_set(uint8_t on)
+{
+    if (on) {
+        aaf_gw_push_binding();
+        aaf_pkt_enable_write(1);
+    } else {
+        aaf_pkt_enable_write(0);
+    }
+    aaf_gw_enabled = on;
+}
+
 static void usb_aaf_drain(void)
 {
     static int32_t  block[AAF_CHANNELS];
@@ -1027,6 +1082,7 @@ int main(void)
             static uint16_t last_vid  = 0xFFFF;
             if (srp.rx_sr_prio != last_prio || srp.rx_sr_vid != last_vid) {
                 aaf_set_vlan(&aaf, srp.rx_sr_prio, srp.rx_sr_vid);
+                if (aaf_gw_enabled) aaf_gw_push_binding();   // propagate new TCI to gateware
                 last_prio = srp.rx_sr_prio;
                 last_vid  = srp.rx_sr_vid;
                 printf("[main] AAF VLAN sync: PCP=%u VID=%u\n",
@@ -1095,8 +1151,13 @@ int main(void)
             }
             dac_last_sample_tick += processed;
         }
-        usb_aaf_drain();          // USB UAC2 playback → AAF talker (#67)
-        aaf_tx_poll(&aaf);
+        if (!aaf_gw_enabled) {
+            // Firmware path (gateware aaf_pkt disabled): drain USB → software
+            // AAF TX. When gateware owns the stream both are skipped — it pops
+            // the FIFO and sources the AAF frames itself, CPU-free.
+            usb_aaf_drain();      // USB UAC2 playback → AAF talker (#67)
+            aaf_tx_poll(&aaf);
+        }
         check_uart_cmd();
     }
 

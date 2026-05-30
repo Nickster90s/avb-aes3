@@ -14,11 +14,11 @@ VexRiscv runs all the protocol stacks bare-metal — no Linux on the device.
 
 ---
 
-## 1. Status (what works as of 2026-05-28 PM)
+## 1. Status (what works as of 2026-05-30)
 
 | Subsystem  | State                                                            |
 |------------|------------------------------------------------------------------|
-| gPTP       | Locks ±30 ns to MOTU AVB Switch / Auvitran grandmaster           |
+| gPTP       | Locks ±30 ns to MOTU AVB Switch / Auvitran GM (last bench: 30 s avg \|off\|=7 ns) |
 | AVDECC     | Hive sees entity, full AEM tree, patchable, no spurious flicker  |
 | MSRP       | Talker + Listener registrar; READY substate at CONNECT_RX        |
 | ACMP       | Fast-path + slow-path (zero-stream-id) listener flows            |
@@ -28,11 +28,14 @@ VexRiscv runs all the protocol stacks bare-metal — no Linux on the device.
 | AES3       | TX wired to AAF RX ch 0+1 (loopback bench-verified)              |
 | I2S TX     | Bit-clock derived from MCR NCO phase — sample-locked to talker   |
 | USB UAC2   | HS enumerate (`1209:eab1`) + playback robust; capture TBD        |
+| USB→AAF    | **Gateware AAF TX packetizer** (`aaf_packetizer.py`) — USB FIFO → AVTP-AAF on the wire, CPU out of the per-sample path, paced by the MCR media clock (= CRF rate when cs=1+locked). Firmware drain kept as a fallback behind the `enable` CSR |
 | Eth gigabit| `eth_tx_clk` 150-176 MHz robust (TX-only sys-datapath patch)     |
 
 **Latest verified bitstream** archived at
-`bitstreams/7199108-dirty_2026-05-28_1428_usb-near-ulpi-floorplan-crf-mcri2s-all-working.bit`
-— covers all of the above on one bit. Sidecar `.info` carries `git log -1` + uncommitted-diff stat.
+`bitstreams/378311e-dirty_2026-05-30_1024_gateware-aaf-packetizer.bit`
+— covers all of the above on one bit (boots, gPTP locks to 7 ns, gateware
+AAF packetizer present + idle until an AAF talker is connected). Sidecar
+`.info` carries `git log -1` + uncommitted-diff stat.
 
 ---
 
@@ -482,11 +485,31 @@ All on master; five working `.bit` files archived in `bitstreams/`.
   the floorplan pulling its cells into the X≤30 region, *any* added
   cd_usb-side logic re-broke 60 MHz ULPI HS chirp. Lesson: the
   proximity floorplan that works for the USB wrapper is too marginal
-  to share with new cd_usb consumers. The cleaner path is to
-  regenerate `usb_avb_subsystem.v` from the avb-usb-host Amaranth
-  source with an internal FIFO + simple read interface, so the FIFO
-  is part of the wrapper's already-validated placement domain.
-  Reverted cleanly; master remains at `df4fb3e`.
+  to share with new cd_usb consumers. The fix was to put the FIFO
+  *inside* `usb_avb_subsystem.v` (regenerated from the avb-usb-host
+  Amaranth source with an internal cd_usb→sys FIFO + a simple sys-side
+  read interface), so the CDC lives in the wrapper's already-validated
+  placement domain.
+- **#67 USB→AAF, firmware then gateware.** With the wrapper exposing a
+  sys-domain sample handshake, the first working bridge was *firmware*
+  (`usb_aaf_drain` reads the FIFO over a 2-op CSR, builds the AAF PDU
+  in `aaf.c`). It runs at the right ~48 k frames/s but the CPU is in
+  the per-sample path (Wishbone reads) → ~2 % loss at sustained max
+  stress. The scalable path — **now implemented** — is a gateware AAF
+  TX packetizer (`aaf_packetizer.py`): the USB FIFO feeds an 8-channel
+  assembler → elastic block FIFO → a builder FSM that emits the full
+  AVTP-AAF frame on its own MAC TX stream, stamping presentation_time
+  straight from the TSU (DSP-free ×1e9). A frame-atomic `TXFrameArbiter`
+  muxes it onto `mac.core.sink` alongside the firmware control plane
+  (which keeps priority); the gPTP TX-timestamp latch is gated to
+  firmware frames so 8000 AAF frames/s can't clobber the Sync/Pdelay
+  egress stamp. **Pacing is the MCR `sample_strobe`** — so when firmware
+  servos the NCO to CRF (cs=1 + locked) the AAF stream rate *is* the
+  recovered media clock, identical to how the I2S DAC already locks.
+  Firmware (`aaf_gw_set`) pushes the binding + flips `enable` on AVDECC
+  talker connect and stops the software drain/TX; the firmware path
+  stays as a fallback when `enable=0`. Verified 2026-05-30: boots,
+  gPTP locks to 7 ns, packetizer idle until a talker is connected.
 - **#58 MCR cs=0 → gPTP-tuned NCO** — when no CRF is patched, tune the
   NCO from gPTP rate so the DAC stays sample-locked to the GM.
 - **Scaling** (when needed): move CPU RAM from BRAM to the on-board
@@ -500,7 +523,8 @@ All on master; five working `.bit` files archived in `bitstreams/`.
 avb-aes3/
 ├── avb_soc.py                   # LiteX SoC top-level (Python/Migen)
 ├── crf_extractor.py             # Gateware CRF (avtp_ts, local_ts) extractor
-├── avtp_extractor.py            # Stage 2a/b AVTP (AAF) per-sample extractor
+├── avtp_extractor.py            # Stage 2a/b AVTP (AAF) per-sample RX extractor
+├── aaf_packetizer.py            # Gateware AAF TX packetizer + TXFrameArbiter (USB→AVB, CPU-free, MCR-paced)
 ├── floorplan_usb.py             # nextpnr --pre-place hook (ON by default, --no-floorplan to skip)
 ├── LITEETH_PATCHES.md           # The 3 in-tree LiteEth patches (#3 is THE fix)
 ├── BENCHMARK_BASELINE.md        # Stage-0 firmware-on-audio baseline (2026-05-21)

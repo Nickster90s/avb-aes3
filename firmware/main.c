@@ -577,16 +577,26 @@ static void check_uart_cmd(void)
             aaf_bind(&aaf, dummy_sid);
             memcpy(aaf.dest_mac, dummy_dest, 6);
             aaf_tx_enable(&aaf, 1);
+            // max_frame_size MUST be the real on-wire AAF size (~230), NOT
+            // 1500. MSRP reserves MaxFrameSize*MaxIntervalFrames*8000/s of
+            // Class A bandwidth per hop; 1500 → 96 Mbps overflows the 75 Mbps
+            // Class A budget of a 100M segment (the Auvitran's port) so the
+            // bridge cannot complete the reservation → listener stuck at
+            // fast-connect "pending". 230 → 14.7 Mbps fits. (Matches the real
+            // AVDECC-connect binding at srp_talker_set(...,230) on init, and
+            // the MOTU's own TalkerAdvertise declares 224 for 8ch AAF.)
             srp_talker_set(&srp, dummy_sid, dummy_dest,
-                           1500 /* max_frame_size */);
+                           230 /* 14 eth + 24 AVTP-AAF hdr + 192 payload */);
             srp_talker_enable(&srp, 1);
-            printf("[DIAG] AAF TX force-enabled → dest=91:e0:f0:00:fe:42 "
-                   "sid=%02x:%02x:%02x:%02x:%02x:%02x:00:01\n",
+            aaf_gw_set(1);            // also source via the gateware packetizer
+            printf("[DIAG] AAF TX force-enabled (gw) → dest=91:e0:f0:00:fe:42 "
+                   "sid=%02x:%02x:%02x:%02x:%02x:%02x:00:01 maxfs=230\n",
                    mac_addr[0], mac_addr[1], mac_addr[2],
                    mac_addr[3], mac_addr[4], mac_addr[5]);
             break;
         }
         case 'T':
+            aaf_gw_set(0);
             aaf_tx_enable(&aaf, 0);
             srp_talker_enable(&srp, 0);
             printf("[DIAG] AAF TX force-disabled\n");

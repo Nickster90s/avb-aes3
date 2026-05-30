@@ -657,7 +657,15 @@ void srp_talker_set(srp_state_t *s, const uint8_t *stream_id,
     s->talker.max_interval_frames = 1;  // Class A: 1 frame per 125us interval
     // Priority 3 (Class A), Rank 1 (non-emergency)
     s->talker.priority_and_rank = (SR_CLASS_A_PRIO << 5) | (1 << 4);
-    s->talker.accumulated_latency_ns = 0;  // We're the first hop
+    // AccumulatedLatency: worst-case sample-reference-to-egress latency, ns.
+    // 0 is a deviation — every reference talker declares non-zero (OpenAvnu
+    // simple_talker 3900, GenAVB adds CFG_PORT_TC_MAX_LATENCY=500/hop, the
+    // MOTU bridge declares 100095). A Milan listener uses this to size its
+    // buffer; some reject 0. We batch 6 samples/packet (~125 us) so our real
+    // talker latency is ~that order; declare 250 us (well under the 2 ms Class
+    // A bound, matches the MOTU ecosystem magnitude). See memory
+    // [[msrp-maxframesize-must-be-real-frame-size]].
+    s->talker.accumulated_latency_ns = 250000;
 }
 
 void srp_talker_enable(srp_state_t *s, uint8_t enable)

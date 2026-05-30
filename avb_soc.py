@@ -735,7 +735,12 @@ class AVBSoC(SoCCore):
         sample_rdy_w = Signal()
         sample_pop_w = Signal()
         sample_ovf_w = Signal(32)
-        usb_feedback = Signal(32)
+        # USB async-feedback inputs to the wrapper: the media-clock strobe and
+        # the consumer-FIFO level. The wrapper now measures the rate + computes
+        # the feedback internally (SOF-synchronised); we just feed it these two.
+        # block_level is a forward Signal driven from aaf_pkt.block_level below
+        # (aaf_pkt is created after this Instance).
+        usb_block_level = Signal(8)
 
         self.specials += Instance("usb_avb_subsystem",
             i_clk       = ClockSignal("sys"),
@@ -753,7 +758,8 @@ class AVBSoC(SoCCore):
             o_sample_readable       = sample_rdy_w,
             i_sample_pop            = sample_pop_w,
             o_sample_overflow_count = sample_ovf_w,
-            i_feedback_value        = usb_feedback,
+            i_sample_strobe         = self.mcr.sample_strobe,
+            i_block_level           = usb_block_level,
         )
 
         # Firmware-facing drain: 2 CSR ops/sample (read packed head, then
@@ -801,56 +807,15 @@ class AVBSoC(SoCCore):
         self.comb += sample_pop_w.eq(
             Mux(aaf_pkt.enable.storage, aaf_pkt.usb_pop, self.usb_sample_pop.re))
 
-        # ---- USB async-feedback flow control from the MCR media clock (P3.4) ----
-        # The wrapper now actually transmits usb_feedback (Q16.16 samples per
-        # microframe, nominal 48k = 0x0006_0000). Drive the host to deliver at
-        # exactly the rate the gateware consumes, so the block FIFO neither
-        # overflows nor empties.
-        #
-        # Feed-forward from the NCO increment (= the CRF-locked consumption
-        # rate): fb = fs/8000 * 2^16 = increment*sys_clk/(2^16*8000). With
-        # sys_clk=50e6 the constant is exactly 400000/2^22, so
-        # fb_ff = (increment*400000) >> 22, and 400000 = sum of bits
-        # {7,9,11,12,17,18} → a DSP-free shift-add (default increment → 0x60000).
-        #
-        # FULLY PIPELINED: usb_feedback is a slowly-varying servo-rate value, so
-        # registering every stage costs nothing functionally (a few sys cycles
-        # of latency) and is essential for timing — as a wide combinational cone
-        # hung off the increment CSR it scattered the CSR-bus placement and
-        # dropped sys_clk below 50 MHz (build5). Registered, it's off the
-        # critical path.
-        _inc = self.mcr._increment.storage
-        inc_r = Signal(32)
-        self.sync += inc_r.eq(_inc)
-        fb_num = Signal(51)
-        self.sync += fb_num.eq((inc_r << 7) + (inc_r << 9) + (inc_r << 11) +
-                               (inc_r << 12) + (inc_r << 17) + (inc_r << 18))
-        fb_ff = Signal(32)
-        self.sync += fb_ff.eq(fb_num >> 22)
-
-        # Proportional trim to recentre the block FIFO at its midpoint: FIFO
-        # low → nudge host faster; FIFO high → slower. Gain 256 per block
-        # (~0.125 samples/uframe = ~1000 smp/s full-scale at +-half-depth).
-        # Tuned on HW: <<7 (500 smp/s) too weak — couldn't drain off "full"
-        # against per-microframe burst-spill, stayed pinned + overflowed; <<9
-        # (2000 smp/s) had authority but overshot full→empty (underrun). <<8 is
-        # the middle: drains a full FIFO yet gentle enough to settle near centre
-        # without slamming empty. At centre trim→0 → pure MCR feed-forward
-        # (~0x60000), FIFO has headroom for the isochronous burst.
-        _mid = aaf_pkt.fifo_depth // 2
-        fb_err = Signal((len(aaf_pkt.block_level) + 2, True))
-        self.sync += fb_err.eq(_mid - aaf_pkt.block_level)
-        fb_val = Signal((34, True))
-        self.sync += fb_val.eq(fb_ff + (fb_err << 8))
-        # Apply only when the gateware owns the USB drain; otherwise (firmware
-        # path / not connected) request nominal 48k so the host stays sane.
-        fb_out = Signal(32)
-        self.sync += If(aaf_pkt.enable.storage,
-            fb_out.eq(fb_val[0:32]),
-        ).Else(
-            fb_out.eq(0x0006_0000),
-        )
-        self.comb += usb_feedback.eq(fb_out)
+        # ---- USB async feedback (P3.4) ----
+        # The rate measurement + FIFO-centering loop now lives INSIDE the
+        # wrapper (usb domain, SOF-synchronised — the ADAT/LUNA canonical
+        # topology; a per-sys-cycle loop here hunted/pinned the FIFO). We only
+        # feed it the consumer-FIFO level. When the gateware doesn't own the USB
+        # drain (firmware path), report mid-level so the wrapper applies no trim
+        # (feedback = pure measured media-clock rate).
+        self.comb += usb_block_level.eq(
+            Mux(aaf_pkt.enable.storage, aaf_pkt.block_level, aaf_pkt.fifo_depth // 2))
 
         # Frame-atomic TX mux: firmware SRAM reader (priority) + gateware AAF
         # talker → MAC core sink. Claim the wishbone-TX seam (see the LiteEth

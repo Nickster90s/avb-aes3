@@ -184,6 +184,13 @@ class AAFPacketizer(LiteXModule):
         block_fifo = SyncFIFO(width=channels * 32, depth=fifo_depth)
         self.submodules.block_fifo = block_fifo
 
+        # Live block-FIFO occupancy (0..fifo_depth), exposed for the USB
+        # feedback flow-control loop in avb_soc (drives the host to keep this
+        # FIFO centred). self.fifo_depth lets the loop compute the midpoint.
+        self.block_level = Signal(max=fifo_depth + 1)
+        self.fifo_depth  = fifo_depth
+        self.comb += self.block_level.eq(block_fifo.level)
+
         cur  = Array([Signal(32) for _ in range(channels)])
         have = Signal()
 

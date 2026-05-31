@@ -24,43 +24,43 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   wire [32:0] \$26 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:261" *)
   wire \$28 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:297" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *)
   wire [8:0] \$30 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:300" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:308" *)
   wire [20:0] \$32 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:300" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:308" *)
   wire [20:0] \$33 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:303" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *)
   wire \$35 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:286" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:294" *)
   wire [19:0] \$37 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:302" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:310" *)
   wire [8:0] \$39 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:302" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:310" *)
   wire [8:0] \$40 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:303" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *)
   wire \$42 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:313" *)
   wire [36:0] \$44 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:313" *)
   wire [35:0] \$45 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:313" *)
   wire [34:0] \$46 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:313" *)
   wire [35:0] \$49 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:313" *)
   wire [15:0] \$50 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:313" *)
   wire [36:0] \$53 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:319" *)
   wire [31:0] \$55 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:319" *)
   wire [14:0] \$56 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:319" *)
   wire [31:0] \$58 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:136" *)
   wire \$6 ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:319" *)
   wire [31:0] \$60 ;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:143" *)
   wire \$8 ;
@@ -84,17 +84,17 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/hdl/ir.py:508" *)
   input clk;
   wire clk;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:293" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:301" *)
   reg [19:0] clock_counter = 20'h00000;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:293" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:301" *)
   reg [19:0] \clock_counter$next ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire dm_pulldown;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire dp_pulldown;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:296" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:304" *)
   wire [8:0] err;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:290" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:298" *)
   wire [7:0] fb_level_sync_level_usb;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/utils/edgetopulse.py:16" *)
   reg fb_strobe_edge_edge_in = 1'h0;
@@ -102,11 +102,11 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   reg \fb_strobe_edge_edge_in$next ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amlib/utils/edgetopulse.py:17" *)
   wire fb_strobe_edge_pulse_out;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:283" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:291" *)
   wire fb_strobe_sync_strobe_usb;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:295" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:303" *)
   reg [31:0] fb_value = 32'd393216;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:295" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:303" *)
   reg [31:0] \fb_value$next ;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire host_disconnect;
@@ -175,11 +175,11 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   wire sample_strobe;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire session_valid;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:294" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:302" *)
   reg [7:0] sof_counter = 8'h00;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:294" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:302" *)
   reg [7:0] \sof_counter$next ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:286" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:294" *)
   wire strobe_tick;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/luna/gateware/interface/utmi.py:96" *)
   wire term_select;
@@ -261,16 +261,16 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   assign \$23  = \out2ch_valid$4  & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:245" *) \$21 ;
   assign \$26  = overflow_usb + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:246" *) 1'h1;
   assign \$28  = sample_pop & (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:261" *) bridge_fifo_r_rdy;
-  assign \$30  = 6'h20 - (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:297" *) fb_level_sync_level_usb;
-  assign \$33  = clock_counter + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:300" *) 1'h1;
-  assign \$35  = ! (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:303" *) sof_counter;
-  assign \$37  = + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:286" *) strobe_tick;
-  assign \$40  = sof_counter + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:302" *) 1'h1;
-  assign \$42  = ! (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:303" *) sof_counter;
-  assign \$45  = + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *) \$46 ;
-  assign \$49  = + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *) $signed(\$50 );
-  assign \$53  = $signed(\$45 ) + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *) $signed(\$49 );
-  assign \$58  = fb_value >>> (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *) \$56 ;
+  assign \$30  = 6'h20 - (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:305" *) fb_level_sync_level_usb;
+  assign \$33  = clock_counter + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:308" *) 1'h1;
+  assign \$35  = ! (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *) sof_counter;
+  assign \$37  = + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:294" *) strobe_tick;
+  assign \$40  = sof_counter + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:310" *) 1'h1;
+  assign \$42  = ! (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *) sof_counter;
+  assign \$45  = + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:313" *) \$46 ;
+  assign \$49  = + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:313" *) $signed(\$50 );
+  assign \$53  = $signed(\$45 ) + (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:313" *) $signed(\$49 );
+  assign \$58  = fb_value >>> (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:319" *) \$56 ;
   always @(posedge \usb_clk$1 )
     wrap_rstcnt <= \wrap_rstcnt$next ;
   always @(posedge \usb_clk$1 )
@@ -411,13 +411,13 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   always @* begin
     if (\$auto$verilog_backend.cc:2334:dump_module$1 ) begin end
     \clock_counter$next  = clock_counter;
-    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:299" *)
+    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:307" *)
     if (strobe_tick) begin
       \clock_counter$next  = \$33 [19:0];
     end
-    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:301" *)
+    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:309" *)
     if (usb_sof_detected) begin
-      (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:303" *)
+      (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *)
       if (\$35 ) begin
         \clock_counter$next  = \$37 ;
       end
@@ -430,7 +430,7 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   always @* begin
     if (\$auto$verilog_backend.cc:2334:dump_module$1 ) begin end
     \sof_counter$next  = sof_counter;
-    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:301" *)
+    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:309" *)
     if (usb_sof_detected) begin
       \sof_counter$next  = \$40 [7:0];
     end
@@ -454,9 +454,9 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   always @* begin
     if (\$auto$verilog_backend.cc:2334:dump_module$1 ) begin end
     \fb_value$next  = fb_value;
-    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:301" *)
+    (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:309" *)
     if (usb_sof_detected) begin
-      (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:303" *)
+      (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:311" *)
       if (\$42 ) begin
         \fb_value$next  = \$53 [31:0];
       end
@@ -514,7 +514,7 @@ module usb_avb_subsystem(ulpi_dir_i, ulpi_nxt_i, ulpi_data_i, ulpi_data_o, ulpi_
   assign ulpi_rst_o = 1'h0;
   assign \usb_clk$1  = usb_clk;
   assign \$46  = { 7'h00, clock_counter, 8'h00 };
-  assign \$50  = { \$30 [8], \$30 [8], \$30 [8], \$30 , 4'h0 };
+  assign \$50  = { \$30 [8], \$30 , 6'h00 };
   assign \$56  = { usb_address, 3'h0 };
   assign \$60 [31:8] = 24'h000000;
   assign \$60 [7:0] = \$58 [7:0];
@@ -2669,7 +2669,7 @@ module \usb_avb_subsystem.fb_level_sync (level_usb, usb_rst, block_level, usb_cl
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:81" *)
   input [7:0] block_level;
   wire [7:0] block_level;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:290" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:298" *)
   output [7:0] level_usb;
   wire [7:0] level_usb;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
@@ -2755,7 +2755,7 @@ module \usb_avb_subsystem.fb_strobe_sync (strobe_usb, usb_rst, sample_strobe, us
   reg stage1 = 1'h0;
   (* src = "/home/lisp/FPGA/avb-usb-host/.venv/lib/python3.11/site-packages/amaranth/lib/cdc.py:89" *)
   wire \stage1$next ;
-  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:283" *)
+  (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:291" *)
   output strobe_usb;
   wire strobe_usb;
   (* src = "/home/lisp/FPGA/avb-usb-host/gateware/usb_avb_subsystem.py:110" *)

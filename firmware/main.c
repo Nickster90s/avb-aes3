@@ -547,6 +547,7 @@ static void check_uart_cmd(void)
                    "  tx: count=%lu underrun=%lu lvl=%lu seq=%u\n"
                    "  usb-bridge: frames=%lu fifo_ovf=%lu\n"
                    "  aaf_pkt(gw): en=%d pkts=%lu underrun=%lu ovr=%lu fifo=%lu\n"
+                   "  soft-ila: push=%lu pop=%lu first=%lu\n"
                    "  last_pres_ts=%08lx\n",
                    aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
                    (unsigned long)aaf.rx_count, (unsigned long)aaf.rx_seq_errors,
@@ -563,6 +564,9 @@ static void check_uart_cmd(void)
                    (unsigned long)aaf_pkt_underrun_count_read(),
                    (unsigned long)aaf_pkt_overrun_count_read(),
                    (unsigned long)aaf_pkt_fifo_level_read(),
+                   (unsigned long)aaf_pkt_dbg_block_push_read(),
+                   (unsigned long)aaf_pkt_dbg_block_pop_read(),
+                   (unsigned long)aaf_pkt_dbg_first_read(),
                    (unsigned long)aaf.last_presentation_ts);
             break;
         case 't': {

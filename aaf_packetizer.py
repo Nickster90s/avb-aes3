@@ -174,6 +174,12 @@ class AAFPacketizer(LiteXModule):
         self.underrun_count = CSRStatus(32, description="Media-clock ticks where block_fifo was empty (silence inserted).")
         self.overrun_count  = CSRStatus(32, description="send_req arriving while builder busy (packet skipped — should stay 0).")
         self.fifo_level     = CSRStatus(blk_bits + 8, description="block_fifo occupancy (blocks).")
+        # Flow-control diagnostics (soft ILA): measure block production vs
+        # consumption to resolve the FIFO-overflow contradiction. Rate them
+        # over a precise interval from the firmware `a` command.
+        self.dbg_block_push = CSRStatus(32, description="blocks PRODUCED (block_fifo.we) — assembler frame rate.")
+        self.dbg_block_pop  = CSRStatus(32, description="blocks CONSUMED (block_fifo.re) — packetizer strobe rate.")
+        self.dbg_first      = CSRStatus(32, description="`first` markers consumed (do_pop & first) — host frame boundaries.")
 
         # MAC error lane is always 0 for our generated frames.
         self.comb += source.error.eq(0)
@@ -211,6 +217,21 @@ class AAFPacketizer(LiteXModule):
         self.comb += [
             block_fifo.din.eq(Cat(*cur)),
             block_fifo.we.eq(do_pop & need_push),
+        ]
+
+        # Soft-ILA counters: production (we), consumption (re), frame markers.
+        _push_cnt = Signal(32)
+        _pop_cnt  = Signal(32)
+        _first_cnt = Signal(32)
+        self.sync += [
+            If(block_fifo.we,           _push_cnt.eq(_push_cnt + 1)),
+            If(block_fifo.re,           _pop_cnt.eq(_pop_cnt + 1)),
+            If(do_pop & first,          _first_cnt.eq(_first_cnt + 1)),
+        ]
+        self.comb += [
+            self.dbg_block_push.status.eq(_push_cnt),
+            self.dbg_block_pop.status.eq(_pop_cnt),
+            self.dbg_first.status.eq(_first_cnt),
         ]
         self.sync += [
             If(do_pop,

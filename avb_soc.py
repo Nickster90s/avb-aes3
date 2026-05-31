@@ -801,11 +801,15 @@ class AVBSoC(SoCCore):
             usb_sample_lo     = sample_lo_w,
             usb_sample_hi     = sample_hi_w,
             usb_readable      = sample_rdy_w,
+            fifo_depth        = 128,   # SRC ring: deeper → servo converges before a rail
         )
-        # USB FIFO pop is owned by the gateware when aaf_pkt.enable is set,
-        # else by firmware's usb_sample_pop CSR (drain fallback preserved).
-        self.comb += sample_pop_w.eq(
-            Mux(aaf_pkt.enable.storage, aaf_pkt.usb_pop, self.usb_sample_pop.re))
+        # USB FIFO pop is ALWAYS owned by the gateware assembler now: its do_pop
+        # drains-and-discards while the talker is disabled (see aaf_packetizer),
+        # so the cd_usb→sys bridge never backs up. The old firmware-CSR drain
+        # fallback couldn't keep up with 384 ksample/s and left the block_fifo
+        # pinned full at stream start (zero jitter headroom). usb_sample_pop CSR
+        # is retained for diagnostics but no longer the drain path.
+        self.comb += sample_pop_w.eq(aaf_pkt.usb_pop)
 
         # ---- USB async feedback (P3.4) ----
         # The rate measurement + FIFO-centering loop now lives INSIDE the
@@ -840,6 +844,7 @@ class AVBSoC(SoCCore):
 def main():
     parser = argparse.ArgumentParser(description="AVB-AES3 SoC on Colorlight i9+")
     parser.add_argument("--build",        action="store_true", help="Build bitstream.")
+    parser.add_argument("--soft-only",    action="store_true", help="Generate software headers only (no P&R).")
     parser.add_argument("--load",         action="store_true", help="Load bitstream.")
     parser.add_argument("--seed", default=4, type=int, help="nextpnr P&R seed.")
     parser.add_argument("--no-floorplan", action="store_true",
@@ -895,6 +900,11 @@ def main():
         builder_kwargs["output_dir"] = args.output_dir
 
     builder = Builder(soc, **builder_kwargs)
+    if args.soft_only:
+        # Generate software headers (csr.h etc.) WITHOUT running P&R, so firmware
+        # can be compiled against new CSRs before the (slow) gateware build.
+        builder.build(run=False)
+        return
     if args.build:
         # nextpnr-xilinx seed pinned to 4. Patch #3 (LITEETH_PATCHES.md,
         # TX-only sys-datapath) made eth_tx_clk robust across seeds (163 MHz

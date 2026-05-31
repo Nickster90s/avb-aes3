@@ -116,6 +116,8 @@ static uint32_t rx_avb_stream_mcast;
 static uint32_t rx_avtp_crf, rx_avtp_aaf;
 static uint32_t usb_to_aaf_frames;   // USB→AAF bridge frames pushed (#67)
 static uint8_t  aaf_gw_enabled;      // 1 = gateware aaf_pkt owns the USB→AVB AAF stream
+static uint32_t usb_lock_calls;      // diag: USB-FIFO servo invocations
+static uint8_t  usb_nco_freeze;      // diag: hold NCO at base (test implicit feedback)
 static void     aaf_gw_set(uint8_t on);          // defined below usb_aaf_drain
 static void     aaf_gw_push_binding(void);
 static uint8_t  rx_crf_last_sid[8];   // last CRF stream_id we saw on the wire
@@ -548,6 +550,7 @@ static void check_uart_cmd(void)
                    "  usb-bridge: frames=%lu fifo_ovf=%lu\n"
                    "  aaf_pkt(gw): en=%d pkts=%lu underrun=%lu ovr=%lu fifo=%lu\n"
                    "  soft-ila: push=%lu pop=%lu first=%lu\n"
+                   "  usb-src: step=%lu base=%lu level=%ld inc=%lu calls=%lu\n"
                    "  last_pres_ts=%08lx\n",
                    aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
                    (unsigned long)aaf.rx_count, (unsigned long)aaf.rx_seq_errors,
@@ -567,8 +570,18 @@ static void check_uart_cmd(void)
                    (unsigned long)aaf_pkt_dbg_block_push_read(),
                    (unsigned long)aaf_pkt_dbg_block_pop_read(),
                    (unsigned long)aaf_pkt_dbg_first_read(),
+                   (unsigned long)aaf_pkt_src_step_read(),
+                   (unsigned long)mcr.usb_integral,
+                   (long)mcr.usb_last_level,
+                   (unsigned long)mcr.current_increment,
+                   (unsigned long)usb_lock_calls,
                    (unsigned long)aaf.last_presentation_ts);
             break;
+        case 'f': {
+            usb_nco_freeze = !usb_nco_freeze;
+            printf("[USB] NCO freeze = %d (1=hold base 48k, 0=servo)\n", usb_nco_freeze);
+            break;
+        }
         case 't': {
             // Diagnostic: force-enable AAF TX without waiting for Hive
             // CONNECT_TX_COMMAND. Sets a hardcoded dest_mac + stream_id
@@ -946,6 +959,7 @@ static void aaf_gw_set(uint8_t on)
     if (on) {
         aaf_gw_push_binding();
         aaf_pkt_enable_write(1);
+        mcr_usb_lock_reset(&mcr);   // fresh USB-FIFO servo state for this stream
     } else {
         aaf_pkt_enable_write(0);
     }
@@ -1107,6 +1121,72 @@ int main(void)
         mcr_pump_hw(&mcr);        // flood-proof servo feed from gateware CRF FIFO
         mcr_servo_update(&mcr);   // also consume any CPU-path CRF sample
         mcr_watchdog_tick(&mcr, gptp_uptime_ms());
+
+        // USB→AVB ASYNC SRC rate servo. The NCO is the FIXED gPTP output media
+        // clock (watchdog holds it at base when unbound). Here we trim the SRC
+        // resampling ratio `src_step` (Q1.31, 1<<31 = 1.0) so the SRC ring stays
+        // centred. FEEDFORWARD: every 64 ms set the baseline step from the
+        // measured input frame rate (push counter), so it converges instantly
+        // instead of winding an integral for seconds. FEEDBACK: gentle PI trim
+        // on (ring_level - centre). This does NOT feed back to the USB host, so
+        // it cannot run away (build25 proved the NCO-follows-FIFO servo does).
+        // Ring depth 64 → centre 32; f_out ≈ 48000.
+        #define SRC_CENTER     64       // ring depth 128 → centre 64
+        #define SRC_FULL_GUARD 120      // don't measure push when ring near-full
+        // PI on the SRC ring (integrator plant, g≈2.235e-5 frames/s per step-unit,
+        // 1 kHz update). Tuned for ζ≈0.7: ωn=√(g·KI·1000), ζ=g·KP/(2ωn). KI=400 →
+        // ωn≈3 rad/s; KP≈180000 → ζ≈0.67 (~2 s settle). The OLD KP=40000 gave
+        // ζ≈0.15 — wildly underdamped; the low clamp just railed it (looked
+        // "stuck full") instead of oscillating. Clamp now high enough for the
+        // integral to drive consume ABOVE the host and actually drain a full ring.
+        #define SRC_KP         180000
+        #define SRC_KI         400
+        #define SRC_INT_CLAMP  800000   // rate authority: hold + drain at host offsets to ~+10%
+        #define SRC_NOM        (1u << 31)
+        {
+            static uint8_t  src_en;     // was-enabled latch (reset feedforward on enable)
+            static uint32_t last_ms, last_ff_ms, last_push, step_base;
+            static int32_t  src_integral;
+            if (aaf_gw_enabled && !mcr.bound) {
+                uint32_t now_ms = gptp_uptime_ms();
+                if (!src_en) {
+                    // RESET on enable: the feedforward statics persist across
+                    // streams; without this the first window used dms=uptime,
+                    // dpush=recent → f_in≈half → step too low → ring overflows.
+                    src_en = 1;
+                    last_ms = now_ms; last_ff_ms = now_ms;
+                    last_push = aaf_pkt_dbg_block_push_read();
+                    step_base = SRC_NOM; src_integral = 0;
+                    aaf_pkt_src_step_write(SRC_NOM);
+                }
+                if (now_ms != last_ms) {
+                    last_ms = now_ms;
+                    usb_lock_calls++;
+                    int level = (int)aaf_pkt_fifo_level_read();
+                    // Pure PI around NOMINAL — NO feedforward. The push-rate
+                    // feedforward is unreliable: a full ring throttles the
+                    // assembler so push reads low → step spirals to the floor.
+                    // The properly-damped PI (ζ≈0.7) finds the host offset on its
+                    // own via the integral; the deep ring rides out the ~2 s
+                    // startup convergence. (last_push/last_ff_ms now unused.)
+                    (void)last_push; (void)last_ff_ms;
+                    step_base = SRC_NOM;
+                    int error = level - SRC_CENTER;
+                    src_integral += error;
+                    if (src_integral >  SRC_INT_CLAMP) src_integral =  SRC_INT_CLAMP;
+                    if (src_integral < -SRC_INT_CLAMP) src_integral = -SRC_INT_CLAMP;
+                    int64_t trim = (int64_t)error * SRC_KP + (int64_t)src_integral * SRC_KI;
+                    int64_t step = (int64_t)step_base + trim;
+                    if (step < (1 << 30))    step = (1 << 30);
+                    if (step > 0xF0000000LL) step = 0xF0000000LL;
+                    aaf_pkt_src_step_write((uint32_t)step);
+                    mcr.usb_last_level = level;              // diag
+                    mcr.usb_integral   = (int64_t)step_base; // diag: step_base
+                }
+            } else {
+                src_en = 0;
+            }
+        }
         // CRF data-flow re-bootstrap: if the CRF listener is ACMP-connected
         // but no CRF has arrived for a few seconds, re-trigger the talker
         // (Auvitran expires its CRF talker on its own MSRP LeaveAll). Uses

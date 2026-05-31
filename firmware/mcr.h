@@ -29,6 +29,31 @@
 #define MCR_INTEGRAL_CLAMP    1000000        // ±1 ms worth of phase
 #define MCR_INCREMENT_MAX_DELTA  (1 << 24)   // ~4 Mppm guard against wild swings
 
+// USB-source media-clock recovery (NCO follows the USB block FIFO). Used when
+// we are the USB→AVB talker + clock master and NOT locked to a CRF: servo the
+// NCO so AVTP consumption exactly tracks the USB host delivery rate, keeping
+// the block FIFO centred → bit-perfect regardless of whether the host honours
+// async feedback (Linux snd-usb-audio does not). Called ~1 kHz. Gains tunable.
+// PI servo, properly damped. The DC correction needed (~16500 increment units
+// = the host's ~0.4% rate excess) is large, so pure-P would need a huge gain to
+// hold near centre and would saturate/bang-bang. The INTEGRAL supplies the DC
+// offset; the proportional damps. Tuned for ζ≈0.68 at ~1 kHz update on the
+// FIFO-integrator plant (g≈0.01164 Hz/unit): ωn=√(g·KI·1000), ζ=KP·√g/(2·√(KI·
+// 1000)). KP=400, KI=1 → ζ≈0.68, settles ~1.7 s, no saturation at the operating
+// point. (The first PI used KP=200/KI=4 → ζ≈0.17, severely underdamped → hunt.)
+#define USB_KP                400       // proportional (damping), per FIFO-block error
+#define USB_KI_NUM            1         // integral (DC offset), per block-error per call
+#define USB_KI_DEN            1
+#define USB_INT_CLAMP         100000    // anti-windup (must reach the host offset)
+// GENTLE-DRIFT shaping: the FIFO now starts CENTRED (gateware prime + always-
+// drain), so the servo only trims the small host-vs-NCO offset (a few frames/s)
+// and slow drift — NOT a full FIFO. Heavily low-pass the level (≈2^5 ≈ 32 ms)
+// so the servo ignores host jitter / the intra-µframe sawtooth and reacts only
+// to genuine drift. Authority capped tight (±~0.78%) — far more than the real
+// offset needs, but bounds any pathological excursion.
+#define USB_FILT_SHIFT        5         // level IIR time constant (~2^5 updates)
+#define USB_CORR_SHIFT        6         // correction clamp = base_increment >> 6 (±1.56%)
+
 typedef struct {
     uint8_t  bound;
     uint8_t  stream_id[8];
@@ -51,6 +76,9 @@ typedef struct {
     int64_t  prev_offset_ns;
     uint8_t  have_prev;
     int64_t  servo_integral;
+    int64_t  usb_integral;      // USB-FIFO-lock servo integral (DC rate offset)
+    int32_t  usb_level_filt;    // USB-FIFO-lock servo: low-passed level (Q8)
+    int32_t  usb_last_level;    // diag: last FIFO level the USB servo read
     uint32_t base_increment;    // Nominal NCO inc; set at init from sys_clk_freq + fs
     uint32_t current_increment; // Last value written to NCO CSR
     uint8_t  servo_locked;
@@ -110,6 +138,13 @@ void mcr_pump_hw(mcr_state_t *m);
 // Called once per main loop iteration; runs the PI servo if there's a
 // new sample. Safe to call when not bound (no-op).
 void mcr_servo_update(mcr_state_t *m);
+
+// USB-source clock recovery: drive the NCO so the USB block FIFO stays at
+// `center`, i.e. AVTP consumption tracks the USB host's delivery rate. Call at
+// ~1 kHz while we're the USB→AVB talker and not CRF-bound. fifo_level/center in
+// block units (0..depth). Resets via mcr_usb_lock_reset().
+void mcr_usb_lock(mcr_state_t *m, int fifo_level, int center);
+void mcr_usb_lock_reset(mcr_state_t *m);
 
 // Called once per main loop iteration. If CRF input has been stale for
 // more than MCR_STALE_THRESHOLD_MS, snap current_increment back to

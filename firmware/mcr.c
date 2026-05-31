@@ -223,6 +223,44 @@ void mcr_process_rx(mcr_state_t *m, const uint8_t *frame, uint32_t len)
     m->rx_count++;
 }
 
+void mcr_usb_lock_reset(mcr_state_t *m)
+{
+    m->usb_integral   = 0;
+    m->usb_level_filt = 32 << 8;   // start centred (Q8); gateware primes to here
+}
+
+void mcr_usb_lock(mcr_state_t *m, int fifo_level, int center)
+{
+    m->usb_last_level = fifo_level;     // diag: what the servo actually sees
+
+    // Heavily low-pass the level (Q8) so the servo reacts only to genuine drift,
+    // not host jitter / the intra-µframe sawtooth (gentle). The FIFO now starts
+    // CENTRED (gateware prime + always-drain), so this only trims the small
+    // host-vs-NCO offset, not a full buffer.
+    m->usb_level_filt += ((fifo_level << 8) - m->usb_level_filt) >> USB_FILT_SHIFT;
+    int level_f = m->usb_level_filt >> 8;
+
+    // PI on the filtered level. error>0 (above centre) ⇒ consume slightly
+    // faster. Integral carries the steady offset (FIFO holds centre); the
+    // proportional damps. Anti-windup on the integral.
+    int error = level_f - center;
+    m->usb_integral += error;
+    if (m->usb_integral >  USB_INT_CLAMP) m->usb_integral =  USB_INT_CLAMP;
+    if (m->usb_integral < -USB_INT_CLAMP) m->usb_integral = -USB_INT_CLAMP;
+
+    int64_t correction = (int64_t)error * USB_KP
+                       + (m->usb_integral * USB_KI_NUM) / USB_KI_DEN;
+    int64_t maxd = (int64_t)m->base_increment >> USB_CORR_SHIFT;   // ±~0.78% guard
+    if (correction >  maxd) correction =  maxd;
+    if (correction < -maxd) correction = -maxd;
+
+    int64_t inc = (int64_t)m->base_increment + correction;
+    if (inc < 1) inc = 1;
+    if (inc > 0xFFFFFFFFLL) inc = 0xFFFFFFFFLL;
+    m->current_increment = (uint32_t)inc;
+    mcr_increment_write(m->current_increment);
+}
+
 void mcr_servo_update(mcr_state_t *m)
 {
     if (!m->bound || m->servo_consumed) return;

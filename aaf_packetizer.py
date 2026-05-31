@@ -185,100 +185,162 @@ class AAFPacketizer(LiteXModule):
         self.comb += source.error.eq(0)
 
         # =========================================================
-        # 1) USB ingress → 8-channel frame assembler → block_fifo
+        # 1) USB ingress → 8-channel frame assembler → SRC ring
         # =========================================================
-        block_fifo = SyncFIFO(width=channels * 32, depth=fifo_depth)
-        self.submodules.block_fifo = block_fifo
+        # The block FIFO is replaced by an ASYNC SAMPLE-RATE CONVERTER (SRC)
+        # ring. The assembler writes whole 8ch frames at the USB host rate; the
+        # media-clock strobe (gPTP-locked NCO) reads INTERPOLATED frames at
+        # exactly f_out. A fractional phase accumulator + per-channel linear
+        # interpolation does the resampling; `src_step` (Q1.31 ratio f_in/f_out,
+        # 1<<31 == 1.0) is servo'd by firmware from the ring level so the ring
+        # stays centred. Because the OUTPUT rate is fixed (gPTP) and does NOT
+        # feed back to the USB host, there is no runaway — unlike the
+        # NCO-follows-FIFO servo (build25 proved the host chases the NCO).
+        assert (fifo_depth & (fifo_depth - 1)) == 0, "SRC ring depth must be power of 2"
+        log2depth = log2_int(fifo_depth)
+        # SRC ring = dual-read BRAM Memory (synchronous reads → block RAM, not
+        # LUT-RAM: the distributed-RAM version's ~1.5k LUTs congested the fabric,
+        # dropped sys_clk and pushed the USB cells off their floorplan → marginal
+        # HS enumeration. BRAM frees the LUTs and is the right form for 50+ ch.)
+        # The 1-cycle sync-read latency is harmless: rd_int/frac are stable for
+        # ~1042 sys cycles between strobes, so the read+interp pipeline settles.
+        mem = Memory(channels * 32, fifo_depth)
+        self.specials += mem
+        wp  = mem.get_port(write_capable=True)
+        rp0 = mem.get_port()      # synchronous read (BRAM)
+        rp1 = mem.get_port()
+        self.specials += wp, rp0, rp1
 
-        # Live block-FIFO occupancy (0..fifo_depth), exposed for the USB
-        # feedback flow-control loop in avb_soc (drives the host to keep this
-        # FIFO centred). self.fifo_depth lets the loop compute the midpoint.
+        self.src_step = CSRStorage(32, reset=1 << 31,
+            description="SRC resampling ratio f_in/f_out in Q1.31 (1<<31 = 1.0).")
+        self.fifo_depth = fifo_depth
+
+        wr     = Signal(32)        # frames written (free-running counter)
+        rd_int = Signal(32)        # integer read index (free-running counter)
+        frac   = Signal(31)        # fractional phase, Q0.31
+        # SIGNED occupancy: wr-rd_int. Must be signed — if the consumer ever
+        # reaches the producer, an unsigned wr-rd_int underflows to a huge value
+        # that masquerades as "full", so have2 stays true and the consumer reads
+        # past the write pointer forever (garbage, no underrun flagged). Signed,
+        # it goes negative → have2 false → the consumer stalls and waits.
+        level  = Signal((33, True))
+        self.comb += level.eq(wr - rd_int)
         self.block_level = Signal(max=fifo_depth + 1)
-        self.fifo_depth  = fifo_depth
-        self.comb += self.block_level.eq(block_fifo.level)
+        self.comb += self.block_level.eq(level)        # legacy port for avb_soc
+
+        rd0 = Signal(log2depth); rd1 = Signal(log2depth)
+        self.comb += [rd0.eq(rd_int[0:log2depth]), rd1.eq((rd_int + 1)[0:log2depth]),
+                      rp0.adr.eq(rd0), rp1.adr.eq(rd1)]
 
         cur  = Array([Signal(32) for _ in range(channels)])
         have = Signal()
-
         ch    = usb_sample_hi[0:ch_bits]
         first = usb_sample_hi[3]
         # 24-bit audio MSB-aligned into a 32-bit sample (= firmware v & 0xFFFFFF00).
         samp32 = Cat(Signal(8), usb_sample_lo[8:32])   # [0:8]=0, [8:32]=audio
 
-        # A `first` sample closes the previous frame: push it, then start fresh.
         need_push = first & have
-        # Only consume from the wrapper when we either don't need to push, or
-        # the block_fifo can accept the pushed block — otherwise stall (the
-        # sample waits in the wrapper's FIFO; its own overflow counter covers
-        # true loss). Gated by enable so firmware keeps the path when disabled.
-        do_pop = self.enable.storage & usb_readable & (~need_push | block_fifo.writable)
-        self.comb += self.usb_pop.eq(do_pop)
-
+        en = self.enable.storage
+        # ALWAYS drain the wrapper FIFO (discard when disabled) so the cd_usb→sys
+        # bridge never backs up. When enabled, stall the pop near-full so we never
+        # overwrite an unread frame.
+        do_pop  = usb_readable & (~en | ~need_push | (level < (fifo_depth - 2)))
+        ring_wr = Signal()
         self.comb += [
-            block_fifo.din.eq(Cat(*cur)),
-            block_fifo.we.eq(do_pop & need_push),
-        ]
-
-        # Soft-ILA counters: production (we), consumption (re), frame markers.
-        _push_cnt = Signal(32)
-        _pop_cnt  = Signal(32)
-        _first_cnt = Signal(32)
-        self.sync += [
-            If(block_fifo.we,           _push_cnt.eq(_push_cnt + 1)),
-            If(block_fifo.re,           _pop_cnt.eq(_pop_cnt + 1)),
-            If(do_pop & first,          _first_cnt.eq(_first_cnt + 1)),
-        ]
-        self.comb += [
-            self.dbg_block_push.status.eq(_push_cnt),
-            self.dbg_block_pop.status.eq(_pop_cnt),
-            self.dbg_first.status.eq(_first_cnt),
+            self.usb_pop.eq(do_pop), ring_wr.eq(en & do_pop & need_push),
+            wp.adr.eq(wr[0:log2depth]),
+            wp.dat_w.eq(Cat(*cur)),    # the just-completed frame (cur updates same edge)
+            wp.we.eq(ring_wr),
         ]
         self.sync += [
+            If(ring_wr, wr.eq(wr + 1)),
             If(do_pop,
-                If(need_push,
-                    # Start a new frame: zero all, drop this sample in its lane.
-                    *[cur[i].eq(0) for i in range(channels)],
-                ),
+                If(need_push, *[cur[i].eq(0) for i in range(channels)]),
                 cur[ch].eq(samp32),
                 have.eq(1),
             ),
         ]
 
         # =========================================================
-        # 2) Media-clock-paced read: block_fifo → pay ping-pong buffer
+        # 2) Media-clock-paced SRC read → pay ping-pong buffer
         # =========================================================
-        # pay addressed as fill*8+blk (depth 16 keeps the address a clean
-        # Cat(blk[3], buf[1]); slots 6,7 of each half are unused).
         pay      = Array([Signal(channels * 32) for _ in range(16)])
         fill_buf = Signal()
         send_buf = Signal()
         blk_idx  = Signal(blk_bits)
         send_req = Signal()
 
-        # Egress runs only when the gateware owns the stream. The NCO strobe
-        # free-runs regardless of enable, so gating here keeps us off the wire
-        # (FSM stays IDLE, source.valid=0) while firmware holds the path.
+        # Prime the ring to centre before consuming (equal jitter headroom).
+        primed = Signal()
+        _center = fifo_depth // 2
+        self.sync += [
+            If(~en, primed.eq(0)).Elif(level >= _center, primed.eq(1)),
+        ]
         strobe = Signal()
-        self.comb += strobe.eq(mcr.sample_strobe & self.enable.storage)
+        self.comb += strobe.eq(mcr.sample_strobe & en & primed)
+
+        # Linear interpolation between the two adjacent ring frames at `frac`,
+        # PIPELINED (2 registered stages) so the 64:1 frame mux and the 33×31
+        # multiply don't blow the 50 MHz sys path. rd_int/frac are stable between
+        # strobes (~1042 sys cycles), so the pipeline is always fully settled by
+        # the time a strobe samples `interp` — the constant latency is harmless.
+        f0_r   = Signal(channels * 32)   # stage 1: registered RAM read outputs
+        f1_r   = Signal(channels * 32)
+        frac_r = Signal(31)
+        self.sync += [f0_r.eq(rp0.dat_r), f1_r.eq(rp1.dat_r), frac_r.eq(frac)]
+        interp = Signal(channels * 32)   # stage 2: registered interpolation
+        for c in range(channels):
+            s0 = Signal((32, True)); s1 = Signal((32, True))
+            self.comb += [s0.eq(f0_r[c*32:(c+1)*32]),
+                          s1.eq(f1_r[c*32:(c+1)*32])]
+            delta = Signal((33, True)); self.comb += delta.eq(s1 - s0)
+            prod  = Signal((64, True)); self.comb += prod.eq(delta * frac_r)  # Q0.31
+            outc  = Signal((32, True)); self.comb += outc.eq(s0 + (prod >> 31))
+            self.sync += interp[c*32:(c+1)*32].eq(outc)
+        have2 = Signal(); self.comb += have2.eq(level >= 2)  # 2 frames → interp valid
+
         underruns = Signal(32)
         self.comb += [
-            block_fifo.re.eq(strobe & block_fifo.readable),
             self.underrun_count.status.eq(underruns),
-            self.fifo_level.status.eq(block_fifo.level),
+            self.fifo_level.status.eq(level),
         ]
+        # Phase advance: acc = frac + src_step; integer part advances rd_int (0..2).
+        acc = Signal(33)
+        self.comb += acc.eq(frac + self.src_step.storage)
+
+        # Soft-ILA counters: ring writes (production), strobes (consumption), firsts.
+        _push_cnt = Signal(32); _pop_cnt = Signal(32); _first_cnt = Signal(32)
+        self.sync += [
+            If(ring_wr,            _push_cnt.eq(_push_cnt + 1)),
+            If(strobe,             _pop_cnt.eq(_pop_cnt + 1)),
+            If(do_pop & first,     _first_cnt.eq(_first_cnt + 1)),
+        ]
+        self.comb += [
+            self.dbg_block_push.status.eq(_push_cnt),
+            self.dbg_block_pop.status.eq(_pop_cnt),
+            self.dbg_first.status.eq(_first_cnt),
+        ]
+
         self.sync += [
             send_req.eq(0),
             If(strobe,
-                # One block per media-clock tick: real data or silence.
-                If(block_fifo.readable,
-                    pay[Cat(blk_idx, fill_buf)].eq(block_fifo.dout),
+                If(have2,
+                    # Data present: interpolate AND advance the read phase. The
+                    # advance is gated by have2 so rd_int can NEVER overtake wr —
+                    # otherwise level=wr-rd_int underflows, wraps to a huge value
+                    # that masquerades as "full", and the consumer reads garbage.
+                    pay[Cat(blk_idx, fill_buf)].eq(interp),
+                    frac.eq(acc[0:31]),
+                    rd_int.eq(rd_int + acc[31:33]),    # advance by integer part (0..2)
                 ).Else(
+                    # Underrun: emit silence, HOLD the read phase (don't consume
+                    # past the write pointer).
                     pay[Cat(blk_idx, fill_buf)].eq(0),
                     underruns.eq(underruns + 1),
                 ),
                 If(blk_idx == (samples_per_packet - 1),
                     blk_idx.eq(0),
-                    send_buf.eq(fill_buf),     # hand the just-filled half to the builder
+                    send_buf.eq(fill_buf),
                     fill_buf.eq(~fill_buf),
                     send_req.eq(1),
                 ).Else(

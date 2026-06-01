@@ -1205,10 +1205,14 @@ int main(void)
                     usb_lock_calls++;
                     main_usb_fb_ovr_write(FB_NOM);          // pin USB feedback nominal
                     int level = (int)aaf_pkt_fifo_level_read();
-                    int32_t step = (int32_t)SRC_NOM + (level - SRC_CENTER) * SRC_KP;
-                    if (step < (int32_t)(SRC_NOM - SRC_CLAMP)) step = (int32_t)(SRC_NOM - SRC_CLAMP);
-                    if (step > (int32_t)(SRC_NOM + SRC_CLAMP)) step = (int32_t)(SRC_NOM + SRC_CLAMP);
-                    aaf_pkt_src_step_write((uint32_t)step);
+                    // Compute the ADJUSTMENT in signed int32 (small: |adj| <=
+                    // 256*16384 = 4.2M, fits), clamp THAT, then add to the
+                    // unsigned nominal. (Do NOT cast SRC_NOM=1<<31 to int32 — it
+                    // overflows to INT_MIN and railed the step to the clamp.)
+                    int32_t adj = (int32_t)(level - SRC_CENTER) * SRC_KP;
+                    if (adj < -(int32_t)SRC_CLAMP) adj = -(int32_t)SRC_CLAMP;
+                    if (adj >  (int32_t)SRC_CLAMP) adj =  (int32_t)SRC_CLAMP;
+                    aaf_pkt_src_step_write((uint32_t)(SRC_NOM + (uint32_t)adj));
                     mcr.usb_last_level = level;
                 }
             }

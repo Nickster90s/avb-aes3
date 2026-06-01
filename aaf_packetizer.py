@@ -269,14 +269,24 @@ class AAFPacketizer(LiteXModule):
 
         need_push = first & have
         en = self.enable.storage
-        # Always drain the wrapper bridge (discard when disabled) so the cd_usb->sys
-        # bridge never backs up. When enabled, stall the pop near-full so we never
-        # overwrite an unread frame.
-        do_pop  = usb_readable & (~en | ~need_push | (level < (fifo_depth - 2)))
+        # ALWAYS drain the wrapper bridge — do NOT stall on ring-full. The
+        # cd_usb->sys bridge is a 2nd buffer in series with this ring; stalling
+        # do_pop when the ring fills lets the bridge accumulate, making it a
+        # second integrator. Two cascaded integrators + the proportional
+        # src_step servo = a relaxation limit-cycle (ring rode full with deep
+        # dips, on-HW 2026-06-01). Draining unconditionally keeps the bridge
+        # near-empty (pure CDC latency, not an integrator) so only the ring
+        # integrates -> the P servo is first-order stable. On ring-full we DROP
+        # the just-completed frame (don't write) instead of back-pressuring;
+        # once the servo centres (~level 286) the ring never nears full, so
+        # drops happen only during the startup transient.
+        have_space = Signal()
+        self.comb += have_space.eq(level < (fifo_depth - 2))
+        do_pop  = usb_readable
         ring_wr = Signal()
         self.comb += [
             self.usb_pop.eq(do_pop),
-            ring_wr.eq(en & do_pop & need_push),
+            ring_wr.eq(en & do_pop & need_push & have_space),
             wp.adr.eq(wr[0:log2depth]),
             wp.dat_w.eq(Cat(*cur)),    # the just-completed frame (cur updates same edge)
             wp.we.eq(ring_wr),

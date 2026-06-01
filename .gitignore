@@ -7,3 +7,6 @@ firmware/firmware.bin
 __pycache__/
 *.pyc
 *.vcd
+csr.csv
+analyzer.csv
+stream.cfg

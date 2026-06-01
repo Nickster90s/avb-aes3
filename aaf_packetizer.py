@@ -180,6 +180,12 @@ class AAFPacketizer(LiteXModule):
         self.dbg_block_push = CSRStatus(32, description="blocks PRODUCED (block_fifo.we) — assembler frame rate.")
         self.dbg_block_pop  = CSRStatus(32, description="blocks CONSUMED (block_fifo.re) — packetizer strobe rate.")
         self.dbg_first      = CSRStatus(32, description="`first` markers consumed (do_pop & first) — host frame boundaries.")
+        # Min/max of block_fifo.level since last reset — resolves "stuck full" vs
+        # "oscillating full↔empty" (aggregate counters can't). Write dbg_level_rst
+        # to start a fresh window.
+        self.dbg_level_min  = CSRStatus(16, description="min block_fifo.level since reset.")
+        self.dbg_level_max  = CSRStatus(16, description="max block_fifo.level since reset.")
+        self.dbg_level_rst  = CSRStorage(1, description="write 1 → restart min/max window at current level.")
 
         # MAC error lane is always 0 for our generated frames.
         self.comb += source.error.eq(0)
@@ -200,6 +206,23 @@ class AAFPacketizer(LiteXModule):
         self.block_level = Signal(max=fifo_depth + 1)
         self.fifo_depth  = fifo_depth
         self.comb += self.block_level.eq(block_fifo.level)
+
+        # Min/max level tracker (resolves stuck-full vs oscillating).
+        _lvl_min = Signal(max=fifo_depth + 1, reset=fifo_depth)
+        _lvl_max = Signal(max=fifo_depth + 1, reset=0)
+        self.sync += [
+            If(self.dbg_level_rst.re,
+                _lvl_min.eq(block_fifo.level),
+                _lvl_max.eq(block_fifo.level),
+            ).Else(
+                If(block_fifo.level < _lvl_min, _lvl_min.eq(block_fifo.level)),
+                If(block_fifo.level > _lvl_max, _lvl_max.eq(block_fifo.level)),
+            ),
+        ]
+        self.comb += [
+            self.dbg_level_min.status.eq(_lvl_min),
+            self.dbg_level_max.status.eq(_lvl_max),
+        ]
 
         cur  = Array([Signal(32) for _ in range(channels)])
         have = Signal()

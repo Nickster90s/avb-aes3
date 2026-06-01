@@ -551,7 +551,7 @@ static void check_uart_cmd(void)
                    "  usb-bridge: frames=%lu fifo_ovf=%lu\n"
                    "  aaf_pkt(gw): en=%d pkts=%lu underrun=%lu ovr=%lu fifo=%lu\n"
                    "  soft-ila: push=%lu pop=%lu first=%lu\n"
-                   "  usb-fifo: level=%ld inc=%lu calls=%lu\n"
+                   "  usb-fifo: level=%ld min=%lu max=%lu fbovr=0x%lx inc=%lu calls=%lu\n"
                    "  last_pres_ts=%08lx\n",
                    aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
                    (unsigned long)aaf.rx_count, (unsigned long)aaf.rx_seq_errors,
@@ -572,9 +572,13 @@ static void check_uart_cmd(void)
                    (unsigned long)aaf_pkt_dbg_block_pop_read(),
                    (unsigned long)aaf_pkt_dbg_first_read(),
                    (long)mcr.usb_last_level,
+                   (unsigned long)aaf_pkt_dbg_level_min_read(),
+                   (unsigned long)aaf_pkt_dbg_level_max_read(),
+                   (unsigned long)main_usb_fb_ovr_read(),
                    (unsigned long)mcr.current_increment,
                    (unsigned long)usb_lock_calls,
                    (unsigned long)aaf.last_presentation_ts);
+            aaf_pkt_dbg_level_rst_write(1);   // restart min/max window for next 'a'
             break;
         case 'f': {
             usb_nco_freeze = !usb_nco_freeze;

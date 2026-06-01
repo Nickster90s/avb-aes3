@@ -430,7 +430,7 @@ static void check_uart_cmd(void)
                    (unsigned long)srp.join_count,
                    (unsigned long)srp.rx_pdu_count,
                    srp.domain_received,
-                   srp.talker_registered,
+                   srp_any_talker_registered(&srp),
                    srp.rx_sr_class, srp.rx_sr_prio, srp.rx_sr_vid,
                    srp.talker.priority_and_rank);
             printf("[AVDECC] adp=%lu acmp=%lu/%lu aecp=%lu/%lu "

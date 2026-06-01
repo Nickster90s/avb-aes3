@@ -353,18 +353,20 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
             s->talker_new_count++;
     }
 
-    // Listener Ready (if enabled). For the first 2 transmissions after
+    // Listener Ready — one attribute per enabled listener stream (CRF, AAF,
+    // …). MSRP allows multiple Listener attributes per PDU, each its own
+    // stream_id + applicant state. For the first 2 transmissions after
     // srp_listener_enable, emit MRPDU_NEW (event=0) so the bridge's
-    // registrar establishes fresh state for our attribute. After that,
-    // switch to JoinMt — mirrors mrpd's VN→AN→QA applicant transitions.
-    if (s->listener_enabled) {
-        uint8_t event = (s->listener_new_count < 2)
-                            ? MRP_EVT_NEW
-                            : MRP_EVT_JOININ;
-        p = msrp_emit_listener(p, s->listener_stream_id,
-                               s->listener_substate, leaveall, event);
-        if (s->listener_new_count < 2)
-            s->listener_new_count++;
+    // registrar establishes fresh state; then JoinIn — mirrors mrpd's
+    // VN→AN→QA applicant transitions.
+    for (int li = 0; li < SRP_MAX_LISTENER_STREAMS; li++) {
+        srp_listener_t *l = &s->listeners[li];
+        if (!l->enabled)
+            continue;
+        uint8_t event = (l->new_count < 2) ? MRP_EVT_NEW : MRP_EVT_JOININ;
+        p = msrp_emit_listener(p, l->stream_id, l->substate, leaveall, event);
+        if (l->new_count < 2)
+            l->new_count++;
     }
 
     // Final EndMark (end of MRPDU MessageList)
@@ -587,23 +589,27 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                 if (s->on_talker_advertise)
                     s->on_talker_advertise(vp, vp + 8);
 
-                // Check if this talker's stream_id matches what our listener wants
-                if (s->listener_enabled) {
+                // Does this TalkerAdvertise match ANY of our listener streams?
+                for (int li = 0; li < SRP_MAX_LISTENER_STREAMS; li++) {
+                    srp_listener_t *l = &s->listeners[li];
+                    if (!l->enabled)
+                        continue;
                     int match = 1;
                     for (int i = 0; i < 8; i++) {
-                        if (vp[i] != s->listener_stream_id[i]) {
-                            match = 0;
-                            break;
-                        }
+                        if (vp[i] != l->stream_id[i]) { match = 0; break; }
                     }
                     if (match) {
                         s->rx_match_count++;
-                        if (!s->talker_registered) {
-                            printf("[SRP] Talker registered for our stream\n");
-                        }
-                        s->talker_registered = 1;
-                        s->talker_last_seen_ms = gptp_uptime_ms();
-                        s->listener_substate = MSRP_LISTENER_READY;
+                        if (!l->talker_registered)
+                            printf("[SRP] Talker registered for our stream "
+                                   "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+                                   l->stream_id[0], l->stream_id[1],
+                                   l->stream_id[2], l->stream_id[3],
+                                   l->stream_id[4], l->stream_id[5],
+                                   l->stream_id[6], l->stream_id[7]);
+                        l->talker_registered   = 1;
+                        l->talker_last_seen_ms = gptp_uptime_ms();
+                        l->substate            = MSRP_LISTENER_READY;
                     }
                 }
             }
@@ -634,7 +640,7 @@ void srp_init(srp_state_t *s, const uint8_t *mac_addr)
     memset(s, 0, sizeof(*s));
     memcpy(s->src_mac, mac_addr, 6);
     srp_txslot = 0;
-    s->listener_substate = MSRP_LISTENER_ASKFAILED;
+    // listeners[] all start enabled=0 (no declarations) via the memset.
     printf("[SRP] Initialized (MSRP)\n");
 }
 
@@ -686,32 +692,73 @@ void srp_talker_enable(srp_state_t *s, uint8_t enable)
     }
 }
 
+// Find the listener entry whose stream_id matches, else NULL.
+static srp_listener_t *srp_find_listener(srp_state_t *s, const uint8_t *stream_id)
+{
+    for (int i = 0; i < SRP_MAX_LISTENER_STREAMS; i++) {
+        srp_listener_t *l = &s->listeners[i];
+        if (!l->enabled)
+            continue;
+        int match = 1;
+        for (int j = 0; j < 8; j++) {
+            if (l->stream_id[j] != stream_id[j]) { match = 0; break; }
+        }
+        if (match)
+            return l;
+    }
+    return NULL;
+}
+
+int srp_any_talker_registered(const srp_state_t *s)
+{
+    for (int i = 0; i < SRP_MAX_LISTENER_STREAMS; i++)
+        if (s->listeners[i].enabled && s->listeners[i].talker_registered)
+            return 1;
+    return 0;
+}
+
 void srp_listener_enable(srp_state_t *s, const uint8_t *stream_id, uint8_t enable)
 {
-    s->listener_enabled = enable;
+    srp_listener_t *l = srp_find_listener(s, stream_id);
+
     if (enable) {
-        memcpy(s->listener_stream_id, stream_id, 8);
+        if (!l) {
+            // Allocate a free slot.
+            for (int i = 0; i < SRP_MAX_LISTENER_STREAMS; i++) {
+                if (!s->listeners[i].enabled) { l = &s->listeners[i]; break; }
+            }
+            if (!l) {
+                printf("[SRP] Listener table full — cannot add stream\n");
+                return;
+            }
+            memset(l, 0, sizeof(*l));
+            l->enabled = 1;
+            memcpy(l->stream_id, stream_id, 8);
+        }
         // Declare Ready immediately, mirroring avb_session_mgr2's
         // send_ready() at ACMP CONNECT_RX time. AskingFailed = "I want
         // this stream but cannot reserve" — talkers (Auvitran observed)
         // interpret it as "no listener" and hold back CRF/AAF. Ready =
-        // "I want it and can receive"; this is the correct initial
-        // substate once ACMP has resolved the stream.
-        s->listener_substate = MSRP_LISTENER_READY;
-        s->talker_registered = 0;
-        // Reset last-seen so the talker-age poll grants the talker a
-        // fresh 30 s window before timing out — otherwise the stamp
-        // from a previous listener attachment can be ancient.
-        s->talker_last_seen_ms = gptp_uptime_ms();
-        // Reset the applicant counter so we emit MRPDU_NEW for the next
-        // 2 transmissions, telling the bridge this is a fresh listener
-        // attachment.
-        s->listener_new_count = 0;
+        // "I want it and can receive"; the correct initial substate once
+        // ACMP has resolved the stream.
+        l->substate = MSRP_LISTENER_READY;
+        l->talker_registered = 0;
+        // Fresh 30 s talker-age window (stale stamp from a prior attach
+        // would otherwise time out immediately).
+        l->talker_last_seen_ms = gptp_uptime_ms();
+        // Re-emit MRPDU_NEW for the next 2 transmissions (fresh attach).
+        l->new_count = 0;
         printf("[SRP] Listener Ready for stream %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
                stream_id[0], stream_id[1], stream_id[2], stream_id[3],
                stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
     } else {
-        printf("[SRP] Listener disabled\n");
+        if (l) {
+            l->enabled = 0;
+            printf("[SRP] Listener disabled for stream "
+                   "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+                   stream_id[0], stream_id[1], stream_id[2], stream_id[3],
+                   stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
+        }
     }
 }
 
@@ -737,8 +784,9 @@ void srp_poll(srp_state_t *s)
         s->rx_leaveall        = 0;
         s->domain_new_count   = 0;
         s->talker_new_count   = 0;
-        s->listener_new_count = 0;
         s->mvrp_new_count     = 0;
+        for (int li = 0; li < SRP_MAX_LISTENER_STREAMS; li++)
+            s->listeners[li].new_count = 0;
         s->last_join_ms       = now_ms - MRP_JOIN_PERIOD_MS;  // re-declare now
     }
 
@@ -777,25 +825,32 @@ void srp_poll(srp_state_t *s)
     // only drop it on explicit teardown. listener_substate is now owned
     // by srp_listener_enable() — the talker-advertise age-out no longer
     // steers it.
-    if (s->talker_registered) {
-        uint32_t age = now_ms - s->talker_last_seen_ms;
-        if (age > 2000000000) age = 0;          // wrap guard
-        if (age >= (3u * MRP_LEAVEALL_PERIOD_MS)) {
-            printf("[SRP] Talker advertise gap %u ms — clearing 'seen' flag "
-                   "(listener stays READY)\n", (unsigned)age);
-            s->talker_registered = 0;
-        }
-    }
+    // Per listener stream (CRF, AAF, …):
+    for (int li = 0; li < SRP_MAX_LISTENER_STREAMS; li++) {
+        srp_listener_t *l = &s->listeners[li];
+        if (!l->enabled)
+            continue;
 
-    // (a') Keepalive: while the listener is enabled (AVDECC-connected),
-    // hold the substate at READY. Mirrors avb_session_mgr2's periodic
-    // "force-refresh the CRF listener attachment" — keeps telling the
-    // bridge/talker we want the stream so Auvitran sources it (and
-    // re-sources it the moment it returns after any gap). Only
-    // srp_listener_enable(enable=0) on AVDECC DISCONNECT clears it.
-    if (s->listener_enabled && s->listener_substate != MSRP_LISTENER_READY) {
-        s->listener_substate  = MSRP_LISTENER_READY;
-        s->listener_new_count = 0;   // re-emit MRPDU_NEW on re-assert
+        if (l->talker_registered) {
+            uint32_t age = now_ms - l->talker_last_seen_ms;
+            if (age > 2000000000) age = 0;          // wrap guard
+            if (age >= (3u * MRP_LEAVEALL_PERIOD_MS)) {
+                printf("[SRP] Talker advertise gap %u ms — clearing 'seen' flag "
+                       "(listener stays READY)\n", (unsigned)age);
+                l->talker_registered = 0;
+            }
+        }
+
+        // (a') Keepalive: while the listener is enabled (AVDECC-connected),
+        // hold the substate at READY. Mirrors avb_session_mgr2's periodic
+        // "force-refresh the listener attachment" — keeps telling the
+        // bridge/talker we want the stream so the talker sources it (and
+        // re-sources it after any gap). Only srp_listener_enable(enable=0)
+        // on AVDECC DISCONNECT clears it.
+        if (l->substate != MSRP_LISTENER_READY) {
+            l->substate  = MSRP_LISTENER_READY;
+            l->new_count = 0;   // re-emit MRPDU_NEW on re-assert
+        }
     }
 
     // Age out the per-stream registrar table on the same schedule.
@@ -835,7 +890,7 @@ void srp_poll(srp_state_t *s)
                    (unsigned long)s->join_count,
                    (unsigned long)s->rx_pdu_count,
                    s->domain_received,
-                   s->talker_registered,
+                   srp_any_talker_registered(s),
                    (unsigned long)s->rx_talker_adv_count,
                    (unsigned long)s->rx_talker_failed_count,
                    (unsigned long)s->rx_listener_count,

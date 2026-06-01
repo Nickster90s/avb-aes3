@@ -91,6 +91,23 @@ typedef struct {
     uint32_t last_seen_ms;
 } srp_remote_talker_t;
 
+// One Listener attribute we declare. The FPGA is simultaneously a CRF
+// listener (media-clock recovery) AND, when looped/tested, an AAF listener
+// — and MSRP lets a participant declare many Listener attributes in one
+// PDU, each its own stream_id + applicant state. A single listener slot
+// made CRF and AAF clobber each other (CRF rebootstrap storm + AAF never
+// registered). One entry per concurrently-registered listener stream.
+#define SRP_MAX_LISTENER_STREAMS 4
+
+typedef struct {
+    uint8_t  enabled;
+    uint8_t  stream_id[8];
+    uint8_t  substate;            // MSRP_LISTENER_READY etc.
+    uint8_t  new_count;           // applicant NEW-count: NEW(0) for first 2 TX
+    uint8_t  talker_registered;   // a remote talker registered for THIS stream
+    uint32_t talker_last_seen_ms; // last TalkerAdvertise matching THIS stream
+} srp_listener_t;
+
 // ---------------------------------------------------------------------------
 // SRP state
 // ---------------------------------------------------------------------------
@@ -102,10 +119,11 @@ typedef struct {
     uint8_t  talker_enabled;
     srp_talker_attr_t talker;
 
-    // Listener state
-    uint8_t  listener_enabled;
-    uint8_t  listener_stream_id[8];
-    uint8_t  listener_substate;     // MSRP_LISTENER_READY etc.
+    // Listener state — one entry per concurrently-registered listener
+    // stream (CRF + AAF + spare). srp_listener_enable() adds/removes by
+    // stream_id; srp_send_declarations() emits a Listener attribute for
+    // each enabled entry.
+    srp_listener_t listeners[SRP_MAX_LISTENER_STREAMS];
 
     // Timers (in milliseconds, tracked via gPTP uptime)
     uint32_t last_join_ms;
@@ -117,16 +135,11 @@ typedef struct {
     uint8_t  rx_sr_class;
     uint8_t  rx_sr_prio;
     uint16_t rx_sr_vid;
-    uint8_t  talker_registered;     // A remote talker was registered for our listener stream
     uint32_t rx_pdu_count;
-    uint32_t talker_last_seen_ms;   // last TalkerAdvertise matching our listener stream
+    // (talker_registered / talker_last_seen_ms / listener_new_count are now
+    // per-stream, in srp_listener_t — see listeners[] above.)
 
-    // MRP applicant state for our Listener attribute. Tracks how many TX
-    // cycles have happened since srp_listener_enable() — mirrors mrpd's
-    // VN→AN→QA transition so the first 2 transmissions emit MRPDU_NEW
-    // (event=0) and later ones switch to JoinMt. See msrp_emit_listener().
-    uint8_t  listener_new_count;
-    // Same idea for MVRP VID registration — first 2 cycles emit NEW(0)
+    // MVRP VID registration — first 2 cycles emit NEW(0)
     // to register our port for VLAN 2 at the bridge; then JoinMt for refresh.
     uint8_t  mvrp_new_count;
     // Same idea for TalkerAdvertise + Domain. Without an initial MRPDU_NEW
@@ -182,7 +195,14 @@ void srp_talker_set(srp_state_t *s, const uint8_t *stream_id,
 
 // Enable/disable talker and listener SRP declarations.
 void srp_talker_enable(srp_state_t *s, uint8_t enable);
+// Add (enable=1) or remove (enable=0) a Listener declaration for stream_id.
+// Multiple stream_ids can be active at once (CRF + AAF), up to
+// SRP_MAX_LISTENER_STREAMS. Re-enabling an already-active stream_id just
+// refreshes it. Returns nothing; silently no-ops if the table is full.
 void srp_listener_enable(srp_state_t *s, const uint8_t *stream_id, uint8_t enable);
+
+// 1 if any enabled listener currently has a registered remote talker.
+int  srp_any_talker_registered(const srp_state_t *s);
 
 // Process received MSRP frame (called from main RX dispatch).
 void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len);

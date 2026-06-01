@@ -118,7 +118,6 @@ static uint32_t usb_to_aaf_frames;   // USB→AAF bridge frames pushed (#67)
 static uint8_t  aaf_gw_enabled;      // 1 = gateware aaf_pkt owns the USB→AVB AAF stream
 static uint32_t usb_lock_calls;      // diag: USB-FIFO servo invocations
 static uint8_t  usb_nco_freeze;      // diag: hold NCO at base (test implicit feedback)
-static uint8_t  fb_manual;           // 'F' diag: 1 = manual feedback override holds (servo paused)
 // SRC src_step PI servo gains — RUNTIME-TUNABLE over the console ('k'/'j') so
 // the loop can be tuned live with no 20-min rebuild. KI=0 -> pure proportional.
 static int32_t  g_src_kp = 16384;    // proportional: step units per frame of level error
@@ -613,28 +612,6 @@ static void check_uart_cmd(void)
         case 'f': {
             usb_nco_freeze = !usb_nco_freeze;
             printf("[USB] NCO freeze = %d (1=hold base 48k, 0=servo)\n", usb_nco_freeze);
-            break;
-        }
-        case 'F': {
-            // Sweep hardcoded USB async-feedback override values (Q16.16
-            // samples/uframe). Lets us watch (usbmon) how the host responds to a
-            // fixed value, live, no rebuild. 0 = auto loop.
-            static const uint32_t fbv[] = {
-                0,          // auto (measured + centring loop)
-                0x60000,    // 6.000 = exactly 48000
-                0x5E000,    // 5.875 = 47000  (ask for LESS -> host should drain FIFO)
-                0x62000,    // 6.125 = 49000  (ask for MORE -> host should fill FIFO)
-                0x5C000,    // 5.750 = 46000
-                0x64000,    // 6.250 = 50000
-            };
-            static int fbi;
-            fbi = (fbi + 1) % (int)(sizeof(fbv)/sizeof(fbv[0]));
-            fb_manual = (fbv[fbi] != 0);          // pause the servo while a manual value holds
-            main_usb_fb_ovr_write(fbv[fbi]);
-            printf("[USB] feedback override = 0x%05lx (%lu/uframe.16 ~ %lu Hz)%s\n",
-                   (unsigned long)fbv[fbi], (unsigned long)(fbv[fbi] >> 16),
-                   (unsigned long)((uint64_t)fbv[fbi] * 8000 >> 16),
-                   fb_manual ? " [servo paused]" : " [servo active]");
             break;
         }
         case 'k': {

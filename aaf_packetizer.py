@@ -300,12 +300,6 @@ class AAFPacketizer(LiteXModule):
             ),
         ]
 
-        # ---- producer-side probe taps (kept from soft-ILA; harmless) ----
-        self.p_usb_readable = Signal(); self.p_do_pop = Signal()
-        self.p_first = Signal(); self.p_need_push = Signal()
-        self.comb += [self.p_usb_readable.eq(usb_readable), self.p_do_pop.eq(do_pop),
-                      self.p_first.eq(first), self.p_need_push.eq(need_push)]
-
         # =========================================================
         # 2) Media-clock-paced SRC read -> pay ping-pong buffer
         # =========================================================
@@ -322,10 +316,13 @@ class AAFPacketizer(LiteXModule):
         strobe = Signal()
         self.comb += strobe.eq(mcr.sample_strobe & en & primed)
 
-        # Pipelined (2-stage) linear interpolation between the two adjacent ring
-        # frames at `frac`. rd_int/frac are stable ~1042 sys cycles between
-        # strobes, so the read+interp pipeline is always settled when a strobe
-        # samples `interp`; the constant latency is harmless.
+        # Pipelined (3-stage) linear interpolation between the two adjacent ring
+        # frames at `frac`. The 33x31 multiply is the long path; it gets its OWN
+        # register stage (prod_r) so it never chains into the final add — that's
+        # the sys_clk-margin fix (the old 2-stage put multiply+shift+add in one
+        # comb cone and dropped sys_clk to ~50 MHz). rd_int/frac only change on a
+        # strobe (~1000+ sys cycles apart), so the deeper pipeline is always fully
+        # settled by the time the next strobe samples `interp`.
         f0_r = Signal(channels * 32); f1_r = Signal(channels * 32); frac_r = Signal(31)
         self.sync += [f0_r.eq(rp0.dat_r), f1_r.eq(rp1.dat_r), frac_r.eq(frac)]
         interp = Signal(channels * 32)
@@ -333,9 +330,11 @@ class AAFPacketizer(LiteXModule):
             s0 = Signal((32, True)); s1 = Signal((32, True))
             self.comb += [s0.eq(f0_r[c*32:(c+1)*32]), s1.eq(f1_r[c*32:(c+1)*32])]
             delta = Signal((33, True)); self.comb += delta.eq(s1 - s0)
-            prod  = Signal((64, True)); self.comb += prod.eq(delta * frac_r)   # Q0.31
-            outc  = Signal((32, True)); self.comb += outc.eq(s0 + (prod >> 31))
-            self.sync += interp[c*32:(c+1)*32].eq(outc)
+            # stage 2: register s0 + the product (isolates the multiply in a DSP)
+            s0_r  = Signal((32, True)); prod_r = Signal((64, True))
+            self.sync += [s0_r.eq(s0), prod_r.eq(delta * frac_r)]   # Q0.31
+            # stage 3: register the interpolated output (just an add now)
+            self.sync += interp[c*32:(c+1)*32].eq(s0_r + (prod_r >> 31))
         have2 = Signal(); self.comb += have2.eq(level >= 2)   # 2 frames -> interp valid
 
         underruns = Signal(32)
@@ -344,10 +343,6 @@ class AAFPacketizer(LiteXModule):
         # Phase advance: acc = frac + src_step; integer part advances rd_int (0..2).
         acc = Signal(33)
         self.comb += acc.eq(frac + self.src_step.storage)
-
-        # ---- consumer-side probe taps ----
-        self.p_primed = Signal(); self.p_strobe = Signal()
-        self.comb += [self.p_primed.eq(primed), self.p_strobe.eq(strobe)]
 
         # Soft-ILA counters: production (ring_wr), consumption (strobe), firsts,
         # raw ungated NCO tick, and true USB samples drained.

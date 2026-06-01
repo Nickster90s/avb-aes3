@@ -119,6 +119,11 @@ static uint8_t  aaf_gw_enabled;      // 1 = gateware aaf_pkt owns the USB→AVB 
 static uint32_t usb_lock_calls;      // diag: USB-FIFO servo invocations
 static uint8_t  usb_nco_freeze;      // diag: hold NCO at base (test implicit feedback)
 static uint8_t  fb_manual;           // 'F' diag: 1 = manual feedback override holds (servo paused)
+// SRC src_step PI servo gains — RUNTIME-TUNABLE over the console ('k'/'j') so
+// the loop can be tuned live with no 20-min rebuild. KI=0 -> pure proportional.
+static int32_t  g_src_kp = 16384;    // proportional: step units per frame of level error
+static int32_t  g_src_ki = 1;        // integral: step units per (accumulated frame-error)
+static int32_t  g_src_integ;         // integral accumulator
 static void     aaf_gw_set(uint8_t on);          // defined below usb_aaf_drain
 static void     aaf_gw_push_binding(void);
 static uint8_t  rx_crf_last_sid[8];   // last CRF stream_id we saw on the wire
@@ -630,6 +635,24 @@ static void check_uart_cmd(void)
                    (unsigned long)fbv[fbi], (unsigned long)(fbv[fbi] >> 16),
                    (unsigned long)((uint64_t)fbv[fbi] * 8000 >> 16),
                    fb_manual ? " [servo paused]" : " [servo active]");
+            break;
+        }
+        case 'k': {
+            // Cycle SRC servo KP (proportional). Live tuning, no rebuild.
+            static const int32_t kps[] = {4096, 8192, 16384, 32768, 65536};
+            static int ki_idx;
+            ki_idx = (ki_idx + 1) % (int)(sizeof(kps)/sizeof(kps[0]));
+            g_src_kp = kps[ki_idx]; g_src_integ = 0;
+            printf("[SRC] KP = %ld (integ reset)\n", (long)g_src_kp);
+            break;
+        }
+        case 'j': {
+            // Cycle SRC servo KI (integral). KI=0 = pure proportional.
+            static const int32_t kis[] = {0, 1, 2, 4, 8, 16};
+            static int kj_idx;
+            kj_idx = (kj_idx + 1) % (int)(sizeof(kis)/sizeof(kis[0]));
+            g_src_ki = kis[kj_idx]; g_src_integ = 0;
+            printf("[SRC] KI = %ld (integ reset)\n", (long)g_src_ki);
             break;
         }
         case 't': {
@@ -1195,7 +1218,6 @@ int main(void)
             #define FB_NOM       0x60000     // 6.0/uframe = 48000 nominal feedback
             #define SRC_CENTER   256         // ring depth 512 -> centre
             #define SRC_NOM      (1u << 31)  // Q1.31 1.0
-            #define SRC_KP       16384       // step units per frame of level error
             #define SRC_CLAMP    0x800000    // +/-0.39% (~3900 ppm); xtal is <200 ppm
             if (aaf_gw_enabled) {
                 uint32_t now_ms = gptp_uptime_ms();
@@ -1205,11 +1227,20 @@ int main(void)
                     usb_lock_calls++;
                     main_usb_fb_ovr_write(FB_NOM);          // pin USB feedback nominal
                     int level = (int)aaf_pkt_fifo_level_read();
-                    // Compute the ADJUSTMENT in signed int32 (small: |adj| <=
-                    // 256*16384 = 4.2M, fits), clamp THAT, then add to the
-                    // unsigned nominal. (Do NOT cast SRC_NOM=1<<31 to int32 — it
-                    // overflows to INT_MIN and railed the step to the clamp.)
-                    int32_t adj = (int32_t)(level - SRC_CENTER) * SRC_KP;
+                    // PI servo on src_step. P alone leaves a steady offset =
+                    // (host/gptp-1)*2^31/KP, so the ring rides off-centre (on-HW
+                    // it sat ~480, hitting the 510 cap -> frame drops). The
+                    // integral term drives the offset to 0 so the ring centres
+                    // regardless of host rate; integ then holds the host-rate
+                    // step bias. Compute the adjustment in signed int32 (clamped),
+                    // add to the unsigned nominal. (NOT (int32_t)SRC_NOM — 1<<31
+                    // overflows to INT_MIN.) Anti-windup: clamp integ term.
+                    int32_t err = level - SRC_CENTER;
+                    g_src_integ += err;
+                    int32_t iterm = g_src_integ * g_src_ki;
+                    if (iterm >  (int32_t)SRC_CLAMP) { iterm =  (int32_t)SRC_CLAMP; if (g_src_ki) g_src_integ =  (int32_t)SRC_CLAMP / g_src_ki; }
+                    if (iterm < -(int32_t)SRC_CLAMP) { iterm = -(int32_t)SRC_CLAMP; if (g_src_ki) g_src_integ = -(int32_t)SRC_CLAMP / g_src_ki; }
+                    int32_t adj = err * g_src_kp + iterm;
                     if (adj < -(int32_t)SRC_CLAMP) adj = -(int32_t)SRC_CLAMP;
                     if (adj >  (int32_t)SRC_CLAMP) adj =  (int32_t)SRC_CLAMP;
                     aaf_pkt_src_step_write((uint32_t)(SRC_NOM + (uint32_t)adj));

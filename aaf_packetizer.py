@@ -238,6 +238,21 @@ class AAFPacketizer(LiteXModule):
         # full so a completed block is never dropped.
         do_pop = usb_readable & (~en | ~need_push | block_fifo.writable)
         self.comb += self.usb_pop.eq(do_pop)
+
+        # ---- LiteScope probe taps (cycle-accurate ground truth) ----
+        # These expose the producer-side decision signals so the analyzer can
+        # see, per sys cycle, whether `first` is glitching, whether do_pop is
+        # actually draining real USB samples, and how need_push lines up.
+        self.p_usb_readable = Signal()
+        self.p_do_pop       = Signal()
+        self.p_first        = Signal()
+        self.p_need_push    = Signal()
+        self.comb += [
+            self.p_usb_readable.eq(usb_readable),
+            self.p_do_pop.eq(do_pop),
+            self.p_first.eq(first),
+            self.p_need_push.eq(need_push),
+        ]
         self.comb += [
             block_fifo.din.eq(Cat(*cur)),
             block_fifo.we.eq(en & do_pop & need_push),
@@ -280,6 +295,14 @@ class AAFPacketizer(LiteXModule):
         ]
         strobe = Signal()
         self.comb += strobe.eq(mcr.sample_strobe & en & primed)
+
+        # ---- LiteScope probe taps (consumer side) ----
+        self.p_primed = Signal()
+        self.p_strobe = Signal()
+        self.comb += [
+            self.p_primed.eq(primed),
+            self.p_strobe.eq(strobe),
+        ]
         underruns = Signal(32)
         self.comb += [
             block_fifo.re.eq(strobe & block_fifo.readable),

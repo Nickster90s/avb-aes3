@@ -367,8 +367,9 @@ def ulpi_io():
 # AVB SoC ----------------------------------------------------------------------------------------------
 
 class AVBSoC(SoCCore):
-    def __init__(self, sys_clk_freq=int(50e6), **kwargs):
+    def __init__(self, sys_clk_freq=int(50e6), with_litescope=False, **kwargs):
         platform = colorlight_i9plus.Platform(toolchain="openxc7")
+        self._with_litescope = with_litescope
 
         # UART via CH347 on Ext-Board (TXD1/RXD1 routed to FPGA).
         platform.add_extension([
@@ -846,12 +847,52 @@ class AVBSoC(SoCCore):
             sys_clk_freq = sys_clk_freq,
         )
 
+        # ---- LiteScope (cycle-accurate FIFO ground truth) ----
+        # Counter inference can't break the level/strobe/host contradiction
+        # (push==pop==~48k with level pinned full, yet usbmon says host=46979 —
+        # impossible if consumer>producer). Capture the actual sys-clock
+        # waveforms of the block_fifo and the producer/consumer decision
+        # signals so we can SEE whether `first` glitches, whether do_pop drains
+        # real samples, and whether `level` is truthful. Read over JTAG (CH347)
+        # via add_jtagbone — no spare UART needed, console stays free.
+        if with_litescope:
+            from litescope import LiteScopeAnalyzer
+            self.add_jtagbone()
+            analyzer_signals = [
+                # producer side
+                aaf_pkt.p_usb_readable,
+                aaf_pkt.p_do_pop,
+                aaf_pkt.p_first,
+                aaf_pkt.p_need_push,
+                # FIFO core
+                aaf_pkt.block_fifo.we,
+                aaf_pkt.block_fifo.re,
+                aaf_pkt.block_fifo.readable,
+                aaf_pkt.block_fifo.writable,
+                aaf_pkt.block_fifo.level,        # 10 bits (depth 512)
+                # consumer side
+                aaf_pkt.p_primed,
+                aaf_pkt.p_strobe,
+                self.mcr.sample_strobe,          # raw NCO tick (true media-clock rate)
+                aaf_pkt.enable.storage,
+            ]
+            self.submodules.analyzer = LiteScopeAnalyzer(
+                analyzer_signals,
+                depth        = 4096,
+                clock_domain = "sys",
+                csr_csv      = "analyzer.csv",
+            )
+
 # Build ------------------------------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="AVB-AES3 SoC on Colorlight i9+")
     parser.add_argument("--build",        action="store_true", help="Build bitstream.")
     parser.add_argument("--soft-only",    action="store_true", help="Generate software headers only (no P&R).")
+    parser.add_argument("--litescope",    action="store_true",
+        help="Add LiteScopeAnalyzer + jtagbone (read over CH347 JTAG with "
+             "litex_server --jtag + litescope_cli) to capture block_fifo "
+             "waveforms. Costs LUTs/BRAM; only for debugging the FIFO servo.")
     parser.add_argument("--load",         action="store_true", help="Load bitstream.")
     parser.add_argument("--seed", default=4, type=int, help="nextpnr P&R seed.")
     parser.add_argument("--no-floorplan", action="store_true",
@@ -890,6 +931,7 @@ def main():
         # print fit without ever blocking the main loop.
         uart_baudrate            = 1_000_000,
         uart_fifo_depth          = 64,
+        with_litescope           = args.litescope,
     )
     if args.firmware:
         # Pre-load the firmware ourselves so SoCCore doesn't shrink the ROM
@@ -905,6 +947,9 @@ def main():
     builder_kwargs = {}
     if args.output_dir:
         builder_kwargs["output_dir"] = args.output_dir
+    if args.litescope:
+        # litescope_cli needs the full register map to find the analyzer CSRs.
+        builder_kwargs["csr_csv"] = "csr.csv"
 
     builder = Builder(soc, **builder_kwargs)
     if args.soft_only:

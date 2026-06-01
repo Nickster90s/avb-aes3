@@ -556,11 +556,14 @@ static void check_uart_cmd(void)
              * if first_rate is higher, `first` is glitching (phantom pushes). */
             {
             static uint32_t pr_str, pr_usb, pr_push, pr_pop, pr_first, pr_ms;
+            static uint32_t pr_rxb, pr_epo;
             uint32_t cs = aaf_pkt_dbg_raw_strobe_read();
             uint32_t cu = aaf_pkt_dbg_usb_samp_read();
             uint32_t cpush = aaf_pkt_dbg_block_push_read();
             uint32_t cpop  = aaf_pkt_dbg_block_pop_read();
             uint32_t cfirst= aaf_pkt_dbg_first_read();
+            uint32_t crxb  = main_usb_dbg_rx_beats_read();   // core->EP raw byte beats
+            uint32_t cepo  = main_usb_dbg_ep_out_read();     // EP->decoder beats
             uint32_t now = gptp_uptime_ms();
             uint32_t dms = now - pr_ms;
             if (dms == 0) dms = 1;
@@ -571,7 +574,14 @@ static void check_uart_cmd(void)
                    (unsigned long)((uint64_t)(cpush - pr_push) * 1000u / dms),
                    (unsigned long)((uint64_t)(cpop  - pr_pop)  * 1000u / dms),
                    (unsigned long)((uint64_t)(cfirst- pr_first)* 1000u / dms));
-            pr_str = cs; pr_usb = cu; pr_push = cpush; pr_pop = cpop; pr_first = cfirst; pr_ms = now;
+            // localisation: rx_beats = core->EP raw bytes/s (real RX rate, ~384k
+            // clean for 2ch); ep_out = EP->decoder bytes/s. >> 384k => real RX
+            // duplication; ~384k while usb_samp floods => EP re-presents.
+            printf("  rx-loc(/s): rx_beats=%lu ep_out=%lu  [clean 2ch ~384000 B/s]\n",
+                   (unsigned long)((uint64_t)(crxb - pr_rxb) * 1000u / dms),
+                   (unsigned long)((uint64_t)(cepo - pr_epo) * 1000u / dms));
+            pr_str = cs; pr_usb = cu; pr_push = cpush; pr_pop = cpop; pr_first = cfirst;
+            pr_rxb = crxb; pr_epo = cepo; pr_ms = now;
             }
             printf("\n[AAF] bound=%d rx_en=%d tx_en=%d\n"
                    "  rx: count=%lu seq_err=%lu other=%lu fmt_err=%lu lvl=%lu\n"

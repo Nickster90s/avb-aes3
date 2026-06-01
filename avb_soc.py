@@ -735,6 +735,8 @@ class AVBSoC(SoCCore):
         sample_rdy_w = Signal()
         sample_pop_w = Signal()
         sample_ovf_w = Signal(32)
+        dbg_rxbeats_w = Signal(32)   # core->EP raw byte beats (rx.next & rx.valid)
+        dbg_epout_w   = Signal(32)   # EP->decoder beats (stream.valid & ready)
         # USB async-feedback inputs to the wrapper: the media-clock strobe and
         # the consumer-FIFO level. The wrapper now measures the rate + computes
         # the feedback internally (SOF-synchronised); we just feed it these two.
@@ -762,6 +764,8 @@ class AVBSoC(SoCCore):
             o_sample_readable       = sample_rdy_w,
             i_sample_pop            = sample_pop_w,
             o_sample_overflow_count = sample_ovf_w,
+            o_dbg_rx_beats          = dbg_rxbeats_w,
+            o_dbg_ep_out            = dbg_epout_w,
             i_sample_strobe         = self.mcr.sample_strobe,
             i_block_level           = usb_block_level,
             i_fb_ovr                = self.usb_fb_ovr.storage,
@@ -783,12 +787,17 @@ class AVBSoC(SoCCore):
         self.usb_sample_data     = CSRStatus(32, description="USB→AAF FIFO head: [31:8]audio [4]valid [3]first [2:0]ch.")
         self.usb_sample_pop      = CSRStorage(1, description="Write 1 to advance the USB→AAF FIFO read pointer.")
         self.usb_sample_overflow = CSRStatus(32, description="Samples dropped at the cd_usb-side FIFO write port.")
+        # Localisation diagnostics (cd_usb, synced): where the ~25x replay enters.
+        self.usb_dbg_rx_beats = CSRStatus(32, description="core->EP raw byte beats (rx.next & rx.valid).")
+        self.usb_dbg_ep_out   = CSRStatus(32, description="EP->decoder beats (stream.valid & ready).")
         self.comb += [
             self.usb_sample_data.status.eq(Cat(sample_hi_w[0:4],   # [3:0] channel+first
                                                sample_rdy_w,        # [4]   valid
                                                Signal(3),           # [7:5] reserved
                                                sample_lo_w[8:32])), # [31:8] audio MSB-aligned
             self.usb_sample_overflow.status.eq(sample_ovf_w),
+            self.usb_dbg_rx_beats.status.eq(dbg_rxbeats_w),
+            self.usb_dbg_ep_out.status.eq(dbg_epout_w),
         ]
         # usb_feedback (the async-feedback value the wrapper now transmits) is
         # driven from the MCR rate + a FIFO-level trim below, after aaf_pkt

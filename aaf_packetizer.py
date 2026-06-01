@@ -186,6 +186,16 @@ class AAFPacketizer(LiteXModule):
         self.dbg_level_min  = CSRStatus(16, description="min block_fifo.level since reset.")
         self.dbg_level_max  = CSRStatus(16, description="max block_fifo.level since reset.")
         self.dbg_level_rst  = CSRStorage(1, description="write 1 → restart min/max window at current level.")
+        # THE two numbers that break the level/strobe/host contradiction:
+        #  - dbg_raw_strobe: mcr.sample_strobe counted UNGATED (no en/primed gate),
+        #    i.e. the true NCO/consumer demand rate. Distinguishes 48000 (1041.7
+        #    cyc) from 48007 independent of FIFO state.
+        #  - dbg_usb_samp: actual samples DRAINED from the cd_usb→sys bridge
+        #    (usb_readable & do_pop) = true USB producer rate. /8 = frame rate,
+        #    directly comparable to usbmon (46979) and to dbg_first. If
+        #    dbg_first > dbg_usb_samp/8 then `first` is glitching (phantom push).
+        self.dbg_raw_strobe = CSRStatus(32, description="mcr.sample_strobe UNGATED — true NCO consumer rate.")
+        self.dbg_usb_samp   = CSRStatus(32, description="samples drained from USB bridge (usb_readable & do_pop) — true producer rate.")
 
         # MAC error lane is always 0 for our generated frames.
         self.comb += source.error.eq(0)
@@ -260,15 +270,22 @@ class AAFPacketizer(LiteXModule):
 
         # Soft-ILA counters.
         _push_cnt = Signal(32); _pop_cnt = Signal(32); _first_cnt = Signal(32)
+        _rawstr_cnt = Signal(32); _usbsamp_cnt = Signal(32)
         self.sync += [
-            If(block_fifo.we,    _push_cnt.eq(_push_cnt + 1)),
-            If(block_fifo.re,    _pop_cnt.eq(_pop_cnt + 1)),
-            If(do_pop & first,   _first_cnt.eq(_first_cnt + 1)),
+            If(block_fifo.we,            _push_cnt.eq(_push_cnt + 1)),
+            If(block_fifo.re,            _pop_cnt.eq(_pop_cnt + 1)),
+            If(do_pop & first,           _first_cnt.eq(_first_cnt + 1)),
+            # raw NCO tick, ungated by en/primed — the true consumer demand rate
+            If(mcr.sample_strobe,        _rawstr_cnt.eq(_rawstr_cnt + 1)),
+            # actual sample drained from the USB bridge — true producer rate
+            If(usb_readable & do_pop,    _usbsamp_cnt.eq(_usbsamp_cnt + 1)),
         ]
         self.comb += [
             self.dbg_block_push.status.eq(_push_cnt),
             self.dbg_block_pop.status.eq(_pop_cnt),
             self.dbg_first.status.eq(_first_cnt),
+            self.dbg_raw_strobe.status.eq(_rawstr_cnt),
+            self.dbg_usb_samp.status.eq(_usbsamp_cnt),
         ]
         self.sync += [
             If(do_pop,

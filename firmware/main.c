@@ -545,6 +545,30 @@ static void check_uart_cmd(void)
             mcr.delta_window_count = 0;
             break;
         case 'a':
+            /* Per-second RATES of the decisive counters, computed over the
+             * interval since the last `a` press. strobe_rate = true NCO
+             * consumer demand; usb_samp_rate/8 = true USB producer frame rate
+             * (compare to usbmon ~46979); first_rate should match usb_samp/8 —
+             * if first_rate is higher, `first` is glitching (phantom pushes). */
+            {
+            static uint32_t pr_str, pr_usb, pr_push, pr_pop, pr_first, pr_ms;
+            uint32_t cs = aaf_pkt_dbg_raw_strobe_read();
+            uint32_t cu = aaf_pkt_dbg_usb_samp_read();
+            uint32_t cpush = aaf_pkt_dbg_block_push_read();
+            uint32_t cpop  = aaf_pkt_dbg_block_pop_read();
+            uint32_t cfirst= aaf_pkt_dbg_first_read();
+            uint32_t now = gptp_uptime_ms();
+            uint32_t dms = now - pr_ms;
+            if (dms == 0) dms = 1;
+            printf("  rates(/s): strobe=%lu usb_samp=%lu (frames=%lu) push=%lu pop=%lu first=%lu  [host~46979]\n",
+                   (unsigned long)((uint64_t)(cs - pr_str)   * 1000u / dms),
+                   (unsigned long)((uint64_t)(cu - pr_usb)   * 1000u / dms),
+                   (unsigned long)((uint64_t)(cu - pr_usb)   * 1000u / dms / 8u),
+                   (unsigned long)((uint64_t)(cpush - pr_push) * 1000u / dms),
+                   (unsigned long)((uint64_t)(cpop  - pr_pop)  * 1000u / dms),
+                   (unsigned long)((uint64_t)(cfirst- pr_first)* 1000u / dms));
+            pr_str = cs; pr_usb = cu; pr_push = cpush; pr_pop = cpop; pr_first = cfirst; pr_ms = now;
+            }
             printf("\n[AAF] bound=%d rx_en=%d tx_en=%d\n"
                    "  rx: count=%lu seq_err=%lu other=%lu fmt_err=%lu lvl=%lu\n"
                    "  tx: count=%lu underrun=%lu lvl=%lu seq=%u\n"

@@ -282,24 +282,22 @@ class AAFPacketizer(LiteXModule):
         # drops happen only during the startup transient.
         have_space = Signal()
         self.comb += have_space.eq(level < (fifo_depth - 2))
-        # RATE-LIMIT the bridge pop. usb_readable is the wrapper's cd_usb->sys
-        # AsyncFIFO r_rdy, brought out across the Verilog instance boundary; after
-        # a pop it stays asserted ~17 sys cycles (gray-pointer sync + the long
-        # cross-instance comb path r_rdy->...->r_en) before reflecting the empty
-        # state. A free-running do_pop=usb_readable therefore RE-READS each entry
-        # ~17x -> the on-HW "23x flood" (proven 2026-06-01: rx_beats & ep_out
-        # clean at 384 kB/s, usb_samp=1.69M). Pop at most once per POP_PERIOD sys
-        # cycles (>> the stale latency, << the ~590-cycle data interval) so each
-        # entry is consumed exactly once. Drain = sys/POP_PERIOD (~1.8 M/s at 32)
-        # >> the 96 k (2ch) / 384 k (8ch) sample rate; a microframe burst still
-        # drains well within 125 us. This replaces the old free-running drain
-        # (which I had added to kill the relaxation oscillation — gating it this
-        # way keeps the bridge near-empty AND reads each entry once).
-        POP_PERIOD = 32
-        pop_div = Signal(max=POP_PERIOD)
-        self.sync += If(pop_div == POP_PERIOD - 1, pop_div.eq(0)).Else(pop_div.eq(pop_div + 1))
+        # REGISTERED bridge-read handshake. usb_readable/usb_pop cross the Verilog
+        # instance boundary to the wrapper's cd_usb->sys AsyncFIFO, where
+        # r_en = sample_pop & r_rdy. A combinational do_pop=usb_readable makes
+        # r_rdy->sample_readable->do_pop->usb_pop->sample_pop->r_en ONE long comb
+        # path across two module boundaries; at ~55 MHz sys it's timing-marginal,
+        # so r_en intermittently fails to advance the read pointer and the SAME
+        # entry is re-read until it takes — the on-HW over-read (free-running:
+        # 17x; rate-limited: still 4x; rx_beats/ep_out proved the decoder/EP are
+        # clean at 384 kB/s). Fix: REGISTER the pop so r_en is a clean synchronous
+        # 1-cycle pulse. `do_pop` toggles (pop, then 1-cycle gap) so each entry is
+        # consumed exactly once; throughput = sys/2 (~27 M/s) >> 96k/384k sample
+        # rate. usb_readable is registered first to break the comb path fully.
+        usb_rdy_r = Signal()
+        self.sync += usb_rdy_r.eq(usb_readable)
         do_pop  = Signal()
-        self.comb += do_pop.eq(usb_readable & (pop_div == 0))
+        self.sync += do_pop.eq(usb_rdy_r & ~do_pop)   # 1 pop, then 1-cycle gap
         ring_wr = Signal()
         self.comb += [
             self.usb_pop.eq(do_pop),

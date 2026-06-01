@@ -118,6 +118,7 @@ static uint32_t usb_to_aaf_frames;   // USB→AAF bridge frames pushed (#67)
 static uint8_t  aaf_gw_enabled;      // 1 = gateware aaf_pkt owns the USB→AVB AAF stream
 static uint32_t usb_lock_calls;      // diag: USB-FIFO servo invocations
 static uint8_t  usb_nco_freeze;      // diag: hold NCO at base (test implicit feedback)
+static uint8_t  fb_manual;           // 'F' diag: 1 = manual feedback override holds (servo paused)
 static void     aaf_gw_set(uint8_t on);          // defined below usb_aaf_drain
 static void     aaf_gw_push_binding(void);
 static uint8_t  rx_crf_last_sid[8];   // last CRF stream_id we saw on the wire
@@ -578,6 +579,28 @@ static void check_uart_cmd(void)
         case 'f': {
             usb_nco_freeze = !usb_nco_freeze;
             printf("[USB] NCO freeze = %d (1=hold base 48k, 0=servo)\n", usb_nco_freeze);
+            break;
+        }
+        case 'F': {
+            // Sweep hardcoded USB async-feedback override values (Q16.16
+            // samples/uframe). Lets us watch (usbmon) how the host responds to a
+            // fixed value, live, no rebuild. 0 = auto loop.
+            static const uint32_t fbv[] = {
+                0,          // auto (measured + centring loop)
+                0x60000,    // 6.000 = exactly 48000
+                0x5E000,    // 5.875 = 47000  (ask for LESS -> host should drain FIFO)
+                0x62000,    // 6.125 = 49000  (ask for MORE -> host should fill FIFO)
+                0x5C000,    // 5.750 = 46000
+                0x64000,    // 6.250 = 50000
+            };
+            static int fbi;
+            fbi = (fbi + 1) % (int)(sizeof(fbv)/sizeof(fbv[0]));
+            fb_manual = (fbv[fbi] != 0);          // pause the servo while a manual value holds
+            main_usb_fb_ovr_write(fbv[fbi]);
+            printf("[USB] feedback override = 0x%05lx (%lu/uframe.16 ~ %lu Hz)%s\n",
+                   (unsigned long)fbv[fbi], (unsigned long)(fbv[fbi] >> 16),
+                   (unsigned long)((uint64_t)fbv[fbi] * 8000 >> 16),
+                   fb_manual ? " [servo paused]" : " [servo active]");
             break;
         }
         case 't': {
@@ -1129,15 +1152,31 @@ int main(void)
         // let the host pace itself. No FIFO servo, no resampler trim — that's the
         // whole point: nothing chases the FIFO, so nothing can run away.
         {
-            // No firmware rate servo: block_fifo passthrough, NCO free-running,
-            // host paced by the wrapper's measured-rate + FIFO-centring feedback.
-            if (aaf_gw_enabled && !mcr.bound) {
+            // USB->AVB rate match: firmware PROPORTIONAL servo on the async-
+            // feedback OVERRIDE. The host follows the feedback value LINEARLY
+            // (verified: 0x60000 -> exactly 48000), so we directly command its
+            // delivery rate to centre the block_fifo. Pure-P around 0x60000 (=
+            // 48000 = our NCO base): level above centre -> lower feedback (host
+            // sends less) -> FIFO drains; below -> raise. Stable (P on the FIFO
+            // integrator, host lag << loop time-const) and bounded (host obeys),
+            // so no runaway. 'F' cmd parks a manual value (fb_manual) for tests.
+            #define FB_CENTER  256       // block_fifo depth 512 -> centre
+            #define FB_NOM     0x60000   // 6.0/uframe = 48000 = NCO base
+            #define FB_KP      32        // feedback units per FIFO-level error
+            #define FB_LO      0x58000   // stay well above Linux's 0x54000 floor
+            #define FB_HI      0x68000
+            if (aaf_gw_enabled && !mcr.bound && !fb_manual) {
                 uint32_t now_ms = gptp_uptime_ms();
                 static uint32_t last_ms;
                 if (now_ms != last_ms) {
                     last_ms = now_ms;
                     usb_lock_calls++;
-                    mcr.usb_last_level = (int32_t)aaf_pkt_fifo_level_read();  // diag only
+                    int level = (int)aaf_pkt_fifo_level_read();
+                    int32_t fb = (int32_t)FB_NOM - (level - FB_CENTER) * FB_KP;
+                    if (fb < FB_LO) fb = FB_LO;
+                    if (fb > FB_HI) fb = FB_HI;
+                    main_usb_fb_ovr_write((uint32_t)fb);
+                    mcr.usb_last_level = level;
                 }
             }
         }

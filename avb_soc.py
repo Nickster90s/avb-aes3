@@ -741,6 +741,10 @@ class AVBSoC(SoCCore):
         # block_level is a forward Signal driven from aaf_pkt.block_level below
         # (aaf_pkt is created after this Instance).
         usb_block_level = Signal(8)
+        # Firmware feedback override (Q16.16 samples/µframe; 0 = auto loop).
+        # Lets firmware sweep hardcoded async-feedback values live to test the
+        # host's response without a gateware rebuild.
+        self.usb_fb_ovr = CSRStorage(32, description="USB async-feedback override (0=auto).")
 
         self.specials += Instance("usb_avb_subsystem",
             i_clk       = ClockSignal("sys"),
@@ -760,6 +764,7 @@ class AVBSoC(SoCCore):
             o_sample_overflow_count = sample_ovf_w,
             i_sample_strobe         = self.mcr.sample_strobe,
             i_block_level           = usb_block_level,
+            i_fb_ovr                = self.usb_fb_ovr.storage,
         )
 
         # Firmware-facing drain: 2 CSR ops/sample (read packed head, then
@@ -801,7 +806,9 @@ class AVBSoC(SoCCore):
             usb_sample_lo     = sample_lo_w,
             usb_sample_hi     = sample_hi_w,
             usb_readable      = sample_rdy_w,
-            fifo_depth        = 128,   # SRC ring: deeper → servo converges before a rail
+            fifo_depth        = 512,   # deep elastic buffer: smooths the bursty host
+                                       # delivery so block_fifo.level is a stable,
+                                       # meaningful number for the feedback servo
         )
         # USB FIFO pop is ALWAYS owned by the gateware assembler now: its do_pop
         # drains-and-discards while the talker is disabled (see aaf_packetizer),

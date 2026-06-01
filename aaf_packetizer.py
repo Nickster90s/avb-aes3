@@ -282,22 +282,17 @@ class AAFPacketizer(LiteXModule):
         # drops happen only during the startup transient.
         have_space = Signal()
         self.comb += have_space.eq(level < (fifo_depth - 2))
-        # REGISTERED bridge-read handshake. usb_readable/usb_pop cross the Verilog
-        # instance boundary to the wrapper's cd_usb->sys AsyncFIFO, where
-        # r_en = sample_pop & r_rdy. A combinational do_pop=usb_readable makes
-        # r_rdy->sample_readable->do_pop->usb_pop->sample_pop->r_en ONE long comb
-        # path across two module boundaries; at ~55 MHz sys it's timing-marginal,
-        # so r_en intermittently fails to advance the read pointer and the SAME
-        # entry is re-read until it takes — the on-HW over-read (free-running:
-        # 17x; rate-limited: still 4x; rx_beats/ep_out proved the decoder/EP are
-        # clean at 384 kB/s). Fix: REGISTER the pop so r_en is a clean synchronous
-        # 1-cycle pulse. `do_pop` toggles (pop, then 1-cycle gap) so each entry is
-        # consumed exactly once; throughput = sys/2 (~27 M/s) >> 96k/384k sample
-        # rate. usb_readable is registered first to break the comb path fully.
-        usb_rdy_r = Signal()
-        self.sync += usb_rdy_r.eq(usb_readable)
-        do_pop  = Signal()
-        self.sync += do_pop.eq(usb_rdy_r & ~do_pop)   # 1 pop, then 1-cycle gap
+        # Textbook AsyncFIFO read: r_en = r_rdy (consume one entry per cycle data
+        # is available). usb_readable = the wrapper's cd_usb->sys AsyncFIFO r_rdy;
+        # usb_pop -> sample_pop -> r_en. The earlier "over-read" that prompted a
+        # rate-limit then a registered toggle was actually the DECODER over-
+        # producing (wrong clock domain — fixed by DomainRenamer); the read itself
+        # is fine. The registered toggle (pop-every-other-cycle off a 1-cycle-lagged
+        # usb_rdy_r) actually SKEWED the read — it re-read first-entries ~1.5x
+        # (on-HW: first=72k vs the true 48k, usb_samp=96k, fifo_ovf=0) and
+        # re-pushed duplicate frames, keeping the ring full. Reverted to the simple
+        # combinational read: each entry consumed exactly once.
+        do_pop  = usb_readable
         ring_wr = Signal()
         self.comb += [
             self.usb_pop.eq(do_pop),

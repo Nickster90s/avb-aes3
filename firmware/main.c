@@ -575,7 +575,7 @@ static void check_uart_cmd(void)
                    "  usb-bridge: frames=%lu fifo_ovf=%lu\n"
                    "  aaf_pkt(gw): en=%d pkts=%lu underrun=%lu ovr=%lu fifo=%lu\n"
                    "  soft-ila: push=%lu pop=%lu first=%lu\n"
-                   "  usb-fifo: level=%ld min=%lu max=%lu fbovr=0x%lx inc=%lu calls=%lu\n"
+                   "  usb-fifo: level=%ld min=%lu max=%lu fbovr=0x%lx step=0x%lx inc=%lu calls=%lu\n"
                    "  last_pres_ts=%08lx\n",
                    aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
                    (unsigned long)aaf.rx_count, (unsigned long)aaf.rx_seq_errors,
@@ -599,6 +599,7 @@ static void check_uart_cmd(void)
                    (unsigned long)aaf_pkt_dbg_level_min_read(),
                    (unsigned long)aaf_pkt_dbg_level_max_read(),
                    (unsigned long)main_usb_fb_ovr_read(),
+                   (unsigned long)aaf_pkt_src_step_read(),
                    (unsigned long)mcr.current_increment,
                    (unsigned long)usb_lock_calls,
                    (unsigned long)aaf.last_presentation_ts);
@@ -1180,30 +1181,34 @@ int main(void)
         // let the host pace itself. No FIFO servo, no resampler trim — that's the
         // whole point: nothing chases the FIFO, so nothing can run away.
         {
-            // USB->AVB rate match: firmware PROPORTIONAL servo on the async-
-            // feedback OVERRIDE. The host follows the feedback value LINEARLY
-            // (verified: 0x60000 -> exactly 48000), so we directly command its
-            // delivery rate to centre the block_fifo. Pure-P around 0x60000 (=
-            // 48000 = our NCO base): level above centre -> lower feedback (host
-            // sends less) -> FIFO drains; below -> raise. Stable (P on the FIFO
-            // integrator, host lag << loop time-const) and bounded (host obeys),
-            // so no runaway. 'F' cmd parks a manual value (fb_manual) for tests.
-            #define FB_CENTER  256       // block_fifo depth 512 -> centre
-            #define FB_NOM     0x60000   // 6.0/uframe = 48000 = NCO base
-            #define FB_KP      32        // feedback units per FIFO-level error
-            #define FB_LO      0x58000   // stay well above Linux's 0x54000 floor
-            #define FB_HI      0x68000
-            if (aaf_gw_enabled && !mcr.bound && !fb_manual) {
+            // USB->AVB rate match via async SRC (fix b, 2026-06-01). USB feedback
+            // is pinned NOMINAL — the host free-runs at its crystal; the gateware
+            // SRC ring resamples host-rate -> gPTP-rate. We servo `src_step`
+            // (Q1.31 f_in/f_out) from the RING LEVEL, which is what the old
+            // USB-feedback servo couldn't do: USB feedback is decoupled from the
+            // ring level by the wrapper's free-running producer (proven root
+            // cause), so it can never centre. The ring is a pure integrator
+            // (level = INT(f_in - step*f_out)); proportional control is stable
+            // and settles step->f_in/f_out with a small bounded level offset.
+            // tau = 2^31/(f_out*KP) ~ 2.7 s. OUTPUT is gPTP (no host feedback) so
+            // no runaway. Works bound (CRF) or free — SRC tracks host vs the NCO.
+            #define FB_NOM       0x60000     // 6.0/uframe = 48000 nominal feedback
+            #define SRC_CENTER   256         // ring depth 512 -> centre
+            #define SRC_NOM      (1u << 31)  // Q1.31 1.0
+            #define SRC_KP       16384       // step units per frame of level error
+            #define SRC_CLAMP    0x800000    // +/-0.39% (~3900 ppm); xtal is <200 ppm
+            if (aaf_gw_enabled) {
                 uint32_t now_ms = gptp_uptime_ms();
                 static uint32_t last_ms;
                 if (now_ms != last_ms) {
                     last_ms = now_ms;
                     usb_lock_calls++;
+                    main_usb_fb_ovr_write(FB_NOM);          // pin USB feedback nominal
                     int level = (int)aaf_pkt_fifo_level_read();
-                    int32_t fb = (int32_t)FB_NOM - (level - FB_CENTER) * FB_KP;
-                    if (fb < FB_LO) fb = FB_LO;
-                    if (fb > FB_HI) fb = FB_HI;
-                    main_usb_fb_ovr_write((uint32_t)fb);
+                    int32_t step = (int32_t)SRC_NOM + (level - SRC_CENTER) * SRC_KP;
+                    if (step < (int32_t)(SRC_NOM - SRC_CLAMP)) step = (int32_t)(SRC_NOM - SRC_CLAMP);
+                    if (step > (int32_t)(SRC_NOM + SRC_CLAMP)) step = (int32_t)(SRC_NOM + SRC_CLAMP);
+                    aaf_pkt_src_step_write((uint32_t)step);
                     mcr.usb_last_level = level;
                 }
             }

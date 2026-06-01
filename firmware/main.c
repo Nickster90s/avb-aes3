@@ -1205,7 +1205,14 @@ int main(void)
             #define FB_NOM       0x60000     // 6.0/uframe = 48000 nominal feedback
             #define SRC_CENTER   256         // ring depth 512 -> centre
             #define SRC_NOM      (1u << 31)  // Q1.31 1.0
-            #define SRC_CLAMP    0x800000    // +/-0.39% (~3900 ppm); xtal is <200 ppm
+            // +/-3.125% step range. The free-running NCO (cs=0) vs the host
+            // crystal can differ ~0.4% on-HW, and 0x800000 (0.39%) left the servo
+            // railed AT the steady-state need with NO headroom to DRAIN a full
+            // ring back to centre (on-HW: usb_samp clean 96k but level stuck ~508,
+            // step pinned at +clamp). Widen so the servo can briefly over-consume
+            // to centre, then settle at the ~0.4% steady offset. Linear interp is
+            // fine to a few %; once CRF-locked (cs=1) the offset shrinks to xtal ppm.
+            #define SRC_CLAMP    0x4000000   // +/-3.125% step range (headroom to centre)
             if (aaf_gw_enabled) {
                 uint32_t now_ms = gptp_uptime_ms();
                 static uint32_t last_ms;

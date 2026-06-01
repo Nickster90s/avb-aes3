@@ -435,7 +435,12 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                 break;
 
             uint16_t num_values = vec_hdr & 0x1FFF;
-            // int lva = (vec_hdr >> 13) & 1;
+            // LeaveAll event (top 3 bits): a peer asked everyone to re-register.
+            // Flag it so srp_poll re-declares immediately with NEW (MRP applicant
+            // RLA response). Bridges/talkers issue this periodically; ignoring it
+            // = our registration ages out -> the talker prunes the CRF stream.
+            if (((vec_hdr >> 13) & 0x7) == 1)   // 1 = LeaveAll (MRP_LVA_EVENT)
+                s->rx_leaveall = 1;
 
             // FirstValue
             if (vp + attr_len > attr_end)
@@ -721,6 +726,21 @@ void srp_poll(srp_state_t *s)
     // (sec & 0xFFFF) * 1000 inline form with gptp_uptime_ms() underflows the
     // age calc → flaps registrations every poll. See [[gptp-time-base-consistency-when-computing-ages]].
     uint32_t now_ms = gptp_uptime_ms();
+
+    // MRP applicant RLA response (GenAVB mrp.c: received LeaveAll -> VP -> re-Join
+    // on next TX). A bridge/talker LeaveAll resets every registration; we MUST
+    // re-declare promptly or our Listener registration ages out and the talker
+    // prunes the CRF stream (the on-HW ~3 s flap that the watchdog was papering
+    // over). Re-emit NEW (not just JoinIn) so the bridge registrar re-initialises
+    // [[feedback_mrp_new_event]], and force the join timer to fire THIS poll.
+    if (s->rx_leaveall) {
+        s->rx_leaveall        = 0;
+        s->domain_new_count   = 0;
+        s->talker_new_count   = 0;
+        s->listener_new_count = 0;
+        s->mvrp_new_count     = 0;
+        s->last_join_ms       = now_ms - MRP_JOIN_PERIOD_MS;  // re-declare now
+    }
 
     uint32_t elapsed_join = now_ms - s->last_join_ms;
     if (elapsed_join > 2000000000)

@@ -135,6 +135,13 @@ typedef struct {
     // wire-side advertise looks correct.
     uint8_t  talker_new_count;
     uint8_t  domain_new_count;
+    // Set by srp_process_rx when a RECEIVED MSRP/MVRP PDU carries a LeaveAll
+    // event; consumed by srp_poll to re-declare immediately with NEW (the MRP
+    // applicant RLA response — GenAVB mrp.c: rLA -> VP -> re-Join). Without it,
+    // a bridge/talker LeaveAll resets our registration and we don't re-register
+    // until the next 1 s tick (often after the registrar leave_timeout), so the
+    // talker prunes the stream -> the on-HW ~3 s CRF flap.
+    uint8_t  rx_leaveall;
 
     // Per-attribute RX diagnostic counters. Bumped once per vector
     // (FirstValue) processed, NOT once per PDU. Lets the UART stats line

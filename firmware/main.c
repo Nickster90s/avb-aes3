@@ -743,9 +743,51 @@ static void check_uart_cmd(void)
                 pending_listeners[i].active = 0;
             printf("[DIAG] Listener bindings force-cleared (mcr + aaf + avdecc slots)\n");
             break;
+        case 'V': {
+            // Gateware soft-ILA: capture 512 samples from TWO taps and dump both:
+            //   src0 = BRIDGE (post-decode, pre-ring): proves the USB decode lane.
+            //   src1 = POST-RING dac_l (ch0 into the I2S TX): splits ring-read vs
+            //          the serializer. Play a clean sine (panned LEFT) on the host.
+            for (int src = 0; src <= 2; src++) {
+                main_usb_cap_src_write(src);
+                printf("\n[USBCAP src=%d %s] arming...\n", src,
+                       src == 0 ? "BRIDGE head" :
+                       src == 1 ? "POST-RING dac_l" : "I2S-OUT bits {b0=dout,b1=lrck}");
+                main_usb_cap_arm_write(1);
+                int spins = 5000000;
+                while (!main_usb_cap_done_read() && spins-- > 0) { }
+                if (!main_usb_cap_done_read()) {
+                    printf("  timeout — USB not streaming? (done never set)\n");
+                    continue;
+                }
+                printf("idx raw       ch f audio\n");
+                for (int i = 0; i < 64; i++) {   /* 64 is plenty to see corruption; full 512 dump is too slow over UART */
+                    main_usb_cap_addr_write(i);
+                    uint32_t v = main_usb_cap_data_read();
+                    unsigned ch = v & 0x7, first = (v >> 3) & 1;
+                    int32_t s = (int32_t)(v & 0xFFFFFF00u) >> 8;   // sign-extended 24-bit
+                    printf("%3d %08lx %u %u %ld\n", i, (unsigned long)v, ch, first, (long)s);
+                }
+                printf("[USBCAP src=%d done]\n", src);
+            }
+            break;
+        }
+        case 'p': {
+            // Cycle the DAC I2S pin polarity 0..3 ([0]=invBCK,[1]=invLRCK).
+            // Press while a tone plays; the combo that makes L clean (if any)
+            // identifies a clock-phase issue. If none helps → confirmed analog.
+            static uint8_t pol = 0;
+            pol = (pol + 1) & 0x3;
+            main_i2s_pol_write(pol);
+            printf("\n[I2S] pin polarity = %u  (BCK inv=%u, LRCK inv=%u)\n",
+                   (unsigned)pol, (unsigned)(pol & 1), (unsigned)((pol >> 1) & 1));
+            break;
+        }
         case 'h':
         case '?':
             printf("\n  s   status (gPTP / AVTP / DAC / SRP / AVDECC / I2S)\n"
+                     "  V   dump 64 post-bridge USB samples (ch0/ch1 corruption probe)\n"
+                     "  p   cycle DAC I2S pin polarity 0..3 (BCK/LRCK invert, ADAT-style)\n"
                      "  m   MCR servo state (CRF lock, NCO increment, offset)\n"
                      "  a   AAF stream state (RX/TX counts, jitter buffer level)\n"
                      "  e   RX ethertype counters + LiteEth heartbeat\n"
@@ -1016,10 +1058,14 @@ static void aaf_gw_push_binding(void)
 
 static void aaf_gw_set(uint8_t on)
 {
+    // Run the gateware AAF packetizer (USB→ring→AAF + DAC tap) whenever the
+    // stream is connected. NOT gated on a remote listener: doing that coupled
+    // the local DAC to the AVB reservation and cycled the whole audio path
+    // every ~30 s (listener age-out). Flood protection, if re-added, must gate
+    // only the MAC frame emission — never this datapath / the DAC.
     if (on) {
         aaf_gw_push_binding();
         aaf_pkt_enable_write(1);
-        mcr_usb_lock_reset(&mcr);   // fresh USB-FIFO servo state for this stream
     } else {
         aaf_pkt_enable_write(0);
     }
@@ -1151,8 +1197,27 @@ int main(void)
                 avdecc_listener_lock_changed(&avdecc, LISTENER_UID_AAF, aaf_now);
                 prev_aaf_locked = aaf_now;
             }
-            avdecc_listener_lock_changed(&avdecc, LISTENER_UID_CRF,
-                                          mcr.servo_locked ? 1 : 0);
+            // HYSTERESIS on the CRF media lock reported to Hive. Without it, a
+            // brief CRF stall (the MCR snaps to base for ~1 s, and the CRF
+            // watchdog's own DISCONNECT_TX/CONNECT_TX rebootstrap creates a
+            // ~3 s gap) flips servo_locked->0 -> we report MEDIA_LOCKED=0 ->
+            // Hive DISCONNECT_RX's us -> we send an SRP Leave -> Auvitran
+            // (Milan) stops sourcing CRF -> bigger stall -> vicious flap. Hold
+            // the REPORTED lock through stalls up to CRF_LOCK_HYST_MS (longer
+            // than a watchdog rebootstrap) so Hive never tears the listener
+            // down on a transient. Same pattern as the gPTP lock hysteresis.
+            #define CRF_LOCK_HYST_MS 8000u
+            {
+                static uint32_t crf_locked_last_ms = 0;
+                uint32_t now_h = gptp_uptime_ms();
+                if (mcr.servo_locked)
+                    crf_locked_last_ms = now_h;
+                uint8_t crf_lock_hyst =
+                    (mcr.servo_locked ||
+                     (now_h - crf_locked_last_ms) < CRF_LOCK_HYST_MS) ? 1 : 0;
+                avdecc_listener_lock_changed(&avdecc, LISTENER_UID_CRF,
+                                              crf_lock_hyst);
+            }
 
             // FRAMES_RX is a polled counter — mirror the underlying
             // counter (no per-frame hook needed).
@@ -1219,26 +1284,13 @@ int main(void)
                 if (now_ms != last_ms) {
                     last_ms = now_ms;
                     usb_lock_calls++;
-                    main_usb_fb_ovr_write(FB_NOM);          // pin USB feedback nominal
-                    int level = (int)aaf_pkt_fifo_level_read();
-                    // PI servo on src_step. P alone leaves a steady offset =
-                    // (host/gptp-1)*2^31/KP, so the ring rides off-centre (on-HW
-                    // it sat ~480, hitting the 510 cap -> frame drops). The
-                    // integral term drives the offset to 0 so the ring centres
-                    // regardless of host rate; integ then holds the host-rate
-                    // step bias. Compute the adjustment in signed int32 (clamped),
-                    // add to the unsigned nominal. (NOT (int32_t)SRC_NOM — 1<<31
-                    // overflows to INT_MIN.) Anti-windup: clamp integ term.
-                    int32_t err = level - SRC_CENTER;
-                    g_src_integ += err;
-                    int32_t iterm = g_src_integ * g_src_ki;
-                    if (iterm >  (int32_t)SRC_CLAMP) { iterm =  (int32_t)SRC_CLAMP; if (g_src_ki) g_src_integ =  (int32_t)SRC_CLAMP / g_src_ki; }
-                    if (iterm < -(int32_t)SRC_CLAMP) { iterm = -(int32_t)SRC_CLAMP; if (g_src_ki) g_src_integ = -(int32_t)SRC_CLAMP / g_src_ki; }
-                    int32_t adj = err * g_src_kp + iterm;
-                    if (adj < -(int32_t)SRC_CLAMP) adj = -(int32_t)SRC_CLAMP;
-                    if (adj >  (int32_t)SRC_CLAMP) adj =  (int32_t)SRC_CLAMP;
-                    aaf_pkt_src_step_write((uint32_t)(SRC_NOM + (uint32_t)adj));
-                    mcr.usb_last_level = level;
+                    // BIT-EXACT passthrough (no SRC, no FIFO servo). fb_ovr=0 →
+                    // the wrapper's SOF-synced MEASURED feedback drives the host,
+                    // so it slaves its delivery to our NCO rate and the elastic
+                    // ring stays balanced. Nothing chases the FIFO here, so
+                    // nothing can run away. (src_step is unused in the gateware.)
+                    main_usb_fb_ovr_write(0);
+                    mcr.usb_last_level = (int)aaf_pkt_fifo_level_read();
                 }
             }
         }

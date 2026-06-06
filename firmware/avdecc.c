@@ -400,18 +400,39 @@ static void acmp_handle_connect_tx(avdecc_state_t *s, const uint8_t *pdu)
     }
 
     avdecc_talker_stream_t *t = &s->talkers[tuid];
-    memcpy(t->listener_id, listener_id, 8);
+
+    // Reference-count DISTINCT listeners. Multiple listeners connect to the
+    // same talker uid; keep TX enabled while ANY is connected. (memcmp isn't
+    // linked in this bare-metal libc -> manual 8-byte compare.)
+    int known = 0, freeslot = -1;
+    for (int i = 0; i < AVDECC_MAX_LISTENERS_PER_TALKER; i++) {
+        int zero = 1, same = 1;
+        for (int k = 0; k < 8; k++) {
+            if (t->listeners[i][k])                   zero = 0;
+            if (t->listeners[i][k] != listener_id[k]) same = 0;
+        }
+        if (!zero && same) { known = 1; break; }
+        if (zero && freeslot < 0) freeslot = i;
+    }
+    uint8_t was_n = t->n_listeners;
+    if (!known && freeslot >= 0) {
+        memcpy(t->listeners[freeslot], listener_id, 8);
+        t->n_listeners++;
+    }
+    memcpy(t->listener_id, listener_id, 8);   // most-recent (diag / response)
     t->listener_uid = luid;
-    t->connected = 1;
+    t->connected = (t->n_listeners > 0);
     t->connection_count++;
 
     printf("[AVDECC] CONNECT_TX uid=%u <- listener "
-           "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+           "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x (n_listeners=%u)\n",
            tuid,
            listener_id[0], listener_id[1], listener_id[2], listener_id[3],
-           listener_id[4], listener_id[5], listener_id[6], listener_id[7]);
+           listener_id[4], listener_id[5], listener_id[6], listener_id[7],
+           t->n_listeners);
 
-    if (s->on_talker_connect)
+    // Enable TX only on the 0->1 transition (first listener).
+    if (was_n == 0 && t->n_listeners > 0 && s->on_talker_connect)
         s->on_talker_connect(tuid, listener_id);
 
     acmp_send_response(s, ACMP_MSG_CONNECT_TX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
@@ -420,13 +441,28 @@ static void acmp_handle_connect_tx(avdecc_state_t *s, const uint8_t *pdu)
 static void acmp_handle_disconnect_tx(avdecc_state_t *s, const uint8_t *pdu)
 {
     uint16_t tuid = av_get_be16(pdu + ACMP_OFF_TALKER_UID);
+    const uint8_t *listener_id = pdu + ACMP_OFF_LISTENER_ID;
     if (tuid < AVDECC_MAX_TALKERS) {
         avdecc_talker_stream_t *t = &s->talkers[tuid];
-        t->connected = 0;
+        // Remove this listener from the set; disable TX only on 1->0 (last one).
+        for (int i = 0; i < AVDECC_MAX_LISTENERS_PER_TALKER; i++) {
+            int same = 1;
+            for (int k = 0; k < 8; k++)
+                if (t->listeners[i][k] != listener_id[k]) { same = 0; break; }
+            if (same) {
+                memset(t->listeners[i], 0, 8);
+                if (t->n_listeners > 0) t->n_listeners--;
+                break;
+            }
+        }
         if (t->connection_count > 0) t->connection_count--;
-        if (s->on_talker_disconnect) s->on_talker_disconnect(tuid);
+        t->connected = (t->n_listeners > 0);
+        printf("[AVDECC] DISCONNECT_TX uid=%u (n_listeners=%u)\n", tuid, t->n_listeners);
+        if (t->n_listeners == 0 && s->on_talker_disconnect)
+            s->on_talker_disconnect(tuid);
+    } else {
+        printf("[AVDECC] DISCONNECT_TX uid=%u\n", tuid);
     }
-    printf("[AVDECC] DISCONNECT_TX uid=%u\n", tuid);
     acmp_send_response(s, ACMP_MSG_DISCONNECT_TX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
 }
 

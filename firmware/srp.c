@@ -346,8 +346,16 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
         s->talker.priority_and_rank = (uint8_t)((dom_prio << 5) | (1 << 4));
         s->talker.vlan_id = dom_vid;
 
-        uint8_t tk_event = (s->talker_new_count < 2)
-                               ? MRP_EVT_NEW : MRP_EVT_JOININ;
+        // MRP applicant event must reflect the REGISTRAR state, like the
+        // working reference talker (00:1b:21 / avb_session_mgr2 on the wire):
+        // it emits JoinMt(3) while NO listener is registered for its stream,
+        // and JoinIn(1) once one is. We hardcoded JoinIn = "registrar IN" even
+        // when it was MT, which a strict bridge won't converge a reservation on
+        // (the listener stays "Registering", Frames RX=0). talker_listener_seen
+        // = a remote listener (AxC) has declared OUR stream on the wire.
+        uint8_t tk_event = (s->talker_new_count < 2) ? MRP_EVT_NEW
+                         : (s->talker_listener_seen  ? MRP_EVT_JOININ
+                                                     : MRP_EVT_JOINMT);
         p = msrp_emit_talker_adv(p, &s->talker, leaveall, tk_event);
         if (s->talker_new_count < 2)
             s->talker_new_count++;
@@ -473,6 +481,23 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                     static uint8_t  printed_once;
                     const uint8_t *sid  = vp;
                     uint8_t code        = vp[33];
+                    // Is the bridge failing OUR talker stream? THE definitive
+                    // "why won't it reserve us" — print every time with the
+                    // IEEE 802.1Q Table 35-6 code (0x06=no bandwidth, 0x05=dest
+                    // in use, 0x16=class/priority, ...).
+                    if (s->talker_enabled) {
+                        int ours = 1;
+                        for (int j = 0; j < 8; j++)
+                            if (sid[j] != s->talker.stream_id[j]) { ours = 0; break; }
+                        if (ours) {
+                            s->talker_fail_code = code;
+                            s->talker_fail_count++;
+                            printf("[SRP] *** OUR TALKER FAILED code=0x%02x "
+                                   "bridge=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x ***\n",
+                                   (unsigned)code, vp[25], vp[26], vp[27], vp[28],
+                                   vp[29], vp[30], vp[31], vp[32]);
+                        }
+                    }
                     int same = printed_once && code == last_code;
                     if (same) {
                         for (int j = 0; j < 8; j++)
@@ -493,8 +518,21 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                     }
                 }
             }
-            if (attr_type == MSRP_ATTR_LISTENER)
+            if (attr_type == MSRP_ATTR_LISTENER) {
                 s->rx_listener_count++;
+                // Flood guard: does a remote listener want OUR talker stream?
+                // (vp[0..7] = the Listener attribute's FirstValue = stream_id.)
+                // If so it's safe to transmit; main.c gates AAF TX on this.
+                if (s->talker_enabled) {
+                    int eq = 1;
+                    for (int k = 0; k < 8; k++)
+                        if (vp[k] != s->talker.stream_id[k]) { eq = 0; break; }
+                    if (eq) {
+                        s->talker_listener_seen    = 1;
+                        s->talker_listener_seen_ms = gptp_uptime_ms();
+                    }
+                }
+            }
 
             if (attr_type == MSRP_ATTR_TALKER_ADV && attr_len >= 25) {
                 s->rx_talker_adv_count++;
@@ -676,7 +714,7 @@ void srp_talker_set(srp_state_t *s, const uint8_t *stream_id,
     // talker latency is ~that order; declare 250 us (well under the 2 ms Class
     // A bound, matches the MOTU ecosystem magnitude). See memory
     // [[msrp-maxframesize-must-be-real-frame-size]].
-    s->talker.accumulated_latency_ns = 250000;
+    s->talker.accumulated_latency_ns = 500000;   // match the working reference talker (avb_session_mgr2)
 }
 
 void srp_talker_enable(srp_state_t *s, uint8_t enable)
@@ -862,6 +900,16 @@ void srp_poll(srp_state_t *s)
         if (age >= (3u * MRP_LEAVEALL_PERIOD_MS)) {
             t->valid = 0;
         }
+    }
+
+    // Flood guard age-out: if no remote listener has declared our talker
+    // stream within 3× LeaveAll, clear the "safe to transmit" flag so main.c
+    // stops the gateware AAF TX (don't blast an unreserved/unwanted stream).
+    if (s->talker_listener_seen) {
+        uint32_t age = now_ms - s->talker_listener_seen_ms;
+        if (age > 2000000000) age = 0;
+        if (age >= (3u * MRP_LEAVEALL_PERIOD_MS))
+            s->talker_listener_seen = 0;
     }
 
     // Join timer — send declarations periodically

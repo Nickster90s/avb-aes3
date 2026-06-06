@@ -156,6 +156,17 @@ typedef struct {
     // talker prunes the stream -> the on-HW ~3 s CRF flap.
     uint8_t  rx_leaveall;
 
+    // Flood guard: set when a RECEIVED MSRP Listener declaration carries OUR
+    // talker stream_id — i.e. a remote listener actually wants our stream, so
+    // the bridge has/will reserve a path and it's safe to transmit. main.c
+    // gates the gateware AAF TX on this so the talker never blasts an
+    // unreserved multicast (which the bridge floods to every port → the
+    // segment-congestion / "AVB stuck" we hit). Aged out by srp_poll.
+    uint8_t  talker_listener_seen;
+    uint32_t talker_listener_seen_ms;
+    uint8_t  talker_fail_code;        // last TalkerFailed code the bridge sent for OUR stream (0=none)
+    uint32_t talker_fail_count;       // # TalkerFailed received for OUR stream
+
     // Per-attribute RX diagnostic counters. Bumped once per vector
     // (FirstValue) processed, NOT once per PDU. Lets the UART stats line
     // distinguish "PDU received but parser dropped attr" from "PDU never

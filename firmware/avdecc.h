@@ -259,6 +259,12 @@ typedef struct {
     uint16_t listener_uid;
     uint8_t  connected;
     uint16_t connection_count;
+    // Reference-counted set of DISTINCT connected listener EIDs. Multiple
+    // listeners (e.g. AxC + the ens5 box) connect to the same talker uid; we
+    // must keep TX enabled while ANY of them is connected. all-zero EID = empty.
+    #define AVDECC_MAX_LISTENERS_PER_TALKER 4
+    uint8_t  listeners[AVDECC_MAX_LISTENERS_PER_TALKER][8];
+    uint8_t  n_listeners;
 } avdecc_talker_stream_t;
 
 // Listener stream — we are the sink. One per stream_input descriptor.

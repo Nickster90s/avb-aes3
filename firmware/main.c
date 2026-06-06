@@ -433,6 +433,12 @@ static void check_uart_cmd(void)
                    srp_any_talker_registered(&srp),
                    srp.rx_sr_class, srp.rx_sr_prio, srp.rx_sr_vid,
                    srp.talker.priority_and_rank);
+            // Talker-side diagnostic: did a remote listener (AxC) declare OUR
+            // stream (so the bridge propagated its want to us)? and did the
+            // bridge fail our talker (code)? Tells us which side is stuck.
+            printf("[SRP] talker_en=%u listener_seen=%u our_fail=%lu last_code=0x%02x\n",
+                   srp.talker_enabled, srp.talker_listener_seen,
+                   (unsigned long)srp.talker_fail_count, srp.talker_fail_code);
             printf("[AVDECC] adp=%lu acmp=%lu/%lu aecp=%lu/%lu "
                    "tx[aaf]=%d rx[crf]=%d rx[aaf]=%d clk_src=%u\n",
                    (unsigned long)avdecc.adp_tx_count,

@@ -105,6 +105,7 @@ typedef struct {
     uint32_t rx_other_count;    // CRF packets we received but for a different stream
     uint32_t bad_type_count;    // PDUs with type != AUDIO_SAMPLE
     uint32_t seq_errors;
+    uint32_t servo_outlier_rejects;  // deltas rejected as glitches (dropped/mispaired CRF ts)
     uint8_t  last_seq;
     uint8_t  have_last_seq;
 

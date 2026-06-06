@@ -530,11 +530,12 @@ static void check_uart_cmd(void)
                    (unsigned long)mcr.current_increment,
                    (unsigned long)mcr_sample_count_read(),
                    (unsigned long)mcr_phase_read());
-            printf("  delta stats (n=%lu): max|d|=%ld ns avg|d|=%ld ns streak=%u\n",
+            printf("  delta stats (n=%lu): max|d|=%ld ns avg|d|=%ld ns streak=%u outlier_rej=%lu\n",
                    (unsigned long)mcr.delta_window_count,
                    (long)mcr.delta_max_abs,
                    (long)(mcr.delta_window_count ? mcr.delta_sum_abs / mcr.delta_window_count : 0),
-                   mcr.lock_streak);
+                   mcr.lock_streak,
+                   (unsigned long)mcr.servo_outlier_rejects);
             printf("  HW-extractor: en=%lu match=%lu eof=%lu ovf=%lu level=%lu hw_rx=%lu last_sub=%02lx\n",
                    (unsigned long)crf_ts_enabled_read(),
                    (unsigned long)crf_ts_match_count_read(),

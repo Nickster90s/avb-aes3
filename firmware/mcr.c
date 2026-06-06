@@ -278,6 +278,23 @@ void mcr_servo_update(mcr_state_t *m)
     int64_t delta = off - m->prev_offset_ns;   // rate-error per packet (ns)
     m->prev_offset_ns = off;
 
+    // OUTLIER REJECTION (the 8ch / AAF-TX-load fix). Under AAF TX the CRF RX
+    // drops/reorders frames (seq_err ~0.2% on HW) and the HW extractor can
+    // mispair an avtp_ts with the wrong packet RX timestamp, so `off` jumps by
+    // 100s of ms -> a giant `delta`. Without rejection the PI acts on it: the
+    // NCO HUNTS (strobe 48356->48697) and the integral accumulates a steady
+    // bias (+0.75%) -> the media clock wobbles, the local DAC sounds bad, and
+    // the listener (AxC) can't lock to a jittering presentation clock. A locked
+    // 48k media clock's per-packet offset change is < ~15 us even mid-converge;
+    // reject anything bigger as a glitch. Baseline (prev_offset) is kept current
+    // so a transient recovers in 1-2 packets. Same idea as gPTP pdelay-outlier
+    // rejection. THIS is why "bound+locked" still had no usable/synced audio.
+    #define MCR_DELTA_OUTLIER_NS 100000        /* 100 us */
+    if (delta > MCR_DELTA_OUTLIER_NS || delta < -MCR_DELTA_OUTLIER_NS) {
+        m->servo_outlier_rejects++;
+        return;
+    }
+
     // PI on delta. Integral accumulates the rate error → equivalent to
     // absolute phase drift since bind. Anti-windup clamp.
     m->servo_integral += delta;

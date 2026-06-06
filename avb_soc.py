@@ -52,6 +52,7 @@ from liteeth.core.ptp import LiteEthTSU
 from avtp_extractor import AVTPSampleExtractor
 from crf_extractor  import CRFTimestampExtractor
 from aaf_packetizer import AAFPacketizer, TXFrameArbiter
+from i2s_clean import CleanI2STx
 
 from migen.genlib.fifo import SyncFIFO, AsyncFIFO
 
@@ -224,6 +225,10 @@ class MCRNco(LiteXModule):
 
         self._increment = CSRStorage(32, reset=default_inc,
             description="NCO phase increment per sys_clk. fs = (inc*sys_clk_freq)/2^32.")
+        # Exposed for the AAFPacketizer's CRF-dilated presentation-time ramp:
+        # the nominal increment (constant) and the live servo'd increment.
+        self.base_increment = default_inc
+        self.increment      = self._increment.storage
         self._sample_count = CSRStatus(32,
             description="Free-running fs sample count (debug).")
         self._phase = CSRStatus(32,
@@ -289,8 +294,12 @@ class MCRI2STx(LiteXModule):
         underruns = Signal(32)
         self.comb += self._underruns.status.eq(underruns)
 
-        # ---- Clock outputs straight off NCO phase bits ----
-        self.comb += [
+        # ---- Clock outputs off NCO phase bits, REGISTERED on sys_clk ----
+        # Registered so BCK/LRCK/DOUT all leave the fabric aligned to the same
+        # clock edge — removes comb path-length skew between the direct BCK/LRCK
+        # and the 32:1-mux DOUT at the DAC pins (a candidate for the left-slot
+        # artefact). One common 20 ns delay; relative timing preserved.
+        self.sync += [
             self.bck .eq(nco.phase[25]),
             self.lrck.eq(nco.phase[31]),
         ]
@@ -331,7 +340,7 @@ class MCRI2STx(LiteXModule):
         pattern = Signal(32)
         self.comb += pattern.eq(Cat(C(0, 1), active[::-1], C(0, 7)))
         pattern_arr = Array([pattern[i] for i in range(32)])
-        self.comb += self.dout.eq(pattern_arr[bit_idx])
+        self.sync += self.dout.eq(pattern_arr[bit_idx])   # registered (see BCK/LRCK above)
 
 
 # I2S Pin Extension ------------------------------------------------------------------------------------
@@ -618,33 +627,47 @@ class AVBSoC(SoCCore):
         self._i2s_push    = CSRStorage(1,  description="Write 1 to push L/R to I2S FIFO.")
         self._i2s_fifo_drops = CSRStatus(32, description="Pushes dropped because FIFO was full.")
 
-        # 48-bit SyncFIFO (24 L + 24 R), depth 32 = ~660 µs at 48 kHz.
-        # Sync (no CDC) because both write and read are sys-domain now.
-        i2s_fifo = SyncFIFO(width=48, depth=32)
+        # 48-bit AsyncFIFO (24 L + 24 R): written in sys (ring strobe, NCO-paced),
+        # read in cd_audio (the clean 12.288 MHz I2S clock). The small NCO-vs-
+        # cd_audio rate difference is absorbed here — on read underrun the
+        # serializer repeats the last frame (inaudible for a monitor). Moving the
+        # DAC onto the clean cd_audio clock is what lets the no-MCLK PCM5102A's
+        # internal PLL lock + frame correctly (NCO-jittery BCK did not).
+        i2s_fifo = ClockDomainsRenamer({"write": "sys", "read": "audio"})(AsyncFIFO(width=48, depth=8))
         self.submodules.i2s_fifo = i2s_fifo
 
-        # Write side — firmware push.
-        i2s_fifo_drops = Signal(32)
-        push_pulse = self._i2s_push.re
-        self.comb += [
-            i2s_fifo.din.eq(Cat(self._i2s_audio_r.storage,
-                                self._i2s_audio_l.storage)),  # R at [0:24], L at [24:48]
-            i2s_fifo.we.eq(push_pulse & i2s_fifo.writable),
-        ]
-        self.sync += If(push_pulse & ~i2s_fifo.writable,
-            i2s_fifo_drops.eq(i2s_fifo_drops + 1))
-        self.comb += self._i2s_fifo_drops.status.eq(i2s_fifo_drops)
+        # Forward signals from aaf_pkt (created later) — resampled USB ch0/ch1.
+        dac_l_w   = Signal(24)
+        dac_r_w   = Signal(24)
+        dac_stb_w = Signal()
 
-        # MCRI2STx — pulls a (L, R) pair on every NCO sample_strobe and
-        # streams the bits out at BCK = nco.phase[25] (~3.072 MHz at fs=48k).
-        self.submodules.i2s_tx = i2s_tx = MCRI2STx(self.mcr)
+        # DEBUG BUILD: DAC plays USB audio directly from the AAF packetizer's
+        # resampled ch0/ch1, gateware-paced by the MCR strobe — proves the
+        # USB→sample path on the local PCM5102A without AVB. (Hardwired rather
+        # than a CSR mux so no CSR address shifts → firmware stays compatible,
+        # single gateware build. The firmware _i2s_audio_* CSRs are retained but
+        # no longer feed the FIFO in this build.)
+        self.comb += [
+            i2s_fifo.din.eq(Cat(dac_r_w, dac_l_w)),   # R at [0:24], L at [24:48]
+            i2s_fifo.we.eq(dac_stb_w & i2s_fifo.writable),
+        ]
+        self.comb += self._i2s_fifo_drops.status.eq(0)
+
+        # CleanI2STx runs entirely in cd_audio (12.288 MHz): BCK/LRCK are pure
+        # integer divides → exactly 32 BCK/channel, zero edge jitter (ADAT-style).
+        self.submodules.i2s_tx = i2s_tx = ClockDomainsRenamer("audio")(CleanI2STx())
+        # I2S pin polarity test (ADAT inverts BCK/LRCK to the DAC: "in I2S
+        # everything happens on the negedge"). Make it live-selectable so we can
+        # walk all 4 BCK/LRCK phase combos by ear in one build instead of
+        # rebuilding per guess. [0]=invert BCK, [1]=invert LRCK.
+        self.i2s_pol = CSRStorage(2, description="DAC I2S pin polarity: [0]=invert BCK, [1]=invert LRCK (ADAT-style).")
         self.comb += [
             i2s_tx.audio_l    .eq(i2s_fifo.dout[24:48]),
             i2s_tx.audio_r    .eq(i2s_fifo.dout[0:24]),
             i2s_tx.audio_valid.eq(i2s_fifo.readable),
             i2s_fifo.re       .eq(i2s_tx.audio_ready),
-            i2s_bck_pad       .eq(i2s_tx.bck),
-            i2s_lrck_pad      .eq(i2s_tx.lrck),
+            i2s_bck_pad       .eq(i2s_tx.bck  ^ self.i2s_pol.storage[0]),
+            i2s_lrck_pad      .eq(i2s_tx.lrck ^ self.i2s_pol.storage[1]),
             i2s_dout_pad      .eq(i2s_tx.dout),
         ]
 
@@ -743,6 +766,17 @@ class AVBSoC(SoCCore):
         # block_level is a forward Signal driven from aaf_pkt.block_level below
         # (aaf_pkt is created after this Instance).
         usb_block_level = Signal(8)
+        # block_level (= wr-rd, sys domain) is consumed by the wrapper's feedback
+        # loop in cd_usb. It was crossing sys->cd_usb UNSYNCHRONISED — nextpnr
+        # timed it as a single-cycle path (-4.59 ns FAIL, the worst path capping
+        # sys_clk Fmax) and it's a real multi-bit CDC metastability hazard. Add a
+        # proper synchroniser: registers it into cd_usb (the MultiReg input is a
+        # CDC endpoint, so the cross-domain path is no longer timed single-cycle).
+        # block_level changes slowly (±1/sample) so per-bit MultiReg skew is a
+        # benign ±1 transient on a coarse feedback trim.
+        from migen.genlib.cdc import MultiReg as _MultiReg
+        usb_block_level_usb = Signal(8)
+        self.specials += _MultiReg(usb_block_level, usb_block_level_usb, odomain="usb")
         # Firmware feedback override (Q16.16 samples/µframe; 0 = auto loop).
         # Lets firmware sweep hardcoded async-feedback values live to test the
         # host's response without a gateware rebuild.
@@ -767,7 +801,7 @@ class AVBSoC(SoCCore):
             o_dbg_rx_beats          = dbg_rxbeats_w,
             o_dbg_ep_out            = dbg_epout_w,
             i_sample_strobe         = self.mcr.sample_strobe,
-            i_block_level           = usb_block_level,
+            i_block_level           = usb_block_level_usb,   # cd_usb-synchronised
             i_fb_ovr                = self.usb_fb_ovr.storage,
         )
 
@@ -826,6 +860,77 @@ class AVBSoC(SoCCore):
         # pinned full at stream start (zero jitter headroom). usb_sample_pop CSR
         # is retained for diagnostics but no longer the drain path.
         self.comb += sample_pop_w.eq(aaf_pkt.usb_pop)
+
+        # ---- USB-sample soft-ILA: capture 512 consecutive post-bridge samples ----
+        # Records the exact 32-bit packed sample ([31:8]=audio MSB-aligned,
+        # [4]=valid, [3]=first, [2:0]=ch) on every gateware FIFO pop into a BRAM
+        # the CPU reads back. Pinpoints whether ch0 values are ALREADY corrupt at
+        # the bridge (USB decode lane) vs clean here but mangled downstream
+        # (ring-read / I2S). Armed + dumped by firmware 'V'.
+        cap_depth = 512
+        cap_abits = log2_int(cap_depth)
+        cap_mem = Memory(32, cap_depth)
+        cap_wp  = cap_mem.get_port(write_capable=True)
+        cap_rp  = cap_mem.get_port()
+        self.specials += cap_mem, cap_wp, cap_rp
+        self.usb_cap_arm  = CSRStorage(1,         description="Write 1 to arm USB-sample capture (fills BRAM with next 512 events).")
+        self.usb_cap_addr = CSRStorage(cap_abits, description="USB capture readback index 0..511.")
+        self.usb_cap_data = CSRStatus(32,         description="USB capture value at usb_cap_addr.")
+        self.usb_cap_done = CSRStatus(1,          description="1 = capture complete (512 samples stored).")
+        # src 0 = BRIDGE (post-decode, pre-ring): the usb_sample_data head on each
+        #         gateware pop — proves the USB decode lane.
+        # src 1 = POST-RING (dac_l): the ch0 value the I2S serializer actually
+        #         receives, captured on each DAC strobe — splits ring-read vs the
+        #         serializer. Formatted like a ch0 sample (audio in [31:8]).
+        # src 2 = I2S OUTPUT BITS: on each BCK rising edge (what the DAC latches),
+        #         store {dout, lrck} — the ACTUAL serialised bitstream the PCM5102A
+        #         sees. Decoded offline this proves on real hardware whether the L
+        #         and R slots are bit-identical (vs a shift the idealised sim missed).
+        self.usb_cap_src  = CSRStorage(2,         description="0=bridge head, 1=post-ring dac_l, 2=I2S output bits {[0]=dout,[1]=lrck} per BCK-rising.")
+        cap_ptr  = Signal(cap_abits + 1)
+        cap_busy = Signal()
+        cap_ev   = Signal()
+        cap_word = Signal(32)
+        # BCK rising-edge detect on the actual I2S pin
+        i2s_bck_r = Signal()
+        self.sync += i2s_bck_r.eq(i2s_tx.bck)
+        i2s_bck_rose = Signal()
+        self.comb += i2s_bck_rose.eq(~i2s_bck_r & i2s_tx.bck)
+        self.comb += [
+            Case(self.usb_cap_src.storage, {
+                0: [cap_ev.eq(aaf_pkt.usb_pop & sample_rdy_w),     # bridge head (pre-ring)
+                    cap_word.eq(self.usb_sample_data.status)],
+                1: [cap_ev.eq(dac_stb_w),                          # post-ring dac_l (ch0)
+                    cap_word.eq(Cat(C(0x18, 8), dac_l_w))],
+                "default": [cap_ev.eq(i2s_bck_rose),               # I2S output bits the DAC latches
+                    cap_word.eq(Cat(i2s_tx.dout, i2s_tx.lrck))],
+            }),
+        ]
+        self.sync += [
+            If(self.usb_cap_arm.re,
+                cap_busy.eq(1), cap_ptr.eq(0),
+            ).Elif(cap_busy & cap_ev,
+                cap_ptr.eq(cap_ptr + 1),
+                If(cap_ptr == (cap_depth - 1), cap_busy.eq(0)),
+            ),
+        ]
+        self.comb += [
+            cap_wp.adr.eq(cap_ptr[:cap_abits]),
+            cap_wp.dat_w.eq(cap_word),
+            cap_wp.we.eq(cap_busy & cap_ev),
+            cap_rp.adr.eq(self.usb_cap_addr.storage),
+            self.usb_cap_data.status.eq(cap_rp.dat_r),
+            self.usb_cap_done.status.eq(~cap_busy),
+        ]
+
+        # Drive the I2S DAC forward signals from the packetizer's resampled
+        # USB ch0/ch1 tap — plays USB audio on the local PCM5102A DAC directly,
+        # bypassing AVB (debug: prove the USB→sample path).
+        self.comb += [
+            dac_l_w.eq(aaf_pkt.dac_l),
+            dac_r_w.eq(aaf_pkt.dac_r),
+            dac_stb_w.eq(aaf_pkt.dac_stb),
+        ]
 
         # ---- USB async feedback (P3.4) ----
         # The rate measurement + FIFO-centering loop now lives INSIDE the
@@ -940,6 +1045,25 @@ def main():
             fp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "floorplan_usb.py")
             soc.platform.toolchain._pnr_opts += " --pre-place {} ".format(fp)
+
+        # CLOCK CONSTRAINTS — the openxc7/yosys_nextpnr toolchain does NOT emit
+        # usable create_clock for the PLL-derived clocks (it uses get_ports,
+        # which matches only I/O pins) and emits NO clock groups. So nextpnr
+        # times every PLL clock at the global `--freq 125` default and times
+        # every sys<->usb<->audio CDC crossing as a real single-cycle path —
+        # which made sys_clk placement-fragile (46-58 MHz, FAIL <50) and
+        # corrupted audio bits on unlucky builds. Inject real per-clock periods
+        # on the PLL output NETS + declare the async domains as a clock group so
+        # the (properly synchronised) CDC crossings are NOT timed. See memory
+        # openxc7-missing-pll-clock-constraints.
+        soc.platform.toolchain.additional_xdc_commands += [
+            "create_clock -name sys_clk    -period 20.000 [get_nets avbsoc_s7pll0_clkout_buf0]",  # 50 MHz
+            "create_clock -name usb_clk    -period 16.667 [get_nets avbsoc_s7pll1_clkout_buf]",   # 60 MHz
+            "create_clock -name idelay_clk -period  5.000 [get_nets avbsoc_s7pll0_clkout_buf1]",  # 200 MHz
+            "create_clock -name audio_clk  -period 81.380 [get_nets avbsoc_s7pll0_clkout_buf2]",  # 12.288 MHz (I2S DAC)
+            "set_clock_groups -asynchronous "
+            "-group {sys_clk} -group {usb_clk} -group {idelay_clk} -group {audio_clk}",
+        ]
         builder.build(seed=args.seed)
 
     if args.load:

@@ -220,31 +220,30 @@ class AAFPacketizer(LiteXModule):
         mem = Memory(channels * 32, fifo_depth)   # BRAM (sync reads), not LUT-RAM
         self.specials += mem
         wp  = mem.get_port(write_capable=True)
-        rp0 = mem.get_port()
-        rp1 = mem.get_port()
-        self.specials += wp, rp0, rp1
+        rp  = mem.get_port()                       # single read port: bit-exact, 1 frame/strobe
+        self.specials += wp, rp
 
+        # Retained for CSR-layout / firmware compat — UNUSED now. The host is
+        # rate-slaved by USB async feedback (tracks our NCO rate), so this is a
+        # bit-exact passthrough: no resampler, no per-channel multiplier.
         self.src_step = CSRStorage(32, reset=1 << 31,
-            description="SRC resampling ratio f_in/f_out in Q1.31 (1<<31 = 1.0); firmware servo'd from ring level.")
+            description="(unused) legacy SRC ratio; bit-exact passthrough now.")
         self.fifo_depth = fifo_depth
 
         wr     = Signal(32)
-        rd_int = Signal(32)
-        frac   = Signal(31)
+        rd     = Signal(32)
         # SIGNED occupancy: if the consumer ever reaches the producer an unsigned
-        # wr-rd_int underflows to a huge value that masquerades as "full"; signed,
-        # it goes negative -> have2 false -> consumer stalls and waits.
+        # wr-rd underflows to a huge value that masquerades as "full"; signed,
+        # it goes negative -> have1 false -> consumer stalls and waits.
         level  = Signal((33, True))
-        self.comb += level.eq(wr - rd_int)
+        self.comb += level.eq(wr - rd)
         self.block_level = Signal(max=fifo_depth + 1)
         self.comb += self.block_level.eq(level)        # legacy port for avb_soc
         # unsigned, range-clamped copy for the level CSR + min/max tracker
         level_u = Signal(max=fifo_depth + 1)
         self.comb += If(level < 0, level_u.eq(0)).Elif(level > fifo_depth, level_u.eq(fifo_depth)).Else(level_u.eq(level))
 
-        rd0 = Signal(log2depth); rd1 = Signal(log2depth)
-        self.comb += [rd0.eq(rd_int[0:log2depth]), rd1.eq((rd_int + 1)[0:log2depth]),
-                      rp0.adr.eq(rd0), rp1.adr.eq(rd1)]
+        self.comb += rp.adr.eq(rd[0:log2depth])    # frame at rd (stable between strobes)
 
         # Min/max level tracker (resolves stuck-full vs oscillating vs centred).
         _lvl_min = Signal(max=fifo_depth + 1, reset=fifo_depth)
@@ -262,10 +261,29 @@ class AAFPacketizer(LiteXModule):
 
         cur  = Array([Signal(32) for _ in range(channels)])
         have = Signal()
-        ch    = usb_sample_hi[0:ch_bits]
-        first = usb_sample_hi[3]
+
+        # Register the bridge-FIFO output one cycle before the channel demux.
+        # The comb cone FIFO-read → samp/ch → 8-way cur[ch] write violated setup
+        # at our ~50-56 MHz sys_clk, intermittently latching a corrupted sample
+        # → an audible noise floor on the real audio (a gateware ramp injected
+        # at cur[0] played clean while the real USB samples were noisy, and it
+        # was placement-sensitive — the timing-marginal signature). Latch the
+        # FIFO output on the pop, demux from the registered value next cycle.
+        do_pop = usb_readable
+        samp_lo_r = Signal(32)
+        samp_hi_r = Signal(4)            # bits 0..2 = channel, bit 3 = first
+        samp_vld  = Signal()
+        self.sync += [
+            samp_vld.eq(do_pop),
+            If(do_pop,
+                samp_lo_r.eq(usb_sample_lo),
+                samp_hi_r.eq(usb_sample_hi[0:4]),
+            ),
+        ]
+        ch    = samp_hi_r[0:ch_bits]
+        first = samp_hi_r[3]
         # 24-bit audio MSB-aligned into a 32-bit sample (= firmware v & 0xFFFFFF00).
-        samp32 = Cat(Signal(8), usb_sample_lo[8:32])   # [0:8]=0, [8:32]=audio
+        samp32 = Cat(Signal(8), samp_lo_r[8:32])   # [0:8]=0, [8:32]=audio
 
         need_push = first & have
         en = self.enable.storage
@@ -292,19 +310,22 @@ class AAFPacketizer(LiteXModule):
         # (on-HW: first=72k vs the true 48k, usb_samp=96k, fifo_ovf=0) and
         # re-pushed duplicate frames, keeping the ring full. Reverted to the simple
         # combinational read: each entry consumed exactly once.
-        do_pop  = usb_readable
         ring_wr = Signal()
         self.comb += [
-            self.usb_pop.eq(do_pop),
-            ring_wr.eq(en & do_pop & need_push & have_space),
+            self.usb_pop.eq(do_pop),                     # pop the FIFO when data ready
+            ring_wr.eq(en & samp_vld & need_push & have_space),
             wp.adr.eq(wr[0:log2depth]),
             wp.dat_w.eq(Cat(*cur)),    # the just-completed frame (cur updates same edge)
             wp.we.eq(ring_wr),
         ]
         self.sync += [
             If(ring_wr, wr.eq(wr + 1)),
-            If(do_pop,
-                If(need_push, *[cur[i].eq(0) for i in range(channels)]),
+            If(samp_vld,
+                # Frame start (need_push ⟹ ch==0): zero ch1..N-1 so un-written
+                # slots (ch2..7 for a 2ch stream) stay silent. cur[0] is written
+                # by cur[ch] below — NOT cleared here — so index 0 has no
+                # same-cycle double-write. Demux from the REGISTERED sample.
+                If(need_push, *[cur[i].eq(0) for i in range(1, channels)]),
                 cur[ch].eq(samp32),
                 have.eq(1),
             ),
@@ -326,33 +347,23 @@ class AAFPacketizer(LiteXModule):
         strobe = Signal()
         self.comb += strobe.eq(mcr.sample_strobe & en & primed)
 
-        # Pipelined (3-stage) linear interpolation between the two adjacent ring
-        # frames at `frac`. The 33x31 multiply is the long path; it gets its OWN
-        # register stage (prod_r) so it never chains into the final add — that's
-        # the sys_clk-margin fix (the old 2-stage put multiply+shift+add in one
-        # comb cone and dropped sys_clk to ~50 MHz). rd_int/frac only change on a
-        # strobe (~1000+ sys cycles apart), so the deeper pipeline is always fully
-        # settled by the time the next strobe samples `interp`.
-        f0_r = Signal(channels * 32); f1_r = Signal(channels * 32); frac_r = Signal(31)
-        self.sync += [f0_r.eq(rp0.dat_r), f1_r.eq(rp1.dat_r), frac_r.eq(frac)]
-        interp = Signal(channels * 32)
-        for c in range(channels):
-            s0 = Signal((32, True)); s1 = Signal((32, True))
-            self.comb += [s0.eq(f0_r[c*32:(c+1)*32]), s1.eq(f1_r[c*32:(c+1)*32])]
-            delta = Signal((33, True)); self.comb += delta.eq(s1 - s0)
-            # stage 2: register s0 + the product (isolates the multiply in a DSP)
-            s0_r  = Signal((32, True)); prod_r = Signal((64, True))
-            self.sync += [s0_r.eq(s0), prod_r.eq(delta * frac_r)]   # Q0.31
-            # stage 3: register the interpolated output (just an add now)
-            self.sync += interp[c*32:(c+1)*32].eq(s0_r + (prod_r >> 31))
-        have2 = Signal(); self.comb += have2.eq(level >= 2)   # 2 frames -> interp valid
+        # BIT-EXACT read: pop ONE ring frame per media strobe (no resampling).
+        # The host is rate-slaved by USB async feedback (it tracks our NCO/SOF
+        # rate), so produce == consume and the ring stays balanced — bit-perfect
+        # passthrough, no interpolator, no per-channel multiplier, no DSP. rp.dat_r
+        # is mem[rd], stable between strobes (BRAM read long-settled).
+        have1 = Signal(); self.comb += have1.eq(level >= 1)   # >=1 frame -> can pop
+
+        # Local-DAC tap: ch0/ch1 of the popped frame (24-bit, MSB-justified top of
+        # the 32-bit sample), strobe-paced. Latched in the strobe block below
+        # alongside the pay[] write.
+        self.dac_l   = Signal(24)
+        self.dac_r   = Signal(24)
+        self.dac_stb = Signal()
 
         underruns = Signal(32)
         self.comb += [self.underrun_count.status.eq(underruns),
                       self.fifo_level.status.eq(level_u)]
-        # Phase advance: acc = frac + src_step; integer part advances rd_int (0..2).
-        acc = Signal(33)
-        self.comb += acc.eq(frac + self.src_step.storage)
 
         # Soft-ILA counters: production (ring_wr), consumption (strobe), firsts,
         # raw ungated NCO tick, and true USB samples drained.
@@ -361,9 +372,9 @@ class AAFPacketizer(LiteXModule):
         self.sync += [
             If(ring_wr,               _push_cnt.eq(_push_cnt + 1)),
             If(strobe,                _pop_cnt.eq(_pop_cnt + 1)),
-            If(do_pop & first,        _first_cnt.eq(_first_cnt + 1)),
+            If(samp_vld & first,      _first_cnt.eq(_first_cnt + 1)),
             If(mcr.sample_strobe,     _rawstr_cnt.eq(_rawstr_cnt + 1)),
-            If(usb_readable & do_pop, _usbsamp_cnt.eq(_usbsamp_cnt + 1)),
+            If(samp_vld,              _usbsamp_cnt.eq(_usbsamp_cnt + 1)),
         ]
         self.comb += [
             self.dbg_block_push.status.eq(_push_cnt),
@@ -375,16 +386,22 @@ class AAFPacketizer(LiteXModule):
 
         self.sync += [
             send_req.eq(0),
+            self.dac_stb.eq(0),
             If(strobe,
-                If(have2,
-                    # Data present: interpolate AND advance the read phase. The
-                    # advance is gated by have2 so rd_int can NEVER overtake wr.
-                    pay[Cat(blk_idx, fill_buf)].eq(interp),
-                    frac.eq(acc[0:31]),
-                    rd_int.eq(rd_int + acc[31:33]),    # advance by integer part (0..2)
+                self.dac_stb.eq(1),
+                If(have1,
+                    # Bit-exact: pop exactly one frame (rp.dat_r = mem[rd]) into
+                    # the packet buffer, advance rd by exactly 1. have1 gates the
+                    # advance so rd can never overtake wr.
+                    pay[Cat(blk_idx, fill_buf)].eq(rp.dat_r),
+                    self.dac_l.eq(rp.dat_r[8:32]),      # ch0, 24-bit MSB-justified
+                    self.dac_r.eq(rp.dat_r[40:64]),     # ch1
+                    rd.eq(rd + 1),
                 ).Else(
-                    # Underrun: emit silence, HOLD the read phase.
+                    # Underrun: emit silence, HOLD the read pointer.
                     pay[Cat(blk_idx, fill_buf)].eq(0),
+                    self.dac_l.eq(0),
+                    self.dac_r.eq(0),
                     underruns.eq(underruns + 1),
                 ),
                 If(blk_idx == (samples_per_packet - 1),
@@ -407,6 +424,48 @@ class AAFPacketizer(LiteXModule):
 
         seq  = Signal(8)
         pres = Signal(32)
+
+        # ---- Deterministic CRF-dilated presentation-time ramp (gst-avtp model) ----
+        # Instead of re-sampling gPTP every packet (which carries strobe->latch
+        # jitter and a possible 1-second glitch at the TSU seconds/ns wrap), we
+        # anchor the gPTP time ONCE and advance avtp_ts by a FIXED per-packet
+        # period, DILATED to the CRF media-clock rate via the MCR servo
+        # increment. The result is a perfectly smooth avtp_ts that tracks
+        # Auvitran's crystal — exactly what its media-clock PLL needs to hold
+        # lock. Mirrors gstavtpaafpay.c: launch_ns = anchor + samples*1e9/rate,
+        # then dilation_correct().  First-order dilation (servo deviation is tiny):
+        #   period_ns = P0 * base/inc  ~=  P0 - (inc-base)*(P0/base)
+        # accumulated with _PRES_F fractional bits so there is no rounding drift.
+        _PRES_F  = 16
+        _P0_ns   = int(round(samples_per_packet * 1_000_000_000 / 48000))  # 125000 @48k/6
+        _base    = mcr.base_increment
+        _Kfix    = int(round((_P0_ns / _base) * (1 << _PRES_F)))           # ns per inc-unit, Q_F
+        pres_acc  = Signal(32 + _PRES_F)
+        anchored  = Signal()
+        anchor_ns = Signal(32)
+        self.comb += anchor_ns.eq((_mul_1e9_lo32(tsu.seconds)
+                                   + tsu.nanoseconds
+                                   + self.pres_offset.storage)[0:32])
+        dinc = Signal((27, True))                         # signed (inc - base)
+        self.comb += dinc.eq(mcr.increment - _base)
+        # Constant multiply dinc*_Kfix via a shift-add tree. A real multiplier
+        # infers a DSP48 whose carry-cascade nextpnr-xilinx can't route (same
+        # issue/fix as the LiteEth TSU *1e9 -> shift-add workaround).
+        _kexpr = None
+        for _b in range(_Kfix.bit_length()):
+            if (_Kfix >> _b) & 1:
+                _term = dinc << _b
+                _kexpr = _term if _kexpr is None else (_kexpr + _term)
+        dinc_K = Signal((40, True))
+        self.comb += dinc_K.eq(_kexpr)
+        step_scaled = Signal((40, True))                  # per-packet period, ns<<F
+        self.comb += step_scaled.eq((_P0_ns << _PRES_F) - dinc_K)
+        new_acc = Signal(32 + _PRES_F)
+        self.comb += If(~anchored,
+            new_acc.eq(Cat(Constant(0, _PRES_F), anchor_ns)),  # anchor: gPTP now + offset
+        ).Else(
+            new_acc.eq(pres_acc + step_scaled),                # advance one packet period
+        )
 
         def mac_byte(sig, i):   # i=0 is the wire-first (MSB) byte of a 48-bit MAC
             hi = 48 - i * 8
@@ -480,13 +539,25 @@ class AAFPacketizer(LiteXModule):
         self.submodules.fsm = fsm
         fsm.act("IDLE",
             If(send_req,
-                NextValue(pres, (_mul_1e9_lo32(tsu.seconds)
-                                 + tsu.nanoseconds
-                                 + self.pres_offset.storage)[0:32]),
                 NextValue(byte_idx, 0),
                 NextState("BUILD"),
             ),
         )
+        # Presentation-time accumulator: latch on the IDLE->BUILD transition.
+        # Anchor on the first packet (and re-anchor whenever the talker is
+        # disabled, so a restarted stream gets a fresh anchor), then advance by
+        # one dilated packet period each packet.
+        do_emit = Signal()
+        self.comb += do_emit.eq(send_req & fsm.ongoing("IDLE"))
+        self.sync += [
+            If(~en,
+                anchored.eq(0),
+            ).Elif(do_emit,
+                pres_acc.eq(new_acc),
+                pres.eq(new_acc[_PRES_F:_PRES_F + 32]),
+                anchored.eq(1),
+            ),
+        ]
         # BUILD: one byte/cycle into wacc; commit a word every 4th byte and on
         # the final (possibly partial) byte. 234 cycles ≈ 4.7 µs << 125 µs.
         commit_full = (lane == 3)

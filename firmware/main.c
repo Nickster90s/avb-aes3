@@ -269,6 +269,14 @@ static void dispatch_rx(void)
             case PTP_ETHERTYPE:
                 rx_ptp++;
                 gptp_process_rx(&gptp, frame, len);
+                // Keep SRP's SR-domain authority = the gPTP grandmaster (the
+                // bridge/switch). GM MAC = clock_id with the FF:FE stripped.
+                if (gptp.gm_valid) {
+                    uint8_t bm[6] = { gptp.gm_clock_id[0], gptp.gm_clock_id[1],
+                                      gptp.gm_clock_id[2], gptp.gm_clock_id[5],
+                                      gptp.gm_clock_id[6], gptp.gm_clock_id[7] };
+                    srp_set_bridge_mac(&srp, bm);
+                }
                 break;
             case AVTP_ETHERTYPE: {
                 rx_avtp++;
@@ -426,13 +434,14 @@ static void check_uart_cmd(void)
             printf("[DAC ] samples=%lu underruns=%lu\n",
                    (unsigned long)dac_sample_count,
                    (unsigned long)dac_underrun_count);
-            printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d bridge_class=%u prio=%u vid=%u talker_prio_byte=0x%02x\n",
+            printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d bridge_class=%u prio=%u vid=%u talker_prio_byte=0x%02x maxIntFrames=%u have_brmac=%u\n",
                    (unsigned long)srp.join_count,
                    (unsigned long)srp.rx_pdu_count,
                    srp.domain_received,
                    srp_any_talker_registered(&srp),
                    srp.rx_sr_class, srp.rx_sr_prio, srp.rx_sr_vid,
-                   srp.talker.priority_and_rank);
+                   srp.talker.priority_and_rank,
+                   srp.talker.max_interval_frames, srp.have_bridge_mac);
             // Talker-side diagnostic: did a remote listener (AxC) declare OUR
             // stream (so the bridge propagated its want to us)? and did the
             // bridge fail our talker (code)? Tells us which side is stuck.

@@ -322,9 +322,12 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
     // priority on our port and reject reservations as code 0x13 "SR class
     // priority mismatch" if we keep declaring the default). Falls back to
     // 802.1Q defaults until first Domain RX arrives.
-    uint8_t  dom_class = s->domain_received ? s->rx_sr_class : SR_CLASS_A;
-    uint8_t  dom_prio  = s->domain_received ? s->rx_sr_prio  : SR_CLASS_A_PRIO;
-    uint16_t dom_vid   = s->domain_received ? s->rx_sr_vid   : SR_CLASS_A_VID;
+    // BASELINE: advertise Class A explicitly (classID 6, prio 3, VID 2),
+    // consistent with our Class-A talker. (Was echoing the bridge's domain,
+    // which on this rig is Class B — inconsistent with a Class-A talker.)
+    uint8_t  dom_class = SR_CLASS_A;
+    uint8_t  dom_prio  = SR_CLASS_A_PRIO;
+    uint16_t dom_vid   = SR_CLASS_A_VID;
 
     // Domain — emit MRPDU_NEW(0) for the first 2 cycles (VN→AN→QA);
     // then JoinIn(1) for steady state. mrpd encodes the QA-state
@@ -339,12 +342,16 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
 
     // Talker Advertise (if enabled)
     if (s->talker_enabled) {
-        // Keep our talker's priority_and_rank synced with the bridge's
-        // advertised priority — protects against per-port priority remap
-        // that triggers "SR Class Priority Mismatch" (0x13) at downstream
-        // listeners.
-        s->talker.priority_and_rank = (uint8_t)((dom_prio << 5) | (1 << 4));
-        s->talker.vlan_id = dom_vid;
+        // BASELINE: declare explicit Class A (the target for pro audio):
+        // priority 3, rank 1, 1 frame per 125us Class-A measurement interval,
+        // VID 2. The bridge SR domain is still latched (for info / later use),
+        // but we declare Class A directly — the switch's VID-2 SR class must be
+        // configured as A. Adaptive class tracking + CRF come back in a later
+        // phase once the plain Class-A gPTP talker locks.
+        (void)dom_prio; (void)dom_vid;
+        s->talker.priority_and_rank = (uint8_t)((SR_CLASS_A_PRIO << 5) | (1 << 4));
+        s->talker.vlan_id = SR_CLASS_A_VID;
+        s->talker.max_interval_frames = 1;
 
         // MRP applicant event must reflect the REGISTRAR state, like the
         // working reference talker (00:1b:21 / avb_session_mgr2 on the wire):
@@ -458,10 +465,23 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
 
             if (attr_type == MSRP_ATTR_DOMAIN && attr_len >= 4) {
                 s->rx_domain_count++;
-                s->domain_received = 1;
-                s->rx_sr_class = vp[0];
-                s->rx_sr_prio  = vp[1];
-                s->rx_sr_vid   = srp_get_be16(vp + 2);
+                // Only latch the SR domain from the BRIDGE (gPTP GM / switch).
+                // Peer talkers (e.g. the ens5 box) advertise their own domain
+                // with a different SRclassID/priority; latching theirs made us
+                // declare the wrong talker priority -> bridge rejects 0x13 (SR
+                // Class Priority Mismatch) -> Frames RX=0. frame+6 = src MAC.
+                const uint8_t *dom_src = frame + 6;
+                int from_bridge = 1;
+                if (s->have_bridge_mac) {
+                    for (int k = 0; k < 6; k++)
+                        if (dom_src[k] != s->bridge_mac[k]) { from_bridge = 0; break; }
+                }
+                if (from_bridge) {
+                    s->domain_received = 1;
+                    s->rx_sr_class = vp[0];
+                    s->rx_sr_prio  = vp[1];
+                    s->rx_sr_vid   = srp_get_be16(vp + 2);
+                }
             }
             if (attr_type == MSRP_ATTR_TALKER_FAIL) {
                 s->rx_talker_failed_count++;
@@ -680,6 +700,24 @@ void srp_init(srp_state_t *s, const uint8_t *mac_addr)
     srp_txslot = 0;
     // listeners[] all start enabled=0 (no declarations) via the memset.
     printf("[SRP] Initialized (MSRP)\n");
+}
+
+void srp_set_bridge_mac(srp_state_t *s, const uint8_t *bridge_mac)
+{
+    int same = s->have_bridge_mac;
+    for (int k = 0; k < 6; k++) {
+        if (s->bridge_mac[k] != bridge_mac[k]) same = 0;
+        s->bridge_mac[k] = bridge_mac[k];
+    }
+    if (!same) {
+        s->have_bridge_mac = 1;
+        // Force re-latching the SR domain from the (now known) bridge so a
+        // peer talker's domain we may have latched earlier is overwritten.
+        s->domain_received = 0;
+        printf("[SRP] bridge MAC = %02x:%02x:%02x:%02x:%02x:%02x (SR domain authority)\n",
+               bridge_mac[0], bridge_mac[1], bridge_mac[2],
+               bridge_mac[3], bridge_mac[4], bridge_mac[5]);
+    }
 }
 
 const srp_remote_talker_t *srp_find_talker(const srp_state_t *s,

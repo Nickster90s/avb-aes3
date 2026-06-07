@@ -345,7 +345,13 @@ class AAFPacketizer(LiteXModule):
         _center = fifo_depth // 2
         self.sync += [If(~en, primed.eq(0)).Elif(level >= _center, primed.eq(1))]
         strobe = Signal()
-        self.comb += strobe.eq(mcr.sample_strobe & en & primed)
+        # Emit at the media rate whenever the talker is ENABLED — not gated on
+        # `primed`. With no USB source (ring never primes) we still send a
+        # continuous silence stream so the listener (AxC) can lock/stay-locked
+        # regardless of the audio source. Real ring audio is used only once
+        # primed (see `primed & have1` below); otherwise the existing silence
+        # path fills zeros.
+        self.comb += strobe.eq(mcr.sample_strobe & en)
 
         # BIT-EXACT read: pop ONE ring frame per media strobe (no resampling).
         # The host is rate-slaved by USB async feedback (it tracks our NCO/SOF
@@ -389,7 +395,7 @@ class AAFPacketizer(LiteXModule):
             self.dac_stb.eq(0),
             If(strobe,
                 self.dac_stb.eq(1),
-                If(have1,
+                If(primed & have1,
                     # Bit-exact: pop exactly one frame (rp.dat_r = mem[rd]) into
                     # the packet buffer, advance rd by exactly 1. have1 gates the
                     # advance so rd can never overtake wr.

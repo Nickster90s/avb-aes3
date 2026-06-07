@@ -135,6 +135,13 @@ typedef struct {
     uint8_t  rx_sr_class;
     uint8_t  rx_sr_prio;
     uint16_t rx_sr_vid;
+    // The SR domain MUST come from the bridge (gPTP grandmaster / switch),
+    // which is authoritative for the reservation. Other talkers advertise
+    // their own domain with a different SRclassID/priority; latching theirs
+    // made us declare the wrong talker priority -> bridge rejects 0x13 (SR
+    // Class Priority Mismatch). bridge_mac = GM MAC derived from gm_clock_id.
+    uint8_t  bridge_mac[6];
+    uint8_t  have_bridge_mac;
     uint32_t rx_pdu_count;
     // (talker_registered / talker_last_seen_ms / listener_new_count are now
     // per-stream, in srp_listener_t — see listeners[] above.)
@@ -194,6 +201,10 @@ typedef struct {
 // ---------------------------------------------------------------------------
 
 void srp_init(srp_state_t *s, const uint8_t *mac_addr);
+
+// Tell SRP the bridge (gPTP grandmaster / switch) MAC so it only latches the
+// SR-class domain from the authoritative switch, not from peer talkers.
+void srp_set_bridge_mac(srp_state_t *s, const uint8_t *bridge_mac);
 
 // Look up a remote talker entry by stream_id. Returns NULL if not seen
 // or aged out.

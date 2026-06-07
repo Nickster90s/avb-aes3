@@ -1241,21 +1241,20 @@ int main(void)
             avdecc.stream_frames_rx[LISTENER_UID_AAF] = aaf.rx_count;
         }
 
-        // Sync AAF VLAN-PCP/VID with bridge-advertised SR domain on every
-        // change (no-op once converged). If we keep emitting PCP=3/VID=2
-        // while the bridge maps Class A to a different priority, listeners
-        // (Auvitran) reject with MSRP failure 0x13 (SR Class Priority
-        // Mismatch). Skip until we've heard a Domain to avoid bouncing.
-        if (srp.domain_received) {
-            static uint8_t  last_prio = 0xFF;
-            static uint16_t last_vid  = 0xFFFF;
-            if (srp.rx_sr_prio != last_prio || srp.rx_sr_vid != last_vid) {
-                aaf_set_vlan(&aaf, srp.rx_sr_prio, srp.rx_sr_vid);
-                if (aaf_gw_enabled) aaf_gw_push_binding();   // propagate new TCI to gateware
-                last_prio = srp.rx_sr_prio;
-                last_vid  = srp.rx_sr_vid;
-                printf("[main] AAF VLAN sync: PCP=%u VID=%u\n",
-                       (unsigned)srp.rx_sr_prio, (unsigned)srp.rx_sr_vid);
+        // BASELINE: force the AAF frame VLAN tag to Class A (PCP 3, VID 2),
+        // consistent with our Class-A talker declaration. (Was syncing the
+        // frame PCP to the bridge's advertised domain, which on this rig is
+        // Class B prio 2 -> frame tagged PCP 2 while we declare prio 3 =
+        // inconsistent.) The switch's VID-2 port(s) must be configured for
+        // SR Class A (prio 3) for the reservation to be accepted.
+        {
+            static uint8_t vlan_forced = 0;
+            if (!vlan_forced) {
+                aaf_set_vlan(&aaf, SR_CLASS_A_PRIO, SR_CLASS_A_VID);
+                if (aaf_gw_enabled) aaf_gw_push_binding();   // propagate TCI to gateware
+                vlan_forced = 1;
+                printf("[main] AAF VLAN forced Class A: PCP=%u VID=%u\n",
+                       (unsigned)SR_CLASS_A_PRIO, (unsigned)SR_CLASS_A_VID);
             }
         }
         avdecc_poll(&avdecc);

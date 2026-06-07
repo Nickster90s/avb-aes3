@@ -342,6 +342,11 @@ static void acmp_send_response(avdecc_state_t *s, uint8_t msg_type, uint8_t stat
             uint16_t cc = (msg_type == ACMP_MSG_GET_TX_STATE_RESPONSE)
                             ? 0 : t->connection_count;
             av_put_be16(p + ACMP_OFF_CONN_COUNT, cc);
+            // The TALKER is authoritative for the stream's VLAN + class flags;
+            // don't echo the listener's command values (it may carry a wrong
+            // assumption). Class A stream on VID 2 -> CLASS_B flag clear.
+            av_put_be16(p + ACMP_OFF_VLAN_ID, 2);
+            av_put_be16(p + ACMP_OFF_FLAGS, 0);
         }
     }
 

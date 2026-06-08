@@ -50,6 +50,31 @@ static inline uint32_t srp_get_be32(const uint8_t *p)
 }
 
 // ---------------------------------------------------------------------------
+// Small xorshift PRNG — used only to jitter the LeaveAll period (mrpd
+// mrp.c:422 does the same with libc random()). No libc rand() in bare metal.
+// ---------------------------------------------------------------------------
+
+static uint32_t srp_rng_state = 0x12345678;
+
+static uint32_t srp_rand(void)
+{
+    uint32_t x = srp_rng_state;
+    if (x == 0) x = 0x12345678;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    srp_rng_state = x;
+    return x;
+}
+
+// Next LeaveAll period: MRP_LEAVEALL_PERIOD_MS + random()%(period/2), per
+// IEEE 802.1Q §10.7.5.22 / mrpd, so multiple endpoints don't lock-step.
+static uint32_t srp_next_lva_period(void)
+{
+    return MRP_LEAVEALL_PERIOD_MS + (srp_rand() % (MRP_LEAVEALL_PERIOD_MS / 2));
+}
+
+// ---------------------------------------------------------------------------
 // TX — shared MAC access
 // ---------------------------------------------------------------------------
 
@@ -306,6 +331,45 @@ static uint8_t *msrp_emit_listener(uint8_t *p, const uint8_t *stream_id,
     srp_put_be16(list_len_ptr, list_len);
 
     return p;
+}
+
+// ---------------------------------------------------------------------------
+// Explicit Leave (Lv) — emit a single attribute with the MRP Lv event so the
+// bridge tears the registration down immediately, instead of waiting for our
+// declarations to stop and the bridge's leavetimer (~ leaveall period) to
+// reclaim it. mrpd does this from the applicant LA state (mrp.c:768 →
+// MRP_SND_LV). We send it on AVDECC DISCONNECT (listener) / talker disable.
+// ---------------------------------------------------------------------------
+
+static void srp_send_one_pdu(uint8_t *frame, uint8_t *p)
+{
+    // MessageList EndMark
+    srp_put_be16(p, 0);
+    p += 2;
+    uint32_t len = (uint32_t)(p - frame);
+    if (len < 64) { memset(p, 0, 64 - len); len = 64; }
+    srp_eth_send(len);
+}
+
+static void srp_send_talker_leave(srp_state_t *s)
+{
+    uint8_t *frame = srp_tx_buf();
+    uint8_t *p = msrp_frame_begin(frame, s->src_mac);
+    p = msrp_emit_talker_adv(p, &s->talker, 0, MRP_EVT_LV);
+    srp_send_one_pdu(frame, p);
+    printf("[SRP] Talker Leave (Lv) sent\n");
+}
+
+static void srp_send_listener_leave(srp_state_t *s, const srp_listener_t *l)
+{
+    uint8_t *frame = srp_tx_buf();
+    uint8_t *p = msrp_frame_begin(frame, s->src_mac);
+    p = msrp_emit_listener(p, l->stream_id, l->substate, 0, MRP_EVT_LV);
+    srp_send_one_pdu(frame, p);
+    printf("[SRP] Listener Leave (Lv) sent for stream "
+           "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+           l->stream_id[0], l->stream_id[1], l->stream_id[2], l->stream_id[3],
+           l->stream_id[4], l->stream_id[5], l->stream_id[6], l->stream_id[7]);
 }
 
 // ---------------------------------------------------------------------------
@@ -698,6 +762,12 @@ void srp_init(srp_state_t *s, const uint8_t *mac_addr)
     memset(s, 0, sizeof(*s));
     memcpy(s->src_mac, mac_addr, 6);
     srp_txslot = 0;
+    // Seed the PRNG from the MAC so each endpoint jitters its LeaveAll
+    // period to a different phase; then set the first randomized period.
+    srp_rng_state = ((uint32_t)mac_addr[2] << 24) | ((uint32_t)mac_addr[3] << 16) |
+                    ((uint32_t)mac_addr[4] << 8) | mac_addr[5];
+    if (srp_rng_state == 0) srp_rng_state = 0x12345678;
+    s->leaveall_period_ms = srp_next_lva_period();
     // listeners[] all start enabled=0 (no declarations) via the memset.
     printf("[SRP] Initialized (MSRP)\n");
 }
@@ -757,13 +827,19 @@ void srp_talker_set(srp_state_t *s, const uint8_t *stream_id,
 
 void srp_talker_enable(srp_state_t *s, uint8_t enable)
 {
-    s->talker_enabled = enable;
     if (enable) {
+        s->talker_enabled = 1;
         // Reset MRPDU_NEW counter so the next 2 advertises emit NEW(0)
         // and force the bridge's registrar into the registered state.
         s->talker_new_count = 0;
         printf("[SRP] Talker Advertise enabled\n");
     } else {
+        // Emit an explicit Lv (while talker is still marked enabled so the
+        // attribute fields are valid) so the bridge frees the reservation
+        // immediately rather than aging it out.
+        if (s->talker_enabled)
+            srp_send_talker_leave(s);
+        s->talker_enabled = 0;
         printf("[SRP] Talker Advertise disabled\n");
     }
 }
@@ -829,6 +905,11 @@ void srp_listener_enable(srp_state_t *s, const uint8_t *stream_id, uint8_t enabl
                stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
     } else {
         if (l) {
+            // Send an explicit Lv for this stream (while still enabled so
+            // stream_id/substate are valid) so the bridge/talker drops our
+            // listener registration at once and the talker stops sourcing —
+            // instead of waiting for our declarations to lapse.
+            srp_send_listener_leave(s, l);
             l->enabled = 0;
             printf("[SRP] Listener disabled for stream "
                    "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -874,11 +955,14 @@ void srp_poll(srp_state_t *s)
     if (elapsed_lva > 2000000000)
         elapsed_lva = MRP_LEAVEALL_PERIOD_MS;
 
-    // LeaveAll timer
+    // LeaveAll timer — randomized period (set per-fire) so co-booting
+    // endpoints don't synchronize their LeaveAlls into a storm (mrpd
+    // mrp.c:422). leaveall_period_ms ∈ [10s, 15s].
     int leaveall = 0;
-    if (elapsed_lva >= MRP_LEAVEALL_PERIOD_MS) {
+    if (elapsed_lva >= s->leaveall_period_ms) {
         leaveall = 1;
         s->last_leaveall_ms = now_ms;
+        s->leaveall_period_ms = srp_next_lva_period();
     }
 
     // (a) Age out talker_registered as a DIAGNOSTIC ONLY. If we haven't

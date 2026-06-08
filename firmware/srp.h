@@ -128,6 +128,11 @@ typedef struct {
     // Timers (in milliseconds, tracked via gPTP uptime)
     uint32_t last_join_ms;
     uint32_t last_leaveall_ms;
+    // Per-cycle randomized LeaveAll period. mrpd (mrp.c:422) uses
+    // MRP_LVATIMER_VAL + random()%(VAL/2) so co-booting endpoints don't
+    // synchronize their LeaveAlls into a storm. Recomputed each time a
+    // LeaveAll fires; range [MRP_LEAVEALL_PERIOD_MS, 1.5×].
+    uint32_t leaveall_period_ms;
     uint32_t join_count;
 
     // RX state

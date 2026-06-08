@@ -600,7 +600,8 @@ static void check_uart_cmd(void)
             pr_rxb = crxb; pr_epo = cepo; pr_ms = now;
             }
             printf("\n[AAF] bound=%d rx_en=%d tx_en=%d\n"
-                   "  rx: count=%lu seq_err=%lu other=%lu fmt_err=%lu lvl=%lu\n"
+                   "  rx[gw-extractor]: match=%lu eof=%lu  <-- AUTHORITATIVE AAF RX\n"
+                   "  rx[cpu-seen]: count=%lu seq_err=%lu other=%lu fmt_err=%lu lvl=%lu (0 is normal: gw discards matched frames)\n"
                    "  tx: count=%lu underrun=%lu lvl=%lu seq=%u\n"
                    "  usb-bridge: frames=%lu fifo_ovf=%lu\n"
                    "  aaf_pkt(gw): en=%d pkts=%lu underrun=%lu ovr=%lu fifo=%lu\n"
@@ -608,6 +609,8 @@ static void check_uart_cmd(void)
                    "  usb-fifo: level=%ld min=%lu max=%lu fbovr=0x%lx step=0x%lx inc=%lu calls=%lu\n"
                    "  last_pres_ts=%08lx\n",
                    aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
+                   (unsigned long)avtp_extractor_slot0_match_count_read(),
+                   (unsigned long)avtp_extractor_diag_eof_count_read(),
                    (unsigned long)aaf.rx_count, (unsigned long)aaf.rx_seq_errors,
                    (unsigned long)aaf.rx_other_count, (unsigned long)aaf.format_errors,
                    (unsigned long)aaf_rx_level(&aaf),
@@ -1203,12 +1206,30 @@ int main(void)
         srp_poll(&srp);
 
         // Track per-stream MEDIA_LOCKED for Hive's listener indicators.
-        // CRF (uid 0) follows the MCR servo; AAF (uid 1) follows
-        // aaf.rx_count crossing zero. Both call into avdecc, which
+        // CRF (uid 0) follows the MCR servo; AAF (uid 1) follows the GATEWARE
+        // extractor's match counter advancing. Both call into avdecc, which
         // pushes unsolicited GET_COUNTERS_RESPONSE on transitions.
         {
             static uint8_t prev_aaf_locked = 0;
-            uint8_t aaf_now = (aaf.bound && aaf.rx_count > 0) ? 1 : 0;
+            // The AAF audio stream is consumed by the gateware AVTPSampleExtractor;
+            // Stage 2b (sram.writer.discard_in = match_at_eof) DROPS the matched
+            // frames from the CPU SRAM before the firmware dispatcher runs, so
+            // aaf.rx_count NEVER advances for the bound stream. The authoritative
+            // "AAF is flowing" signal is the gateware extractor match counter.
+            // Track its delta with a short hysteresis window, same shape as the
+            // CRF servo lock below. (Using aaf.rx_count here = permanently 0 =
+            // AAF MEDIA_LOCKED never reported to Hive — the bug this fixes.)
+            #define AAF_LOCK_HYST_MS 2000u
+            static uint32_t aaf_gw_last_match = 0;
+            static uint32_t aaf_rx_seen_ms    = 0;
+            uint32_t aaf_gw_match = avtp_extractor_slot0_match_count_read();
+            uint32_t now_a        = gptp_uptime_ms();
+            if (aaf_gw_match != aaf_gw_last_match) {
+                aaf_gw_last_match = aaf_gw_match;
+                aaf_rx_seen_ms    = now_a;
+            }
+            uint8_t aaf_now = (aaf.bound && aaf_rx_seen_ms != 0 &&
+                               (now_a - aaf_rx_seen_ms) < AAF_LOCK_HYST_MS) ? 1 : 0;
             if (aaf_now != prev_aaf_locked) {
                 avdecc_listener_lock_changed(&avdecc, LISTENER_UID_AAF, aaf_now);
                 prev_aaf_locked = aaf_now;
@@ -1236,9 +1257,11 @@ int main(void)
             }
 
             // FRAMES_RX is a polled counter — mirror the underlying
-            // counter (no per-frame hook needed).
+            // counter (no per-frame hook needed). AAF frames are consumed in
+            // gateware (discarded from CPU SRAM), so the real RX frame count is
+            // the extractor match counter, NOT aaf.rx_count (which stays 0).
             avdecc.stream_frames_rx[LISTENER_UID_CRF] = mcr.rx_count;
-            avdecc.stream_frames_rx[LISTENER_UID_AAF] = aaf.rx_count;
+            avdecc.stream_frames_rx[LISTENER_UID_AAF] = aaf_gw_match;
         }
 
         // BASELINE: force the AAF frame VLAN tag to Class A (PCP 3, VID 2),

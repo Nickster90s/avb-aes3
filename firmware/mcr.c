@@ -54,6 +54,17 @@ void mcr_set_gptp(mcr_state_t *m, const gptp_t *g)
 // current_addend_full/base_addend_full to discipline the TSU. The NCO shares
 // the same sys_clk, so the same fractional correction makes it emit exactly
 // 48000 gPTP-Hz. Falls back to the raw nominal base until gPTP locks.
+// Clamp the gPTP frequency correction to a physically-plausible crystal-error
+// window: base_increment >> 9 ≈ ±0.195% ≈ ±1953 ppm — roughly 10-20x any real
+// crystal+GM offset (spec'd tens of ppm), so it never clips a genuine lock but
+// rejects pathological windup. Without it, a gPTP servo that winds its addend
+// up with NO real grandmaster (e.g. a point-to-point link, or a transient GM
+// loss) drives `corr` huge and the gPTP-disciplined NCO over-revs the media
+// clock — observed as the AAF talker emitting ~112k pkt/s instead of 8000 on
+// the point-to-point bring-up. This bounds the NCO to a sane rate regardless of
+// gPTP state, so a gPTP unlock can never over-rev the talker.
+#define MCR_GPTP_CORR_SHIFT  9
+
 static uint32_t mcr_compute_gptp_base(const mcr_state_t *m)
 {
     const gptp_t *g = m->gptp;
@@ -61,6 +72,9 @@ static uint32_t mcr_compute_gptp_base(const mcr_state_t *m)
         return m->base_increment;
     int64_t d    = (int64_t)g->current_addend_full - (int64_t)g->base_addend_full;
     int64_t corr = ((int64_t)m->base_increment * d) / (int64_t)g->base_addend_full;
+    int64_t maxc = (int64_t)m->base_increment >> MCR_GPTP_CORR_SHIFT;
+    if (corr >  maxc) corr =  maxc;
+    if (corr < -maxc) corr = -maxc;
     int64_t inc  = (int64_t)m->base_increment + corr;
     if (inc < 1) inc = 1;
     return (uint32_t)inc;

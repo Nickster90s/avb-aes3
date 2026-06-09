@@ -8,6 +8,7 @@
 #define MCR_H
 
 #include <stdint.h>
+#include "gptp.h"   // gptp_t — for gPTP-disciplined NCO (cs=0 media clock)
 
 // CRF parameters (from IEEE 1722-2016 Table 25-27)
 #define CRF_TYPE_AUDIO_SAMPLE   1
@@ -119,9 +120,24 @@ typedef struct {
     uint32_t last_rx_count_snapshot;
     uint32_t last_rx_check_ms;
     uint8_t  watchdog_reset_active;  // 1 while increment is held at base
+
+    // gPTP-disciplined media clock (cs=0). The NCO base_increment is computed
+    // from the NOMINAL sys_clk, so free-running it emits 48000 ± crystal-error
+    // Hz — NOT the network's 48000 gPTP-Hz, so a listener's buffer drifts.
+    // gPTP already measures the sys_clk-vs-GM ratio (current_addend_full /
+    // base_addend_full); we apply it to the NCO so it produces exactly 48000
+    // gPTP-Hz. gptp_locked_base = that disciplined increment, recomputed each
+    // watchdog tick; also pushed to the AAF packetizer's pres_base CSR so the
+    // presentation-time ramp uses the SAME reference (no double correction).
+    const gptp_t *gptp;
+    uint32_t gptp_locked_base;       // base_increment scaled by the gPTP rate ratio
+    uint32_t pres_base_last;         // last value written to aaf_pkt pres_base (deadband)
 } mcr_state_t;
 
 void mcr_init  (mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs);
+// Give the MCR a gPTP handle so it can discipline the free-running (cs=0) NCO
+// to the network media rate. Call once after mcr_init + gptp_init.
+void mcr_set_gptp(mcr_state_t *m, const gptp_t *g);
 void mcr_bind  (mcr_state_t *m, const uint8_t *stream_id);
 void mcr_unbind(mcr_state_t *m);
 

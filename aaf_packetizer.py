@@ -144,7 +144,14 @@ class AAFPacketizer(LiteXModule):
         rem      = TOTAL % 4
         N_WORDS  = (TOTAL + 3) // 4                    # 59
         LAST_IDX = N_WORDS - 1
-        LAST_BE  = 0xF if rem == 0 else ((1 << rem) - 1)
+        # last_be is a ONE-HOT of the LAST VALID BYTE (LiteEth mac/sram.py:238-245:
+        # 1 byte->0b0001, 2->0b0010, 3->0b0100, 4->0b1000), NOT a byte mask.
+        # We had ((1<<rem)-1) = 0x3 for the 234-byte frame (rem=2) where LiteEth's
+        # TX last_be stage + 32->8 converter expect 0x2 -> wrong final byte count
+        # -> WRONG FRAME LENGTH -> BAD FCS -> every AAF frame dropped on the wire
+        # as an RX error (firmware frames were fine because the SRAM reader sets
+        # this correctly). THE bug that kept AAF off the wire end-to-end.
+        LAST_BE  = (1 << 3) if rem == 0 else (1 << (rem - 1))
 
         # AAF header scalar fields (depend on channels/spp).
         nsr_ch   = (5 << 12) | (channels & 0x3FF)     # nsr=48k | channels
@@ -168,6 +175,17 @@ class AAFPacketizer(LiteXModule):
                              description="802.1Q TCI = (pcp<<13)|vid. Class A default pcp=3, vid=2.")
         self.pres_offset   = CSRStorage(32, reset=2_000_000,
                              description="presentation_time offset (ns) added to gPTP now. Milan AAF = 2 ms.")
+        # gPTP-disciplined media-clock base. The presentation-time ramp dilates
+        # by (mcr.increment - pres_base); firmware (mcr.c) writes here the NCO
+        # increment that equals EXACTLY 48000 gPTP-Hz (base_increment scaled by
+        # the gPTP servo's sys_clk-vs-GM ratio). So cs=0 (NCO at pres_base) =>
+        # dinc=0 => pres advances at exactly 125 us/packet; cs=1 (CRF) => dinc
+        # tracks CRF relative to gPTP. Reset = nominal base so the ramp is sane
+        # before firmware's first write. (Was a build-time constant = nominal
+        # base, which re-injected the full crystal error once the NCO got
+        # gPTP-disciplined.)
+        self.pres_base     = CSRStorage(32, reset=mcr.base_increment,
+                             description="NCO increment that equals 48000 gPTP-Hz (firmware writes the gPTP-disciplined base).")
 
         # ---- CSRs: status (read-only diagnostics) ----
         self.packet_count   = CSRStatus(32, description="AAF frames transmitted.")
@@ -196,6 +214,17 @@ class AAFPacketizer(LiteXModule):
         #    dbg_first > dbg_usb_samp/8 then `first` is glitching (phantom push).
         self.dbg_raw_strobe = CSRStatus(32, description="mcr.sample_strobe UNGATED — true NCO consumer rate.")
         self.dbg_usb_samp   = CSRStatus(32, description="samples drained from USB bridge (usb_readable & do_pop) — true producer rate.")
+        # Live avtp_timestamp (presentation time, ns mod 2^32) of the last emitted
+        # packet. Firmware compares it to gPTP-now: it MUST be ~now + pres_offset
+        # (2 ms). If it's garbage / not ~2 ms ahead, the stream carries no
+        # recoverable media clock and a listener can't lock.
+        self.dbg_pres       = CSRStatus(32, description="last emitted avtp_timestamp (ns mod 2^32). Expect ~gPTP_now + 2 ms.")
+        # Frame-buffer dump: read the ACTUAL assembled frame the gateware puts on
+        # the wire, word by word. firmware writes dump_addr (0..N_WORDS-1) and
+        # reads dump_data. Lets us verify EVERY byte (dst/src/VLAN/ethertype/AAF
+        # header/payload) directly, instead of trusting the construction.
+        self.dbg_frame_addr = CSRStorage(8,  description="frame_ram word index to read back via dbg_frame_data.")
+        self.dbg_frame_data = CSRStatus(32, description="frame_ram[dbg_frame_addr] — the exact 32-bit word on the wire (byte0 in LSB).")
 
         # MAC error lane is always 0 for our generated frames.
         self.comb += source.error.eq(0)
@@ -430,6 +459,7 @@ class AAFPacketizer(LiteXModule):
 
         seq  = Signal(8)
         pres = Signal(32)
+        self.comb += self.dbg_pres.status.eq(pres)   # expose live avtp_timestamp
 
         # ---- Deterministic CRF-dilated presentation-time ramp (gst-avtp model) ----
         # Instead of re-sampling gPTP every packet (which carries strobe->latch
@@ -452,8 +482,12 @@ class AAFPacketizer(LiteXModule):
         self.comb += anchor_ns.eq((_mul_1e9_lo32(tsu.seconds)
                                    + tsu.nanoseconds
                                    + self.pres_offset.storage)[0:32])
-        dinc = Signal((27, True))                         # signed (inc - base)
-        self.comb += dinc.eq(mcr.increment - _base)
+        dinc = Signal((27, True))                         # signed (inc - pres_base)
+        # Dilate relative to the gPTP-disciplined base (CSR), NOT the build-time
+        # nominal constant. cs=0: increment == pres_base => dinc=0 => no dilation
+        # (the NCO already IS 48000 gPTP-Hz). cs=1: dinc = CRF - gptp_base tracks
+        # CRF relative to gPTP. _Kfix stays constant (ppm*ppm residual).
+        self.comb += dinc.eq(mcr.increment - self.pres_base.storage)
         # Constant multiply dinc*_Kfix via a shift-add tree. A real multiplier
         # infers a DSP48 whose carry-cascade nextpnr-xilinx can't route (same
         # issue/fix as the LiteEth TSU *1e9 -> shift-add workaround).
@@ -512,6 +546,8 @@ class AAFPacketizer(LiteXModule):
         # 4) Builder FSM: bytes → frame_ram, then stream frame_ram → source
         # =========================================================
         frame_ram = Array([Signal(32) for _ in range(N_WORDS)])
+        # Debug readback of the assembled frame (see dbg_frame_addr/data above).
+        self.comb += self.dbg_frame_data.status.eq(frame_ram[self.dbg_frame_addr.storage])
         byte_idx  = Signal(max=TOTAL + 1)
         wacc      = Signal(24)            # holds lanes 0..2 of the in-progress word
         rd_idx    = Signal(max=N_WORDS)

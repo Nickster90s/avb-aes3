@@ -265,6 +265,12 @@ typedef struct {
     #define AVDECC_MAX_LISTENERS_PER_TALKER 4
     uint8_t  listeners[AVDECC_MAX_LISTENERS_PER_TALKER][8];
     uint8_t  n_listeners;
+    // Milan STREAM_OUTPUT counters (IEEE 1722.1 §7.4.42, Milan §6.8.3).
+    // STREAM_START bumps on the empty->non-empty listener edge (first
+    // CONNECT_TX), STREAM_STOP on the non-empty->empty edge (last
+    // DISCONNECT_TX). Milan §5.3.7.7 invariant: |start - stop| <= 1.
+    uint32_t stream_start;
+    uint32_t stream_stop;
 } avdecc_talker_stream_t;
 
 // Listener stream — we are the sink. One per stream_input descriptor.
@@ -354,6 +360,11 @@ typedef struct {
     uint32_t stream_media_unlocked[AVDECC_MAX_LISTENERS];
     uint32_t stream_frames_rx     [AVDECC_MAX_LISTENERS];
     uint8_t  stream_last_locked   [AVDECC_MAX_LISTENERS];
+
+    // STREAM_OUTPUT FRAMES_TX (Milan §6.8.3 counter 4). Polled from the
+    // gateware AAF packetizer's packet count (fed by main.c), mirroring how
+    // stream_frames_rx mirrors the listener side.
+    uint32_t stream_frames_tx     [AVDECC_MAX_TALKERS];
 
     // ACMP slow-path resolve state. One per listener UID.
     avdecc_resolve_t resolves[AVDECC_MAX_LISTENERS];

@@ -572,17 +572,26 @@ static void check_uart_cmd(void)
              * if first_rate is higher, `first` is glitching (phantom pushes). */
             {
             static uint32_t pr_str, pr_usb, pr_push, pr_pop, pr_first, pr_ms;
-            static uint32_t pr_rxb, pr_epo;
+            static uint32_t pr_rxb, pr_epo, pr_pkts;
             uint32_t cs = aaf_pkt_dbg_raw_strobe_read();
             uint32_t cu = aaf_pkt_dbg_usb_samp_read();
             uint32_t cpush = aaf_pkt_dbg_block_push_read();
             uint32_t cpop  = aaf_pkt_dbg_block_pop_read();
             uint32_t cfirst= aaf_pkt_dbg_first_read();
+            uint32_t cpkts = aaf_pkt_packet_count_read();    // AAF frames handed to MAC
             uint32_t crxb  = main_usb_dbg_rx_beats_read();   // core->EP raw byte beats
             uint32_t cepo  = main_usb_dbg_ep_out_read();     // EP->decoder beats
             uint32_t now = gptp_uptime_ms();
             uint32_t dms = now - pr_ms;
             if (dms == 0) dms = 1;
+            // *** AAF TX FRAME RATE *** — should be ~8000/s (6 samples/pkt at
+            // 48 kHz). This is the AUTHORITATIVE "are we transmitting at rate"
+            // number; aaf_pkt.packet_count increments only when the MAC core
+            // ACCEPTS a frame's last beat, so this == frames put on the wire.
+            // If it's not ~8000, the media-clock strobe is wrong (not a
+            // forwarding/listener problem).
+            printf("  *** AAF TX = %lu pkt/s (expect ~8000) ***\n",
+                   (unsigned long)((uint64_t)(cpkts - pr_pkts) * 1000u / dms));
             printf("  rates(/s): strobe=%lu usb_samp=%lu (frames=%lu) push=%lu pop=%lu first=%lu  [host~46979]\n",
                    (unsigned long)((uint64_t)(cs - pr_str)   * 1000u / dms),
                    (unsigned long)((uint64_t)(cu - pr_usb)   * 1000u / dms),
@@ -597,7 +606,20 @@ static void check_uart_cmd(void)
                    (unsigned long)((uint64_t)(crxb - pr_rxb) * 1000u / dms),
                    (unsigned long)((uint64_t)(cepo - pr_epo) * 1000u / dms));
             pr_str = cs; pr_usb = cu; pr_push = cpush; pr_pop = cpop; pr_first = cfirst;
-            pr_rxb = crxb; pr_epo = cepo; pr_ms = now;
+            pr_rxb = crxb; pr_epo = cepo; pr_ms = now; pr_pkts = cpkts;
+            }
+            // *** MEDIA-CLOCK / avtp_timestamp validity ***  The listener
+            // recovers its media clock from our avtp_timestamp. It must be
+            // ~gPTP_now + 2 ms; if pres-now is garbage (not ~+2,000,000 ns) the
+            // stream carries no usable media clock and AxC can't lock.
+            {
+                ptp_timestamp_t _now = gptp_read_time();
+                uint32_t _now32 = (uint32_t)((uint64_t)_now.seconds * 1000000000ULL
+                                             + _now.nanoseconds);
+                uint32_t _pres = aaf_pkt_dbg_pres_read();
+                int32_t  _diff = (int32_t)(_pres - _now32);
+                printf("  *** avtp_ts=%lu gptp_now=%lu  pres-now=%ld ns (expect ~+2000000) ***\n",
+                       (unsigned long)_pres, (unsigned long)_now32, (long)_diff);
             }
             printf("\n[AAF] bound=%d rx_en=%d tx_en=%d\n"
                    "  rx[gw-extractor]: match=%lu eof=%lu  <-- AUTHORITATIVE AAF RX\n"
@@ -697,6 +719,22 @@ static void check_uart_cmd(void)
             srp_talker_enable(&srp, 0);
             printf("[DIAG] AAF TX force-disabled\n");
             break;
+        case 'F': {
+            // Dump the EXACT assembled AAF frame the gateware puts on the wire,
+            // byte 0 first. Verify dst(0-5)/src(6-11)/TPID 8100(12-13)/TCI(14-15
+            // = 60 02 => PCP3 VID2)/ethertype 22F0(16-17)/AAF hdr(18+)/payload.
+            printf("\n[FRAME] gateware AAF frame, byte 0 first (234 bytes):\n");
+            for (int w = 0; w < 59; w++) {
+                aaf_pkt_dbg_frame_addr_write(w);
+                uint32_t word = aaf_pkt_dbg_frame_data_read();
+                printf("%02x %02x %02x %02x ",
+                       (unsigned)(word & 0xFF),  (unsigned)((word >> 8) & 0xFF),
+                       (unsigned)((word >> 16) & 0xFF), (unsigned)((word >> 24) & 0xFF));
+                if ((w & 3) == 3) printf("\n");
+            }
+            printf("\n");
+            break;
+        }
         case 'b':
             // Per-second windowed rates — Stage-0 baseline for the
             // firmware-on-audio architecture. Each subsequent
@@ -936,18 +974,23 @@ static void on_talker_connect(uint16_t uid, const uint8_t *listener_entity_id)
     (void)listener_entity_id;
     if (uid != TALKER_UID_AAF) return;
     aaf_tx_enable(&aaf, 1);
+    // Re-assert the talker advertise (idempotent; it's already enabled from
+    // boot). This resets the NEW counter so the next 2 advertises emit NEW(0),
+    // refreshing the bridge registrar for the freshly-connecting listener.
     srp_talker_enable(&srp, 1);
     aaf_gw_set(1);            // hand the USB→AVB stream to gateware (CPU out of path)
-    printf("[main] AAF talker started via AVDECC (gateware packetizer)\n");
+    printf("[main] AAF talker media started via AVDECC (gateware packetizer)\n");
 }
 
 static void on_talker_disconnect(uint16_t uid)
 {
     if (uid != TALKER_UID_AAF) return;
-    aaf_gw_set(0);            // release the stream before tearing down the binding
-    aaf_tx_enable(&aaf, 0);
-    srp_talker_enable(&srp, 0);
-    printf("[main] AAF talker stopped via AVDECC\n");
+    // Keep BOTH the SRP reservation AND the continuous-silence emission running
+    // after a listener disconnects — the stream stays present and reserved so
+    // the next listener can lock immediately. (We stream silence from boot; a
+    // listener disconnecting just means no one is consuming it right now.)
+    // Nothing to tear down here; logged for visibility.
+    printf("[main] AAF listener disconnected (stream stays advertised + streaming)\n");
 }
 
 static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
@@ -1162,23 +1205,64 @@ int main(void)
     gptp_init(&gptp, mac_addr);
     srp_init(&srp, mac_addr);
     mcr_init(&mcr, CONFIG_CLOCK_FREQUENCY, 48000);
+    // Give MCR the gPTP handle so the free-running (cs=0) NCO is disciplined to
+    // the network media rate (exactly 48000 gPTP-Hz) instead of the raw crystal.
+    mcr_set_gptp(&mcr, &gptp);
     {
         // AAF uses the same talker stream_id/dest_mac advertised in AVDECC.
         // stream_id = MAC + 0x00 0x01 (matches avtp_set_stream_id default).
         uint8_t aaf_stream_id[8] = {0,0,0,0,0,0, 0x00, 0x01};
         memcpy(aaf_stream_id, mac_addr, 6);
-        // Derive dest_mac from MAC bytes 4..5 so we don't collide with another
-        // AVB talker on the same network. A hardcoded 91:E0:F0:00:FE:00 makes
-        // every FPGA build advertise the same address — bridges respond with
-        // MSRP Failure 0x05 (Stream Destination Address In Use) the moment a
-        // second talker shows up. The 91:E0:F0:00:FE:xx slice is the Milan
-        // locally-administered range (IEEE 1722-2016 Annex B.1).
+        // Stream destination MAC = 91:E0:F0:00:FE:mac[5]. The 0xFE slice is the
+        // locally-administered range OUTSIDE the MAAP dynamic pool (00:00..FD:FF)
+        // — chosen to avoid colliding with a MAAP allocation. NOTE: avb_session
+        // itself transmits to 91:E0:F0:00:FE:00 (same 0xFE range) fine, so the
+        // reserved range is NOT a forwarding problem. (A brief experiment with an
+        // in-pool 0x42:xx address was reverted: it risked MAAP collision and the
+        // reserved range was never the issue — D3 is still about data delivery,
+        // not the dest range.) TODO: proper MAAP allocate+defend if needed.
         uint8_t aaf_mcast[6] = {0x91, 0xE0, 0xF0, 0x00, 0xFE, mac_addr[5]};
         aaf_init(&aaf, mac_addr, aaf_stream_id, aaf_mcast);
     }
 
-    // Configure SRP talker to advertise our AAF stream
-    srp_talker_set(&srp, aaf.stream_id, aaf.dest_mac, 230);   // 14+24+192
+    // Configure SRP talker to advertise our AAF stream.
+    // MaxFrameSize = the REAL L2 frame size INCLUDING the VLAN tag (IEEE 802.1Q
+    // §35.2.2.8.3): dst(6)+src(6)+VLANtag(4)+ethertype(2)+AVTP_hdr(24)+audio(192)
+    // = 234. (Was 230 = "14+24+192" — it forgot the 4-byte VLAN tag we actually
+    // transmit. We declared 230 but send 234-byte frames; a bridge that polices
+    // frame size vs the declared MaxFrameSize drops every frame at forwarding ->
+    // handshake completes but Frames RX=0. Matches avb_session compute_pkt_size:
+    // 6+6+4+2+avtp_payload.) Must be the EXACT size — over-declaring (e.g. 1500)
+    // overflows the Class-A bandwidth budget; see
+    // [[msrp-maxframesize-must-be-real-frame-size]].
+    srp_talker_set(&srp, aaf.stream_id, aaf.dest_mac, 234);   // 6+6+4+2+24+192
+
+    // Advertise the MSRP TalkerAdvertise CONTINUOUSLY from boot — decoupled
+    // from AVDECC/ACMP. This mirrors avb_session_mgr2's do_srp_register() at
+    // startup (the known-good talker on this rig): the bridge always has our
+    // talker reservation registered BEFORE any listener connects.
+    //
+    // Previously srp_talker_enable(1) was only called from on_talker_connect
+    // (ACMP CONNECT_TX). That created a chicken-and-egg: when the controller
+    // wires AxC→us, AxC declares its MSRP Listener Ready at ~the same instant
+    // we first start advertising — so its Listener Ready hits a bridge that
+    // hasn't yet registered our TalkerAdvertise (NEW×2 not done) → no
+    // reservation path → Frames RX=0. The RX direction worked only because the
+    // REMOTE talker advertises continuously. Symmetry: we must too.
+    srp_talker_enable(&srp, 1);
+
+    // ALSO emit AAF frames (continuous silence) from boot. The gateware
+    // AAFPacketizer was only enabled inside on_talker_connect (ACMP), so on a
+    // fresh boot with no connection ZERO AAF frames left the FPGA — and a
+    // listener (AxC) can't lock, and won't send CONNECT_TX for, a stream it
+    // never sees on the wire. Deadlock. Stream silence continuously (the
+    // "send silent even with no USB source" design) so the stream is always
+    // present for a listener to lock; real audio fills in once USB plays.
+    // Safe to emit now that the SR reservation is advertised from boot — an
+    // AVB bridge prunes our SR-multicast (91:e0:f0:00:fe:xx) to registered
+    // listener ports only, so this does NOT flood the segment.
+    aaf_tx_enable(&aaf, 1);
+    aaf_gw_set(1);
 
     // Observe every TalkerAdvertise on the wire — used to learn the
     // real stream_id for a FAST_CONNECT listener that arrived with
@@ -1262,6 +1346,9 @@ int main(void)
             // the extractor match counter, NOT aaf.rx_count (which stays 0).
             avdecc.stream_frames_rx[LISTENER_UID_CRF] = mcr.rx_count;
             avdecc.stream_frames_rx[LISTENER_UID_AAF] = aaf_gw_match;
+            // STREAM_OUTPUT FRAMES_TX: the gateware AAF packetizer's packet
+            // count (continuous silence from boot, real audio once USB plays).
+            avdecc.stream_frames_tx[TALKER_UID_AAF] = aaf_pkt_packet_count_read();
         }
 
         // BASELINE: force the AAF frame VLAN tag to Class A (PCP 3, VID 2),
@@ -1284,6 +1371,30 @@ int main(void)
         mcr_pump_hw(&mcr);        // flood-proof servo feed from gateware CRF FIFO
         mcr_servo_update(&mcr);   // also consume any CPU-path CRF sample
         mcr_watchdog_tick(&mcr, gptp_uptime_ms());
+
+        // Re-anchor the AAF presentation-time ramp ONCE after gPTP locks. The
+        // gateware ramp anchors gPTP time on its FIRST packet; we stream from
+        // boot, so that anchor is taken BEFORE gPTP steps to GM time, leaving
+        // every avtp_ts ~1 s off (mod 2^32 ns) from the listener's clock — far
+        // outside its jitter buffer, so it can't media-lock (MEDIA_LOCKED=0) and
+        // drops our frames (Frames RX=0). After the clock has stepped+locked,
+        // toggle aaf_pkt.enable once to reset the gateware `anchored` latch; the
+        // next packet re-anchors to the correct GM-locked TSU. Fire EXACTLY ONCE
+        // per lock — servo_step_count counts every servo update (not steps), so
+        // using it re-toggled enable every Sync and continuously reset the
+        // anchor, breaking the stream. Re-arm only on a full unlock (rare; gPTP
+        // lock has hysteresis). See [[gptp-step-invalidates-time-stamps]].
+        {
+            static uint8_t reanchored = 0;
+            if (!gptp.servo_locked) {
+                reanchored = 0;
+            } else if (!reanchored && aaf_gw_enabled) {
+                aaf_pkt_enable_write(0);   // resets gateware `anchored`
+                aaf_pkt_enable_write(1);   // next packet re-anchors to locked TSU
+                reanchored = 1;
+                printf("[main] gPTP locked — AAF presentation time re-anchored\n");
+            }
+        }
 
         // USB→AVB rate matching: SMUNAUT-STYLE honest async feedback.
         // The NCO free-runs (watchdog holds it at base = gPTP rate when unbound).

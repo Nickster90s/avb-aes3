@@ -347,6 +347,19 @@ static void acmp_send_response(avdecc_state_t *s, uint8_t msg_type, uint8_t stat
             // assumption). Class A stream on VID 2 -> CLASS_B flag clear.
             av_put_be16(p + ACMP_OFF_VLAN_ID, 2);
             av_put_be16(p + ACMP_OFF_FLAGS, 0);
+            // DIAGNOSTIC: show exactly what we hand the listener so it can set
+            // its RX filter + declare a Listener Ready. If Frames RX stays 0,
+            // compare these against what the listener actually subscribes to.
+            if (msg_type == ACMP_MSG_CONNECT_TX_RESPONSE)
+                printf("[ACMP] CONNECT_TX_RESPONSE -> listener: sid=%02x:%02x:%02x"
+                       ":%02x:%02x:%02x:%02x:%02x dst=%02x:%02x:%02x:%02x:%02x:%02x"
+                       " vlan=2 conn=%u\n",
+                       t->stream_id[0], t->stream_id[1], t->stream_id[2],
+                       t->stream_id[3], t->stream_id[4], t->stream_id[5],
+                       t->stream_id[6], t->stream_id[7],
+                       t->dest_mac[0], t->dest_mac[1], t->dest_mac[2],
+                       t->dest_mac[3], t->dest_mac[4], t->dest_mac[5],
+                       (unsigned)cc);
         }
     }
 
@@ -390,6 +403,10 @@ static void acmp_send_response(avdecc_state_t *s, uint8_t msg_type, uint8_t stat
     avdecc_eth_send(frame_len);
     s->acmp_tx_count++;
 }
+
+// Defined near push_unsol_counters(); used here on the connect/disconnect edge.
+static void push_unsol_stream_out_counters(avdecc_state_t *s, uint16_t uid);
+static void push_unsol_stream_info(avdecc_state_t *s, uint16_t dt, uint16_t di);
 
 static void acmp_handle_connect_tx(avdecc_state_t *s, const uint8_t *pdu)
 {
@@ -437,8 +454,21 @@ static void acmp_handle_connect_tx(avdecc_state_t *s, const uint8_t *pdu)
            t->n_listeners);
 
     // Enable TX only on the 0->1 transition (first listener).
-    if (was_n == 0 && t->n_listeners > 0 && s->on_talker_connect)
-        s->on_talker_connect(tuid, listener_id);
+    if (was_n == 0 && t->n_listeners > 0) {
+        // Milan STREAM_START: bump on the empty->non-empty edge (matches the
+        // reference handleConnectTx g_streamStartCount). Keep the §5.3.7.7
+        // invariant |start-stop|<=1: only advance if start is level with stop.
+        if (t->stream_start <= t->stream_stop)
+            t->stream_start++;
+        push_unsol_stream_out_counters(s, tuid);   // let Hive see it climb live
+        // Push STREAM_INFO too so the controller/listener immediately sees the
+        // talker flip to CONNECTED/streaming (matches avb_session's
+        // notify_stream_info_changed(0x0006) on connect). Without this the
+        // listener never learns the talker is live and never arms its input.
+        push_unsol_stream_info(s, AEM_DESC_STREAM_OUTPUT, tuid);
+        if (s->on_talker_connect)
+            s->on_talker_connect(tuid, listener_id);
+    }
 
     acmp_send_response(s, ACMP_MSG_CONNECT_TX_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
 }
@@ -463,8 +493,16 @@ static void acmp_handle_disconnect_tx(avdecc_state_t *s, const uint8_t *pdu)
         if (t->connection_count > 0) t->connection_count--;
         t->connected = (t->n_listeners > 0);
         printf("[AVDECC] DISCONNECT_TX uid=%u (n_listeners=%u)\n", tuid, t->n_listeners);
-        if (t->n_listeners == 0 && s->on_talker_disconnect)
-            s->on_talker_disconnect(tuid);
+        if (t->n_listeners == 0) {
+            // Milan STREAM_STOP on the non-empty->empty edge, guarded so
+            // stop never exceeds start (§5.3.7.7 |start-stop|<=1).
+            if (t->stream_stop < t->stream_start)
+                t->stream_stop++;
+            push_unsol_stream_out_counters(s, tuid);
+            push_unsol_stream_info(s, AEM_DESC_STREAM_OUTPUT, tuid);  // talker -> not connected
+            if (s->on_talker_disconnect)
+                s->on_talker_disconnect(tuid);
+        }
     } else {
         printf("[AVDECC] DISCONNECT_TX uid=%u\n", tuid);
     }
@@ -1660,7 +1698,13 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
             }
             break;
         case AEM_DESC_STREAM_OUTPUT:
-            if (di < N_STREAM_OUTPUTS) valid = 0x0000001F;
+            if (di < N_STREAM_OUTPUTS) {
+                valid = 0x0000001F;
+                counters[0] = s->talkers[di].stream_start;   // STREAM_START
+                counters[1] = s->talkers[di].stream_stop;    // STREAM_STOP
+                // 2=MEDIA_RESET, 3=TIMESTAMP_UNCERTAIN left 0
+                counters[4] = s->stream_frames_tx[di];       // FRAMES_TX
+            }
             break;
         default:
             break;
@@ -1825,6 +1869,11 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
                         | STREAM_INFO_FLAG_MSRP_ACC_LATENCY_VALID
                         | STREAM_INFO_FLAG_STREAM_VLAN_ID_VALID;
             connected = t->connected;
+            // Report CONNECTED (= streaming, STREAMING_WAIT clear) when a
+            // listener is bound, so the controller/listener sees the talker as
+            // live and arms the input. (Was computed but never flagged.)
+            if (connected)
+                info_flags |= STREAM_INFO_FLAG_CONNECTED;
         } else if (dt == AEM_DESC_STREAM_INPUT && di < AVDECC_MAX_LISTENERS) {
             const avdecc_listener_stream_t *l = &s->listeners[di];
             fmt = (di == LISTENER_CRF_INDEX) ? stream_fmt_crf_48k : stream_fmt_aaf_8ch_48k;
@@ -2242,6 +2291,18 @@ static void push_unsol_stream_counters(avdecc_state_t *s, uint16_t uid)
     push_unsol_counters(s, AEM_DESC_STREAM_INPUT, uid, 0x00000FFF, c);
 }
 
+// STREAM_OUTPUT (talker) counters — pushed on the connect/disconnect edge so
+// Hive's STREAM_START / STREAM_STOP / FRAMES_TX update without a manual poll.
+static void push_unsol_stream_out_counters(avdecc_state_t *s, uint16_t uid)
+{
+    if (uid >= AVDECC_MAX_TALKERS) return;
+    uint32_t c[32] = {0};
+    c[0] = s->talkers[uid].stream_start;   // STREAM_START
+    c[1] = s->talkers[uid].stream_stop;    // STREAM_STOP
+    c[4] = s->stream_frames_tx[uid];       // FRAMES_TX
+    push_unsol_counters(s, AEM_DESC_STREAM_OUTPUT, uid, 0x0000001F, c);
+}
+
 // Build the 56-byte Milan GET_STREAM_INFO payload (the part that follows
 // the AECP header at offset +24). Layout matches the response builder in
 // aecp_handle's AEM_CMD_GET_STREAM_INFO case. dt must be STREAM_INPUT or
@@ -2264,6 +2325,13 @@ static uint32_t build_stream_info_payload(avdecc_state_t *s, uint16_t dt,
                     | STREAM_INFO_FLAG_STREAM_DEST_MAC_VALID
                     | STREAM_INFO_FLAG_MSRP_ACC_LATENCY_VALID
                     | STREAM_INFO_FLAG_STREAM_VLAN_ID_VALID;
+        // Report the talker as CONNECTED (and therefore STREAMING, since
+        // STREAMING_WAIT is clear) once a listener is bound. Without this a
+        // Milan controller/listener sees our talker as idle and never arms its
+        // input -> AxC shows neither MEDIA_LOCKED nor MEDIA_UNLOCKED ("never
+        // tries"). avb_session reports CONNECTED here (updateStreamInfoConnected).
+        if (t->connected)
+            info_flags |= STREAM_INFO_FLAG_CONNECTED;
     } else if (dt == AEM_DESC_STREAM_INPUT && di < AVDECC_MAX_LISTENERS) {
         const avdecc_listener_stream_t *l = &s->listeners[di];
         fmt = (di == LISTENER_CRF_INDEX) ? stream_fmt_crf_48k : stream_fmt_aaf_8ch_48k;

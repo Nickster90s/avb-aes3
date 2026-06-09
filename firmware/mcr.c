@@ -38,7 +38,38 @@ void mcr_init(mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs)
     // before a CRF stream binds.
     mcr_increment_write(m->base_increment);
     m->watchdog_reset_active = 1;
+    m->gptp_locked_base = m->base_increment;
 }
+
+void mcr_set_gptp(mcr_state_t *m, const gptp_t *g)
+{
+    m->gptp = g;
+    m->gptp_locked_base = m->base_increment;
+    m->pres_base_last   = 0;   // force the first pres_base CSR write
+}
+
+// Compute the NCO increment that produces exactly 48000 gPTP-Hz. The nominal
+// base_increment makes the NCO emit 48000 at the NOMINAL sys_clk; the actual
+// crystal is off by tens of ppm. gPTP already measures that error and applies
+// current_addend_full/base_addend_full to discipline the TSU. The NCO shares
+// the same sys_clk, so the same fractional correction makes it emit exactly
+// 48000 gPTP-Hz. Falls back to the raw nominal base until gPTP locks.
+static uint32_t mcr_compute_gptp_base(const mcr_state_t *m)
+{
+    const gptp_t *g = m->gptp;
+    if (!g || !g->servo_locked || g->base_addend_full == 0)
+        return m->base_increment;
+    int64_t d    = (int64_t)g->current_addend_full - (int64_t)g->base_addend_full;
+    int64_t corr = ((int64_t)m->base_increment * d) / (int64_t)g->base_addend_full;
+    int64_t inc  = (int64_t)m->base_increment + corr;
+    if (inc < 1) inc = 1;
+    return (uint32_t)inc;
+}
+
+// Deadband (NCO increment units) for re-writing the gPTP-disciplined base.
+// 1 unit ~ 0.6 ppm at sys_clk; a couple of units avoids CSR thrash on servo
+// jitter while staying far under any audible drift.
+#define MCR_GPTP_DEADBAND  2
 
 // Stale threshold: 1000 ms. Class A CRF arrives at 8 kHz; a real talker
 // stopping streaming is on the order of seconds, not ~200 ms. 200 ms was
@@ -53,13 +84,30 @@ void mcr_init(mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs)
 
 void mcr_watchdog_tick(mcr_state_t *m, uint32_t now_ms)
 {
+    // Keep the gPTP-locked media-clock reference current (runs every tick,
+    // bound or not). pres_base mirrors it to the AAF packetizer so the
+    // presentation-time ramp shares the SAME base: cs=0 -> dinc=0 -> pres
+    // advances at exactly 125 us/packet; cs=1 -> dinc tracks CRF *relative to
+    // gPTP*. Deadband-gated to avoid CSR thrash on servo jitter.
+    uint32_t gbase = mcr_compute_gptp_base(m);
+    m->gptp_locked_base = gbase;
+    uint32_t pd = (gbase > m->pres_base_last) ? gbase - m->pres_base_last
+                                              : m->pres_base_last - gbase;
+    if (pd > MCR_GPTP_DEADBAND) {
+        m->pres_base_last = gbase;
+        aaf_pkt_pres_base_write(gbase);
+    }
+
     if (!m->bound) {
-        // Not bound — make sure increment is at base (covers both the
-        // "never bound since boot" case and the "user disconnected CRF"
-        // case).
-        if (!m->watchdog_reset_active) {
-            m->current_increment    = m->base_increment;
-            mcr_increment_write(m->base_increment);
+        // Not bound — free-run the NCO at the gPTP-DISCIPLINED base (exactly
+        // 48000 gPTP-Hz), NOT the raw nominal-crystal base. Covers both
+        // "never bound since boot" and "user disconnected CRF". Re-apply when
+        // it moves beyond the deadband so it tracks the gPTP servo.
+        uint32_t d2 = (gbase > m->current_increment) ? gbase - m->current_increment
+                                                      : m->current_increment - gbase;
+        if (!m->watchdog_reset_active || d2 > MCR_GPTP_DEADBAND) {
+            m->current_increment    = gbase;
+            mcr_increment_write(gbase);
             m->watchdog_reset_active = 1;
         }
         return;
@@ -76,8 +124,8 @@ void mcr_watchdog_tick(mcr_state_t *m, uint32_t now_ms)
     uint32_t age_ms = now_ms - m->last_rx_check_ms;
     if (age_ms > MCR_STALE_THRESHOLD_MS) {
         if (!m->watchdog_reset_active) {
-            m->current_increment    = m->base_increment;
-            mcr_increment_write(m->base_increment);
+            m->current_increment    = m->gptp_locked_base;
+            mcr_increment_write(m->gptp_locked_base);
             m->servo_integral       = 0;
             m->have_prev            = 0;
             m->servo_locked         = 0;
@@ -138,11 +186,12 @@ void mcr_unbind(mcr_state_t *m)
     m->lock_streak     = 0;
     m->have_latest     = 0;
     m->servo_consumed  = 1;
-    // Snap the NCO back to base rate now that the talker reference is
-    // gone. Otherwise the gateware NCO keeps ticking at the last servo-
-    // tuned rate, drifting against audio_clk and audibly clicking.
-    m->current_increment    = m->base_increment;
-    mcr_increment_write(m->base_increment);
+    // Snap the NCO back to the gPTP-locked base now that the talker reference
+    // is gone. Otherwise the gateware NCO keeps ticking at the last servo-
+    // tuned rate, drifting against audio_clk and audibly clicking. (gPTP-locked
+    // base, not raw nominal, so the free-run rate is the real network 48 kHz.)
+    m->current_increment    = m->gptp_locked_base;
+    mcr_increment_write(m->gptp_locked_base);
     m->watchdog_reset_active = 1;
     crf_ts_enabled_write(0);   // stop the gateware extractor queuing pairs
     printf("[MCR] unbound — increment reset to base\n");

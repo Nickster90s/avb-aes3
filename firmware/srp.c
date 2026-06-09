@@ -378,89 +378,61 @@ static void srp_send_listener_leave(srp_state_t *s, const srp_listener_t *l)
 
 static void srp_send_declarations(srp_state_t *s, int leaveall)
 {
-    uint8_t *frame = srp_tx_buf();
-    uint8_t *p = msrp_frame_begin(frame, s->src_mac);
+    // SPLIT INTO TWO SEPARATE MSRP PDUs (2026-06-08). Previously the Domain,
+    // TalkerAdvertise, and Listener attributes all shared ONE PDU. Enabling the
+    // talker inserted its 25-byte TalkerAdvertise AHEAD of the CRF/AAF Listener
+    // attributes in the same MessageList; any parse hiccup in the talker
+    // attribute made the bridge stop before the listeners -> "TX advertises (Hive
+    // shows it trying) but CRF/AAF listener never registers". The user observed
+    // exactly this: turning on TX broke CRF RX. Emitting the TalkerAdvertise as
+    // its OWN PDU fully decouples the two — the talker can never affect how the
+    // bridge parses our listener declarations.
 
-    // Use the bridge-advertised SR class / priority / VID if we've heard
-    // one (mandatory for interop — the bridge may map Class A to a non-3
-    // priority on our port and reject reservations as code 0x13 "SR class
-    // priority mismatch" if we keep declaring the default). Falls back to
-    // 802.1Q defaults until first Domain RX arrives.
-    // BASELINE: advertise Class A explicitly (classID 6, prio 3, VID 2),
-    // consistent with our Class-A talker. (Was echoing the bridge's domain,
-    // which on this rig is Class B — inconsistent with a Class-A talker.)
-    uint8_t  dom_class = SR_CLASS_A;
-    uint8_t  dom_prio  = SR_CLASS_A_PRIO;
-    uint16_t dom_vid   = SR_CLASS_A_VID;
+    // ---- PDU 1: Domain + Listener declarations ("we want to receive": CRF/AAF).
+    {
+        uint8_t *frame = srp_tx_buf();
+        uint8_t *p = msrp_frame_begin(frame, s->src_mac);
 
-    // Domain — emit MRPDU_NEW(0) for the first 2 cycles (VN→AN→QA);
-    // then JoinIn(1) for steady state. mrpd encodes the QA-state
-    // action as JoinIn (registrar==IN); using JoinMt(3) instead tells
-    // bridges "registrar is empty" and they keep the reservation in
-    // half-allocated state, replying upstream with MSRP TalkerFailed.
-    // See [[msrp-joinmt-vs-joinin]].
-    uint8_t dom_event = (s->domain_new_count < 2) ? MRP_EVT_NEW : MRP_EVT_JOININ;
-    p = msrp_emit_domain(p, dom_class, dom_prio, dom_vid, leaveall, dom_event);
-    if (s->domain_new_count < 2)
-        s->domain_new_count++;
+        // Domain — NEW(0) for the first 2 cycles (VN->AN->QA), then JoinIn(1).
+        uint8_t dom_event = (s->domain_new_count < 2) ? MRP_EVT_NEW : MRP_EVT_JOININ;
+        p = msrp_emit_domain(p, SR_CLASS_A, SR_CLASS_A_PRIO, SR_CLASS_A_VID,
+                             leaveall, dom_event);
+        if (s->domain_new_count < 2)
+            s->domain_new_count++;
 
-    // Talker Advertise (if enabled)
+        // Listener Ready — one attribute per enabled listener stream (CRF, AAF).
+        for (int li = 0; li < SRP_MAX_LISTENER_STREAMS; li++) {
+            srp_listener_t *l = &s->listeners[li];
+            if (!l->enabled)
+                continue;
+            uint8_t event = (l->new_count < 2) ? MRP_EVT_NEW : MRP_EVT_JOININ;
+            p = msrp_emit_listener(p, l->stream_id, l->substate, leaveall, event);
+            if (l->new_count < 2)
+                l->new_count++;
+        }
+        srp_send_one_pdu(frame, p);   // EndMark + pad + send
+    }
+
+    // ---- PDU 2: TalkerAdvertise ALONE (decoupled from the listeners above).
     if (s->talker_enabled) {
-        // BASELINE: declare explicit Class A (the target for pro audio):
-        // priority 3, rank 1, 1 frame per 125us Class-A measurement interval,
-        // VID 2. The bridge SR domain is still latched (for info / later use),
-        // but we declare Class A directly — the switch's VID-2 SR class must be
-        // configured as A. Adaptive class tracking + CRF come back in a later
-        // phase once the plain Class-A gPTP talker locks.
-        (void)dom_prio; (void)dom_vid;
+        // Explicit Class A: priority 3, rank 1, 1 frame per 125us interval, VID 2.
         s->talker.priority_and_rank = (uint8_t)((SR_CLASS_A_PRIO << 5) | (1 << 4));
         s->talker.vlan_id = SR_CLASS_A_VID;
         s->talker.max_interval_frames = 1;
 
-        // MRP applicant event must reflect the REGISTRAR state, like the
-        // working reference talker (00:1b:21 / avb_session_mgr2 on the wire):
-        // it emits JoinMt(3) while NO listener is registered for its stream,
-        // and JoinIn(1) once one is. We hardcoded JoinIn = "registrar IN" even
-        // when it was MT, which a strict bridge won't converge a reservation on
-        // (the listener stays "Registering", Frames RX=0). talker_listener_seen
-        // = a remote listener (AxC) has declared OUR stream on the wire.
+        // MRP applicant event tracks the registrar: NEW(0)x2, then JoinMt(3) while
+        // no listener is registered for OUR stream, JoinIn(1) once one is.
         uint8_t tk_event = (s->talker_new_count < 2) ? MRP_EVT_NEW
                          : (s->talker_listener_seen  ? MRP_EVT_JOININ
                                                      : MRP_EVT_JOINMT);
+        uint8_t *frame = srp_tx_buf();
+        uint8_t *p = msrp_frame_begin(frame, s->src_mac);
         p = msrp_emit_talker_adv(p, &s->talker, leaveall, tk_event);
         if (s->talker_new_count < 2)
             s->talker_new_count++;
+        srp_send_one_pdu(frame, p);   // EndMark + pad + send
     }
 
-    // Listener Ready — one attribute per enabled listener stream (CRF, AAF,
-    // …). MSRP allows multiple Listener attributes per PDU, each its own
-    // stream_id + applicant state. For the first 2 transmissions after
-    // srp_listener_enable, emit MRPDU_NEW (event=0) so the bridge's
-    // registrar establishes fresh state; then JoinIn — mirrors mrpd's
-    // VN→AN→QA applicant transitions.
-    for (int li = 0; li < SRP_MAX_LISTENER_STREAMS; li++) {
-        srp_listener_t *l = &s->listeners[li];
-        if (!l->enabled)
-            continue;
-        uint8_t event = (l->new_count < 2) ? MRP_EVT_NEW : MRP_EVT_JOININ;
-        p = msrp_emit_listener(p, l->stream_id, l->substate, leaveall, event);
-        if (l->new_count < 2)
-            l->new_count++;
-    }
-
-    // Final EndMark (end of MRPDU MessageList)
-    srp_put_be16(p, 0);
-    p += 2;
-
-    uint32_t frame_len = (uint32_t)(p - frame);
-
-    // Pad to minimum Ethernet frame size (64 bytes)
-    if (frame_len < 64) {
-        memset(p, 0, 64 - frame_len);
-        frame_len = 64;
-    }
-
-    srp_eth_send(frame_len);
     s->join_count++;
 }
 
@@ -604,17 +576,45 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
             }
             if (attr_type == MSRP_ATTR_LISTENER) {
                 s->rx_listener_count++;
-                // Flood guard: does a remote listener want OUR talker stream?
-                // (vp[0..7] = the Listener attribute's FirstValue = stream_id.)
-                // If so it's safe to transmit; main.c gates AAF TX on this.
-                if (s->talker_enabled) {
-                    int eq = 1;
-                    for (int k = 0; k < 8; k++)
-                        if (vp[k] != s->talker.stream_id[k]) { eq = 0; break; }
-                    if (eq) {
-                        s->talker_listener_seen    = 1;
-                        s->talker_listener_seen_ms = gptp_uptime_ms();
+                // Extract the FourPackedEvent substate (1=AskingFailed, 2=Ready,
+                // 3=ReadyFailed) — the 4-pack byte follows the FirstValue + its
+                // 3-pack event. For num_values=1: 3-pack at vp[attr_len], 4-pack
+                // at vp[attr_len+1]; substate = 4pack / 64 (first value).
+                uint32_t n3 = (num_values + 2) / 3;
+                uint8_t  sub = 0;
+                if (vp + attr_len + n3 < attr_end)
+                    sub = vp[attr_len + n3] / 64;
+
+                // Flood guard + DIAGNOSTIC: does a remote listener want OUR
+                // talker stream? (vp[0..7] = Listener FirstValue = stream_id.)
+                int eq = 1;
+                for (int k = 0; k < 8; k++)
+                    if (vp[k] != s->talker.stream_id[k]) { eq = 0; break; }
+
+                // Log EVERY Listener declaration we receive (rate-limited 2s)
+                // so we can see whether AxC ever declares a listener for our
+                // stream, and in what substate. This is THE signal that the
+                // bridge will forward our AAF — without it, no Frames RX.
+                {
+                    static uint32_t last_log_ms;
+                    uint32_t now = gptp_uptime_ms();
+                    if (eq || (now - last_log_ms) >= 2000) {
+                        last_log_ms = now;
+                        printf("[SRP-RX] Listener decl sid=%02x:%02x:%02x:%02x:"
+                               "%02x:%02x:%02x:%02x substate=%u%s\n",
+                               vp[0], vp[1], vp[2], vp[3],
+                               vp[4], vp[5], vp[6], vp[7],
+                               (unsigned)sub, eq ? "  <== OUR TALKER STREAM" : "");
                     }
+                }
+
+                if (s->talker_enabled && eq) {
+                    if (!s->talker_listener_seen)
+                        printf("[SRP] *** REMOTE LISTENER declared OUR stream "
+                               "(substate=%u) — bridge should now forward AAF ***\n",
+                               (unsigned)sub);
+                    s->talker_listener_seen    = 1;
+                    s->talker_listener_seen_ms = gptp_uptime_ms();
                 }
             }
 

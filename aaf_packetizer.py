@@ -389,13 +389,6 @@ class AAFPacketizer(LiteXModule):
         # is mem[rd], stable between strobes (BRAM read long-settled).
         have1 = Signal(); self.comb += have1.eq(level >= 1)   # >=1 frame -> can pop
 
-        # Local-DAC tap: ch0/ch1 of the popped frame (24-bit, MSB-justified top of
-        # the 32-bit sample), strobe-paced. Latched in the strobe block below
-        # alongside the pay[] write.
-        self.dac_l   = Signal(24)
-        self.dac_r   = Signal(24)
-        self.dac_stb = Signal()
-
         underruns = Signal(32)
         self.comb += [self.underrun_count.status.eq(underruns),
                       self.fifo_level.status.eq(level_u)]
@@ -421,22 +414,16 @@ class AAFPacketizer(LiteXModule):
 
         self.sync += [
             send_req.eq(0),
-            self.dac_stb.eq(0),
             If(strobe,
-                self.dac_stb.eq(1),
                 If(primed & have1,
                     # Bit-exact: pop exactly one frame (rp.dat_r = mem[rd]) into
                     # the packet buffer, advance rd by exactly 1. have1 gates the
                     # advance so rd can never overtake wr.
                     pay[Cat(blk_idx, fill_buf)].eq(rp.dat_r),
-                    self.dac_l.eq(rp.dat_r[8:32]),      # ch0, 24-bit MSB-justified
-                    self.dac_r.eq(rp.dat_r[40:64]),     # ch1
                     rd.eq(rd + 1),
                 ).Else(
                     # Underrun: emit silence, HOLD the read pointer.
                     pay[Cat(blk_idx, fill_buf)].eq(0),
-                    self.dac_l.eq(0),
-                    self.dac_r.eq(0),
                     underruns.eq(underruns + 1),
                 ),
                 If(blk_idx == (samples_per_packet - 1),

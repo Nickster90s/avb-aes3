@@ -459,10 +459,6 @@ static void check_uart_cmd(void)
                    avdecc.listeners[LISTENER_UID_CRF].connected,
                    avdecc.listeners[LISTENER_UID_AAF].connected,
                    avdecc.current_clock_source);
-            printf("[I2S] %lu %lu %lu\n",
-                   (unsigned long)main_i2s_mmcm_locked_read(),
-                   (unsigned long)main_i2s_bck_count_read(),
-                   (unsigned long)main_i2s_lrck_count_read());
             break;
         }
         case 'u': {
@@ -800,51 +796,9 @@ static void check_uart_cmd(void)
                 pending_listeners[i].active = 0;
             printf("[DIAG] Listener bindings force-cleared (mcr + aaf + avdecc slots)\n");
             break;
-        case 'V': {
-            // Gateware soft-ILA: capture 512 samples from TWO taps and dump both:
-            //   src0 = BRIDGE (post-decode, pre-ring): proves the USB decode lane.
-            //   src1 = POST-RING dac_l (ch0 into the I2S TX): splits ring-read vs
-            //          the serializer. Play a clean sine (panned LEFT) on the host.
-            for (int src = 0; src <= 2; src++) {
-                main_usb_cap_src_write(src);
-                printf("\n[USBCAP src=%d %s] arming...\n", src,
-                       src == 0 ? "BRIDGE head" :
-                       src == 1 ? "POST-RING dac_l" : "I2S-OUT bits {b0=dout,b1=lrck}");
-                main_usb_cap_arm_write(1);
-                int spins = 5000000;
-                while (!main_usb_cap_done_read() && spins-- > 0) { }
-                if (!main_usb_cap_done_read()) {
-                    printf("  timeout — USB not streaming? (done never set)\n");
-                    continue;
-                }
-                printf("idx raw       ch f audio\n");
-                for (int i = 0; i < 64; i++) {   /* 64 is plenty to see corruption; full 512 dump is too slow over UART */
-                    main_usb_cap_addr_write(i);
-                    uint32_t v = main_usb_cap_data_read();
-                    unsigned ch = v & 0x7, first = (v >> 3) & 1;
-                    int32_t s = (int32_t)(v & 0xFFFFFF00u) >> 8;   // sign-extended 24-bit
-                    printf("%3d %08lx %u %u %ld\n", i, (unsigned long)v, ch, first, (long)s);
-                }
-                printf("[USBCAP src=%d done]\n", src);
-            }
-            break;
-        }
-        case 'p': {
-            // Cycle the DAC I2S pin polarity 0..3 ([0]=invBCK,[1]=invLRCK).
-            // Press while a tone plays; the combo that makes L clean (if any)
-            // identifies a clock-phase issue. If none helps → confirmed analog.
-            static uint8_t pol = 0;
-            pol = (pol + 1) & 0x3;
-            main_i2s_pol_write(pol);
-            printf("\n[I2S] pin polarity = %u  (BCK inv=%u, LRCK inv=%u)\n",
-                   (unsigned)pol, (unsigned)(pol & 1), (unsigned)((pol >> 1) & 1));
-            break;
-        }
         case 'h':
         case '?':
-            printf("\n  s   status (gPTP / AVTP / DAC / SRP / AVDECC / I2S)\n"
-                     "  V   dump 64 post-bridge USB samples (ch0/ch1 corruption probe)\n"
-                     "  p   cycle DAC I2S pin polarity 0..3 (BCK/LRCK invert, ADAT-style)\n"
+            printf("\n  s   status (gPTP / AVTP / SRP / AVDECC)\n"
                      "  m   MCR servo state (CRF lock, NCO increment, offset)\n"
                      "  a   AAF stream state (RX/TX counts, jitter buffer level)\n"
                      "  e   RX ethertype counters + LiteEth heartbeat\n"
@@ -1450,57 +1404,6 @@ int main(void)
         avdecc_crf_flow_watchdog(&avdecc, LISTENER_UID_CRF,
                                  mcr.rx_count, gptp_uptime_ms());
 
-        // DAC writer: pace AAF RX ch 0/1 → I2S TX at the audio sample
-        // rate. mcr_sample_count ticks at fs (48 kHz) — driven by the
-        // MCR NCO. Each main-loop visit, drain ALL samples up to the
-        // current tick (not just one) — otherwise when main_loop runs
-        // slower than 48 kHz under AAF flood (~800 Hz observed), we
-        // skip ~98% of samples → audio sounds aliased / synth-like.
-        // I2S TX latches whatever's in i2s_audio_l/r at frame_start
-        // (48 kHz), so writes faster than that get sample-and-hold'd
-        // by the gateware — only the last write per audio-frame
-        // actually goes out the wire, which is exactly what we want.
-        {
-            uint32_t tick = mcr_sample_count_read();
-            uint32_t ticks_due = tick - dac_last_sample_tick;
-            // Cap per-call drain to bound CSR write time, but ADVANCE
-            // dac_last_sample_tick by what we actually processed —
-            // NOT to `tick` directly. Otherwise capping = silently
-            // skipping audio samples (the "underrun" counter actually
-            // reflects samples we threw away because of the cap).
-            // 32 samples ≈ 0.16 ms of CSR work, fine between
-            // dispatch_rx visits now that the AAF fast-path skips
-            // the scratch memcpy.
-            if (ticks_due > 32) ticks_due = 32;
-            uint32_t processed = ticks_due;
-            while (ticks_due--) {
-                // Stage 2a audio source: per-channel sample FIFOs in
-                // the gateware AVTPSampleExtractor. Slot 1 = AAF in,
-                // channels 0+1 → I2S L/R. Firmware never touches the
-                // audio bytes; gateware did the parse + sample pack.
-                int32_t sl = 0, sr = 0;
-                // Indirect-addressed: write ch_select, then read data/level.
-                // Single AAF slot = slot 0; ch 0 = L, ch 1 = R.
-                avtp_extractor_slot0_ch_select_write(0);
-                uint32_t lvl_l = avtp_extractor_slot0_level_read();
-                avtp_extractor_slot0_ch_select_write(1);
-                uint32_t lvl_r = avtp_extractor_slot0_level_read();
-                if (lvl_l > 0 && lvl_r > 0) {
-                    sr = (int32_t)avtp_extractor_slot0_data_read() >> 8;
-                    avtp_extractor_slot0_pop_write(1);
-                    avtp_extractor_slot0_ch_select_write(0);
-                    sl = (int32_t)avtp_extractor_slot0_data_read() >> 8;
-                    avtp_extractor_slot0_pop_write(1);
-                    dac_sample_count++;
-                } else {
-                    dac_underrun_count++;
-                }
-                main_i2s_audio_l_write((uint32_t)sl & 0xFFFFFFu);
-                main_i2s_audio_r_write((uint32_t)sr & 0xFFFFFFu);
-                main_i2s_push_write(1);
-            }
-            dac_last_sample_tick += processed;
-        }
         if (!aaf_gw_enabled) {
             // Firmware path (gateware aaf_pkt disabled): drain USB → software
             // AAF TX. When gateware owns the stream both are skipped — it pops

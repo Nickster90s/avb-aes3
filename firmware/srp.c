@@ -12,6 +12,14 @@
 // switches which will accept our declarations and maintain reservations.
 
 #include "srp.h"
+
+extern uint8_t g_verbose;   /* console verbose toggle (main.c); 0 = quiet */
+
+/* SRP/MSRP UART logging REMOVED — the reservation path is stable now; the
+ * per-frame [SRP-RX] traces + periodic [SRP] status just flooded the console
+ * and starved the UART. All SRP prints route through this no-op. (Switch back
+ * to printf here if SRP ever needs debugging again.) */
+#define SRPLOG(...) do {} while (0)
 #include "gptp.h"
 
 #include <generated/csr.h>
@@ -357,7 +365,7 @@ static void srp_send_talker_leave(srp_state_t *s)
     uint8_t *p = msrp_frame_begin(frame, s->src_mac);
     p = msrp_emit_talker_adv(p, &s->talker, 0, MRP_EVT_LV);
     srp_send_one_pdu(frame, p);
-    printf("[SRP] Talker Leave (Lv) sent\n");
+    SRPLOG("[SRP] Talker Leave (Lv) sent\n");
 }
 
 static void srp_send_listener_leave(srp_state_t *s, const srp_listener_t *l)
@@ -366,7 +374,7 @@ static void srp_send_listener_leave(srp_state_t *s, const srp_listener_t *l)
     uint8_t *p = msrp_frame_begin(frame, s->src_mac);
     p = msrp_emit_listener(p, l->stream_id, l->substate, 0, MRP_EVT_LV);
     srp_send_one_pdu(frame, p);
-    printf("[SRP] Listener Leave (Lv) sent for stream "
+    SRPLOG("[SRP] Listener Leave (Lv) sent for stream "
            "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
            l->stream_id[0], l->stream_id[1], l->stream_id[2], l->stream_id[3],
            l->stream_id[4], l->stream_id[5], l->stream_id[6], l->stream_id[7]);
@@ -548,7 +556,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                         if (ours) {
                             s->talker_fail_code = code;
                             s->talker_fail_count++;
-                            printf("[SRP] *** OUR TALKER FAILED code=0x%02x "
+                            SRPLOG("[SRP] *** OUR TALKER FAILED code=0x%02x "
                                    "bridge=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x ***\n",
                                    (unsigned)code, vp[25], vp[26], vp[27], vp[28],
                                    vp[29], vp[30], vp[31], vp[32]);
@@ -560,7 +568,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                             if (sid[j] != last_sid[j]) { same = 0; break; }
                     }
                     if (!same) {
-                        printf("[SRP-RX] TalkerFailed sid=%02x:%02x:%02x:%02x:"
+                        if (g_verbose) SRPLOG("[SRP-RX] TalkerFailed sid=%02x:%02x:%02x:%02x:"
                                "%02x:%02x:%02x:%02x bridge=%02x:%02x:%02x:%02x:"
                                "%02x:%02x:%02x:%02x code=0x%02x\n",
                                sid[0], sid[1], sid[2], sid[3],
@@ -598,9 +606,15 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                 {
                     static uint32_t last_log_ms;
                     uint32_t now = gptp_uptime_ms();
-                    if (eq || (now - last_log_ms) >= 2000) {
+                    // Throttle to 2 s REGARDLESS of eq: AxC re-declares OUR stream
+                    // every MRP cycle, and the old `eq ||` bypass printed every
+                    // single one -> flooded the 64-byte UART FIFO -> console
+                    // crawled. The first eq is still announced by the [SRP] ***
+                    // print below (talker_listener_seen); the 'a'/'s' counters
+                    // give live state. So periodic (2 s) logging is plenty.
+                    if (g_verbose && (now - last_log_ms) >= 2000) {
                         last_log_ms = now;
-                        printf("[SRP-RX] Listener decl sid=%02x:%02x:%02x:%02x:"
+                        SRPLOG("[SRP-RX] Listener decl sid=%02x:%02x:%02x:%02x:"
                                "%02x:%02x:%02x:%02x substate=%u%s\n",
                                vp[0], vp[1], vp[2], vp[3],
                                vp[4], vp[5], vp[6], vp[7],
@@ -610,7 +624,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
 
                 if (s->talker_enabled && eq) {
                     if (!s->talker_listener_seen)
-                        printf("[SRP] *** REMOTE LISTENER declared OUR stream "
+                        SRPLOG("[SRP] *** REMOTE LISTENER declared OUR stream "
                                "(substate=%u) — bridge should now forward AAF ***\n",
                                (unsigned)sub);
                     s->talker_listener_seen    = 1;
@@ -661,8 +675,8 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                         cache_t_ms[found] = now;
                         log_it = 1;
                     }
-                    if (log_it) {
-                        printf("[SRP-RX] TalkerAdv sid=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x "
+                    if (log_it && g_verbose) {
+                        SRPLOG("[SRP-RX] TalkerAdv sid=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x "
                                "dest=%02x:%02x:%02x:%02x:%02x:%02x\n",
                                vp[0], vp[1], vp[2], vp[3], vp[4], vp[5], vp[6], vp[7],
                                vp[8], vp[9], vp[10], vp[11], vp[12], vp[13]);
@@ -723,7 +737,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                     if (match) {
                         s->rx_match_count++;
                         if (!l->talker_registered)
-                            printf("[SRP] Talker registered for our stream "
+                            SRPLOG("[SRP] Talker registered for our stream "
                                    "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
                                    l->stream_id[0], l->stream_id[1],
                                    l->stream_id[2], l->stream_id[3],
@@ -769,7 +783,7 @@ void srp_init(srp_state_t *s, const uint8_t *mac_addr)
     if (srp_rng_state == 0) srp_rng_state = 0x12345678;
     s->leaveall_period_ms = srp_next_lva_period();
     // listeners[] all start enabled=0 (no declarations) via the memset.
-    printf("[SRP] Initialized (MSRP)\n");
+    SRPLOG("[SRP] Initialized (MSRP)\n");
 }
 
 void srp_set_bridge_mac(srp_state_t *s, const uint8_t *bridge_mac)
@@ -784,7 +798,7 @@ void srp_set_bridge_mac(srp_state_t *s, const uint8_t *bridge_mac)
         // Force re-latching the SR domain from the (now known) bridge so a
         // peer talker's domain we may have latched earlier is overwritten.
         s->domain_received = 0;
-        printf("[SRP] bridge MAC = %02x:%02x:%02x:%02x:%02x:%02x (SR domain authority)\n",
+        SRPLOG("[SRP] bridge MAC = %02x:%02x:%02x:%02x:%02x:%02x (SR domain authority)\n",
                bridge_mac[0], bridge_mac[1], bridge_mac[2],
                bridge_mac[3], bridge_mac[4], bridge_mac[5]);
     }
@@ -832,7 +846,7 @@ void srp_talker_enable(srp_state_t *s, uint8_t enable)
         // Reset MRPDU_NEW counter so the next 2 advertises emit NEW(0)
         // and force the bridge's registrar into the registered state.
         s->talker_new_count = 0;
-        printf("[SRP] Talker Advertise enabled\n");
+        SRPLOG("[SRP] Talker Advertise enabled\n");
     } else {
         // Emit an explicit Lv (while talker is still marked enabled so the
         // attribute fields are valid) so the bridge frees the reservation
@@ -840,7 +854,7 @@ void srp_talker_enable(srp_state_t *s, uint8_t enable)
         if (s->talker_enabled)
             srp_send_talker_leave(s);
         s->talker_enabled = 0;
-        printf("[SRP] Talker Advertise disabled\n");
+        SRPLOG("[SRP] Talker Advertise disabled\n");
     }
 }
 
@@ -880,7 +894,7 @@ void srp_listener_enable(srp_state_t *s, const uint8_t *stream_id, uint8_t enabl
                 if (!s->listeners[i].enabled) { l = &s->listeners[i]; break; }
             }
             if (!l) {
-                printf("[SRP] Listener table full — cannot add stream\n");
+                SRPLOG("[SRP] Listener table full — cannot add stream\n");
                 return;
             }
             memset(l, 0, sizeof(*l));
@@ -900,7 +914,7 @@ void srp_listener_enable(srp_state_t *s, const uint8_t *stream_id, uint8_t enabl
         l->talker_last_seen_ms = gptp_uptime_ms();
         // Re-emit MRPDU_NEW for the next 2 transmissions (fresh attach).
         l->new_count = 0;
-        printf("[SRP] Listener Ready for stream %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+        SRPLOG("[SRP] Listener Ready for stream %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
                stream_id[0], stream_id[1], stream_id[2], stream_id[3],
                stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
     } else {
@@ -911,7 +925,7 @@ void srp_listener_enable(srp_state_t *s, const uint8_t *stream_id, uint8_t enabl
             // instead of waiting for our declarations to lapse.
             srp_send_listener_leave(s, l);
             l->enabled = 0;
-            printf("[SRP] Listener disabled for stream "
+            SRPLOG("[SRP] Listener disabled for stream "
                    "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
                    stream_id[0], stream_id[1], stream_id[2], stream_id[3],
                    stream_id[4], stream_id[5], stream_id[6], stream_id[7]);
@@ -995,7 +1009,7 @@ void srp_poll(srp_state_t *s)
             uint32_t age = now_ms - l->talker_last_seen_ms;
             if (age > 2000000000) age = 0;          // wrap guard
             if (age >= (3u * MRP_LEAVEALL_PERIOD_MS)) {
-                printf("[SRP] Talker advertise gap %u ms — clearing 'seen' flag "
+                SRPLOG("[SRP] Talker advertise gap %u ms — clearing 'seen' flag "
                        "(listener stays READY)\n", (unsigned)age);
                 l->talker_registered = 0;
             }
@@ -1054,8 +1068,8 @@ void srp_poll(srp_state_t *s)
         s->last_join_ms = now_ms;
 
         // Periodic status
-        if (s->join_count > 0 && (s->join_count % 30) == 0) {
-            printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d "
+        if (g_verbose && s->join_count > 0 && (s->join_count % 30) == 0) {
+            SRPLOG("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d "
                    "rx_attr: tadv=%lu tfail=%lu lst=%lu dom=%lu match=%lu\n",
                    (unsigned long)s->join_count,
                    (unsigned long)s->rx_pdu_count,

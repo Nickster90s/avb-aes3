@@ -79,13 +79,6 @@ static uint32_t avtp_filter_match_count(int slot)
     return avtp_extractor_slot0_match_count_read();
 }
 
-// I2S DAC writer state — paced from mcr_sample_count which ticks at fs
-// (48 kHz) once MCR is locked. Each tick we pop one block from AAF RX
-// (channels 0+1) and write to the I2S TX CSRs.
-static uint32_t dac_sample_count;
-static uint32_t dac_underrun_count;
-static uint32_t dac_last_sample_tick;
-
 // RX EtherType counters for link-debug
 static uint32_t rx_total, rx_ptp, rx_avtp, rx_msrp, rx_other;
 static uint16_t rx_last_ethertype;
@@ -116,6 +109,7 @@ static uint32_t rx_avb_stream_mcast;
 static uint32_t rx_avtp_crf, rx_avtp_aaf;
 static uint32_t usb_to_aaf_frames;   // USB→AAF bridge frames pushed (#67)
 static uint8_t  aaf_gw_enabled;      // 1 = gateware aaf_pkt owns the USB→AVB AAF stream
+uint8_t         g_verbose = 0;       // 0 = quiet console (default); 1 = SRP/gPTP debug spam ('v' toggles)
 static uint32_t usb_lock_calls;      // diag: USB-FIFO servo invocations
 static uint8_t  usb_nco_freeze;      // diag: hold NCO at base (test implicit feedback)
 // SRC src_step PI servo gains — RUNTIME-TUNABLE over the console ('k'/'j') so
@@ -136,8 +130,6 @@ typedef struct {
     uint32_t s_writer_errors;
     uint32_t s_rx_avtp_aaf;
     uint32_t s_rx_avtp_crf;
-    uint32_t s_dac_samples;
-    uint32_t s_dac_underruns;
     uint32_t s_aecp_rx;
     uint32_t s_aecp_tx;
     uint32_t s_sync_rx;
@@ -151,8 +143,6 @@ typedef struct {
     uint32_t r_writer_errors;
     uint32_t r_aaf;
     uint32_t r_crf;
-    uint32_t r_dac_samples;
-    uint32_t r_dac_underruns;
     uint32_t r_aecp_rx;
     uint32_t r_aecp_tx;
     uint32_t r_sync_rx;
@@ -360,8 +350,6 @@ static void bench_tick(void)
     bench.r_writer_errors   = ethmac_sram_writer_errors_read() - bench.s_writer_errors;
     bench.r_aaf             = rx_avtp_aaf  - bench.s_rx_avtp_aaf;
     bench.r_crf             = rx_avtp_crf  - bench.s_rx_avtp_crf;
-    bench.r_dac_samples     = dac_sample_count   - bench.s_dac_samples;
-    bench.r_dac_underruns   = dac_underrun_count - bench.s_dac_underruns;
     bench.r_aecp_rx         = avdecc.aecp_rx_count - bench.s_aecp_rx;
     bench.r_aecp_tx         = avdecc.aecp_tx_count - bench.s_aecp_tx;
     bench.r_sync_rx         = gptp.rx_sync_count - bench.s_sync_rx;
@@ -375,8 +363,6 @@ static void bench_tick(void)
     bench.s_writer_errors  = ethmac_sram_writer_errors_read();
     bench.s_rx_avtp_aaf    = rx_avtp_aaf;
     bench.s_rx_avtp_crf    = rx_avtp_crf;
-    bench.s_dac_samples    = dac_sample_count;
-    bench.s_dac_underruns  = dac_underrun_count;
     bench.s_aecp_rx        = avdecc.aecp_rx_count;
     bench.s_aecp_tx        = avdecc.aecp_tx_count;
     bench.s_sync_rx        = gptp.rx_sync_count;
@@ -431,9 +417,6 @@ static void check_uart_cmd(void)
                    (unsigned long)gptp.rx_other_count,
                    (unsigned long)gptp.rx_wrong_domain_count,
                    gptp.rx_last_msg_type, gptp.rx_last_domain);
-            printf("[DAC ] samples=%lu underruns=%lu\n",
-                   (unsigned long)dac_sample_count,
-                   (unsigned long)dac_underrun_count);
             printf("[SRP] tx=%lu rx=%lu domain=%d talker_reg=%d bridge_class=%u prio=%u vid=%u talker_prio_byte=0x%02x maxIntFrames=%u have_brmac=%u\n",
                    (unsigned long)srp.join_count,
                    (unsigned long)srp.rx_pdu_count,
@@ -741,7 +724,6 @@ static void check_uart_cmd(void)
                    "  RX:        %lu writer_err/s  %lu aaf/s  %lu crf/s\n"
                    "  AVDECC:    %lu aecp_rx/s  %lu aecp_tx/s\n"
                    "  gPTP:      %lu sync_rx/s  %lu pdresp_rx/s\n"
-                   "  DAC:       %lu samples/s  %lu underruns/s\n"
                    "  HW filter: slot0=%lu slot1=%lu slot2=%lu slot3=%lu  (cumulative)\n",
                    (unsigned long)bench.r_iter_per_sec,
                    (unsigned long)bench.r_iter_avg_ns,
@@ -753,8 +735,6 @@ static void check_uart_cmd(void)
                    (unsigned long)bench.r_aecp_tx,
                    (unsigned long)bench.r_sync_rx,
                    (unsigned long)bench.r_pdresp_rx,
-                   (unsigned long)bench.r_dac_samples,
-                   (unsigned long)bench.r_dac_underruns,
                    (unsigned long)avtp_filter_match_count(0),
                    (unsigned long)avtp_filter_match_count(1),
                    (unsigned long)avtp_filter_match_count(2),
@@ -796,6 +776,10 @@ static void check_uart_cmd(void)
                 pending_listeners[i].active = 0;
             printf("[DIAG] Listener bindings force-cleared (mcr + aaf + avdecc slots)\n");
             break;
+        case 'v':
+            g_verbose = !g_verbose;
+            printf("\n[main] verbose debug prints %s\n", g_verbose ? "ON" : "OFF");
+            break;
         case 'h':
         case '?':
             printf("\n  s   status (gPTP / AVTP / SRP / AVDECC)\n"
@@ -806,6 +790,7 @@ static void check_uart_cmd(void)
                      "  t   force-enable AAF TX (diagnostic, bypasses AVDECC)\n"
                      "  T   force-disable AAF TX\n"
                      "  D   force-clear all listener bindings (clears stale FAST_CONNECT)\n"
+                     "  v   toggle verbose debug prints (SRP-RX / gPTP dump) — default OFF\n"
                      "  r   reboot\n"
                      "  h   help\n");
             break;
@@ -1081,7 +1066,10 @@ static void aaf_gw_set(uint8_t on)
     // only the MAC frame emission — never this datapath / the DAC.
     if (on) {
         aaf_gw_push_binding();
-        aaf_pkt_enable_write(1);
+        // Do NOT enable the talker here. The gPTP-lock gate in the main loop
+        // turns aaf_pkt ON only once gPTP is locked (the media clock is then
+        // disciplined to gPTP) — emitting before that stamps wrong presentation
+        // times and the listener can't align (broadband noise).
     } else {
         aaf_pkt_enable_write(0);
     }
@@ -1340,13 +1328,26 @@ int main(void)
         // lock has hysteresis). See [[gptp-step-invalidates-time-stamps]].
         {
             static uint8_t reanchored = 0;
-            if (!gptp.servo_locked) {
+            static uint8_t talker_on  = 0;
+            // GATE the gateware AAF talker on gPTP lock. Streaming before the
+            // media clock is gPTP-disciplined stamps wrong presentation times →
+            // the listener can't media-lock → broadband noise on the audio.
+            // Hold the DATA off until locked; enable + anchor on the lock edge;
+            // drop back off if gPTP unlocks.
+            if (aaf_gw_enabled && gptp.servo_locked) {
+                if (!reanchored) {
+                    aaf_pkt_enable_write(0);   // reset gateware `anchored`
+                    aaf_pkt_enable_write(1);   // enable + anchor to locked TSU
+                    reanchored = 1; talker_on = 1;
+                    printf("[main] gPTP locked — AAF talker ENABLED + anchored\n");
+                }
+            } else {
                 reanchored = 0;
-            } else if (!reanchored && aaf_gw_enabled) {
-                aaf_pkt_enable_write(0);   // resets gateware `anchored`
-                aaf_pkt_enable_write(1);   // next packet re-anchors to locked TSU
-                reanchored = 1;
-                printf("[main] gPTP locked — AAF presentation time re-anchored\n");
+                if (talker_on) {
+                    aaf_pkt_enable_write(0);   // hold OFF until gPTP (re)locks
+                    talker_on = 0;
+                    printf("[main] AAF talker held OFF — gPTP not locked\n");
+                }
             }
         }
 

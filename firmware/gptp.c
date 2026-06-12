@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdio.h>
 
+extern uint8_t g_verbose;   /* console verbose toggle (main.c); 0 = quiet */
+
 // ---------------------------------------------------------------------------
 // Low-level MAC frame TX/RX
 // ---------------------------------------------------------------------------
@@ -401,7 +403,7 @@ static void process_follow_up(gptp_t *g, const uint8_t *ptp, uint32_t ptp_len)
     // Was every 256 (~32s) but the 160-char line blocks the main loop for
     // ~14 ms each — visible as keystroke-response lag spikes on UART.
     static uint32_t dump_count = 0;
-    if ((dump_count++ & 0x7FF) == 0) {
+    if (g_verbose && (dump_count++ & 0x7FF) == 0) {
         uint64_t urx   = (uint64_t)rx_ns;
         uint64_t uorig = (uint64_t)orig_ns;
         uint64_t uoff  = (uint64_t)g->offset_from_master_ns;
@@ -531,7 +533,7 @@ void gptp_servo_update(gptp_t *g)
     // — but the ~80-char print blocks the main loop for ~7 ms and stacks
     // up with the dump print one line above. Available on demand via 's'.
     static uint32_t dbg_count = 0;
-    if ((dbg_count++ & 0x7FF) == 0) {
+    if (g_verbose && (dbg_count++ & 0x7FF) == 0) {
         printf("[gPTP] dbg off=0x%08lx_%08lx add=0x%08lx_%08lx int=0x%08lx_%08lx\n",
                (unsigned long)((uint64_t)offset >> 32),
                (unsigned long)((uint64_t)offset & 0xFFFFFFFF),

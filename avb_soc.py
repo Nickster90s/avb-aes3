@@ -673,8 +673,16 @@ class AVBSoC(SoCCore):
         # feed it the consumer-FIFO level. When the gateware doesn't own the USB
         # drain (firmware path), report mid-level so the wrapper applies no trim
         # (feedback = pure measured media-clock rate).
+        # Scale the 10-bit ring level (0..512) down by 4 into the 8-bit block_level
+        # port (0..128). WITHOUT this, ring levels >255 WRAP in the 8-bit port, so
+        # the bridge feedback reads a falsely-LOW level on every host burst → tells
+        # the host "send MORE" → ring overflows → frames DROPPED → broadband pink
+        # noise. With >>2, the feedback's CENTRE=64 correctly targets ring level
+        # 256 (mid of 512). else-branch (gateware not draining) = fifo_depth>>3 =
+        # 64 = same mid-level so the wrapper applies no trim.
         self.comb += usb_block_level.eq(
-            Mux(aaf_pkt.enable.storage, aaf_pkt.block_level, aaf_pkt.fifo_depth // 2))
+            Mux(aaf_pkt.enable.storage,
+                aaf_pkt.block_level >> 2, aaf_pkt.fifo_depth >> 3))
 
         # Frame-atomic TX mux: firmware SRAM reader (priority) + gateware AAF
         # talker → MAC core sink. Claim the wishbone-TX seam (see the LiteEth
@@ -737,7 +745,11 @@ def main():
         # supports it. The bigger FIFO (16 → 64) also lets a full periodic
         # print fit without ever blocking the main loop.
         uart_baudrate            = 1_000_000,
-        uart_fifo_depth          = 64,
+        uart_fifo_depth          = 64,     # KEEP 64: bumping to 1024 shifted
+                                           # placement and broke the marginal ULPI
+                                           # HS-chirp (no USB enum). The verbose
+                                           # gating (g_verbose default 0) removes
+                                           # the print flood, so 64 is plenty.
     )
     if args.firmware:
         # Pre-load the firmware ourselves so SoCCore doesn't shrink the ROM
@@ -791,11 +803,27 @@ def main():
         # the (properly synchronised) CDC crossings are NOT timed. See memory
         # openxc7-missing-pll-clock-constraints.
         soc.platform.toolchain.additional_xdc_commands += [
-            "create_clock -name sys_clk    -period 20.000 [get_nets avbsoc_s7pll0_clkout_buf0]",  # 50 MHz
-            "create_clock -name usb_clk    -period 16.667 [get_nets avbsoc_s7pll1_clkout_buf]",   # 60 MHz
-            "create_clock -name idelay_clk -period  5.000 [get_nets avbsoc_s7pll0_clkout_buf1]",  # 200 MHz
+            # NOTE: the PLL output nets carry the CRG submodule prefix
+            # `avbsoc_crg_…`. Without it get_nets matched NOTHING, so BOTH the
+            # create_clock and the set_clock_groups below were silently dropped —
+            # nextpnr then timed sys at the default 125 MHz (and timed every async
+            # CDC crossing as a real path) → the placement-fragile 39-57 MHz Fmax.
+            # audio_clk dropped from the group: the AAF bridge has no separate
+            # audio clock domain (audio is the sys-domain MCR strobe), so naming
+            # an undefined clock would make the now-live set_clock_groups fail.
+            # sys is OVER-CONSTRAINED to 8 ns (125 MHz target), NOT its real
+            # 20 ns / 50 MHz: binding sys at its true 50 MHz made nextpnr ease off
+            # the moment it got "close" (~35-45 MHz); an aggressive target makes
+            # the placer grind sys far harder, landing ~52 MHz — comfortably past
+            # the real 50 MHz the audio path needs. The PLL still clocks sys at 50;
+            # this only changes nextpnr's optimization pressure. Read the reported
+            # Fmax number (the "FAIL at 125" is expected/ignored). This reproduces
+            # the lean shift-fix build's 52.74 MHz, which had sys timed at 125.
+            "create_clock -name sys_clk    -period  8.000 [get_nets avbsoc_crg_s7pll0_clkout_buf0]",  # target 125 MHz (real 50)
+            "create_clock -name usb_clk    -period 16.667 [get_nets avbsoc_crg_s7pll1_clkout_buf]",   # 60 MHz
+            "create_clock -name idelay_clk -period  5.000 [get_nets avbsoc_crg_s7pll0_clkout_buf1]",  # 200 MHz
             "set_clock_groups -asynchronous "
-            "-group {sys_clk} -group {usb_clk} -group {idelay_clk} -group {audio_clk}",
+            "-group {sys_clk} -group {usb_clk} -group {idelay_clk}",
         ]
         builder.build(seed=args.seed)
 

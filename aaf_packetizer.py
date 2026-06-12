@@ -311,8 +311,9 @@ class AAFPacketizer(LiteXModule):
         ]
         ch    = samp_hi_r[0:ch_bits]
         first = samp_hi_r[3]
-        # 24-bit audio MSB-aligned into a 32-bit sample (= firmware v & 0xFFFFFF00).
-        samp32 = Cat(Signal(8), samp_lo_r[8:32])   # [0:8]=0, [8:32]=audio
+        # Full 32-bit sample: carry ALL bytes (host sends a live LSB). Was
+        # Cat(Signal(8), samp_lo_r[8:32]) = 24-bit MSB-aligned (LSB zeroed).
+        samp32 = samp_lo_r                          # true 32-bit, no truncation
 
         need_push = first & have
         en = self.enable.storage
@@ -354,7 +355,9 @@ class AAFPacketizer(LiteXModule):
                 # slots (ch2..7 for a 2ch stream) stay silent. cur[0] is written
                 # by cur[ch] below — NOT cleared here — so index 0 has no
                 # same-cycle double-write. Demux from the REGISTERED sample.
-                If(need_push, *[cur[i].eq(0) for i in range(1, channels)]),
+                If(need_push,
+                    *[cur[i].eq(0) for i in range(1, channels)],
+                ),
                 cur[ch].eq(samp32),
                 have.eq(1),
             ),
@@ -422,7 +425,9 @@ class AAFPacketizer(LiteXModule):
                     pay[Cat(blk_idx, fill_buf)].eq(rp.dat_r),
                     rd.eq(rd + 1),
                 ).Else(
-                    # Underrun: emit silence, HOLD the read pointer.
+                    # Underrun: emit silence, HOLD the read pointer. (Rare — the
+                    # PI servo keeps the ring centered — so the cheap zero-fill is
+                    # fine; a 256-bit hold-last register cost ~8 MHz of sys Fmax.)
                     pay[Cat(blk_idx, fill_buf)].eq(0),
                     underruns.eq(underruns + 1),
                 ),
@@ -553,8 +558,22 @@ class AAFPacketizer(LiteXModule):
         p_blk = n[3:]                             # block 0..5
         p_ch  = n[0:3]                            # channel 0..7
         blk_word = pay[Cat(p_blk[0:3], send_buf)]            # 256-bit block
-        p_samp   = (blk_word >> (p_ch * 32))[0:32]           # selected channel sample
-        p_byte   = (p_samp >> ((3 - k) * 8))[0:8]            # big-endian byte (put_be32)
+        # Explicit channel + byte selection via muxes. The original variable
+        # barrel shifts (blk_word >> p_ch*32) and (p_samp >> (3-k)*8)
+        # MIS-SYNTHESIZE on openXC7 (yosys/nextpnr truncates the shift amount):
+        # channels aliased mod-2 (ch0==ch2==ch4==ch6) and each sample's bytes
+        # MSB-replicated -> [A,0,A,0] = THE pink noise. Identical at every
+        # sys_clk 49-57 MHz (a logic bug, not timing). Muxes have no barrel shift.
+        p_samp = Signal(32)
+        self.comb += Case(p_ch, {i: p_samp.eq(blk_word[i*32 : i*32 + 32])
+                                 for i in range(channels)})
+        p_byte = Signal(8)
+        self.comb += Case(k, {
+            0: p_byte.eq(p_samp[24:32]),   # big-endian: MSB byte first
+            1: p_byte.eq(p_samp[16:24]),
+            2: p_byte.eq(p_samp[8:16]),
+            3: p_byte.eq(p_samp[0:8]),
+        })
         self.comb += If(byte_idx < HDR_LEN,
             cur_byte.eq(header[byte_idx[0:6]]),
         ).Else(

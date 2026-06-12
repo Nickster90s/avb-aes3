@@ -160,6 +160,42 @@ for nname, net in ctx.nets:
     for u in getattr(net, "users", []):
         nu += _pull(getattr(u, "cell", None), USB_REGION)
 
+# ---- AAF packetizer: compact box in the clear right-center -----------------
+# The sys-domain critical paths (pres-time t_next_value adder, ring rd/level,
+# byte-build FSM) are ALL internal to the AAF packetizer and routing-dominated
+# — left to float they scatter across the die and cap sys at ~40-45 MHz. Boxing
+# them tight keeps those internal nets short so sys closes 50 deterministically,
+# independent of the placer's seed. Clear of USB (X<=45) and the eth-TX pins.
+# Same net-connectivity capture as USB (the bulk are anonymous $abc/$auto cells
+# that only the NETS carry the 'aafpacketizer' hierarchy for). Tunable via
+# NEXTPNR_AAF_REGION="x0,y0,x1,y1"; set "" to disable.
+AAF_REGION = "aaf_fp"
+AAF_PREFIX = "aafpacketizer"
+AX0, AY0, AX1, AY1 = 72, 28, 104, 96
+_a = os.environ.get("NEXTPNR_AAF_REGION", "").strip()   # default OFF: boxing the
+na = 0
+if _a != "":
+    if "," in _a:
+        AX0, AY0, AX1, AY1 = (int(v) for v in _a.split(","))
+    ctx.createRectangularRegion(AAF_REGION, AX0, AY0, AX1, AY1)
+    # SELECTIVE capture: unlike USB (self-contained), the AAF packetizer's nets
+    # fan out to the MAC / CSR bus / MCR, so pulling net *users* dragged ~66% of
+    # the design into the box (11896 cells — unplaceable). Pull only (a) cells
+    # NAMED aafpacketizer and (b) the DRIVER of each aafpacketizer net (the cell
+    # that PRODUCES the signal — i.e. AAF-internal logic, incl. the anonymous
+    # $abc luts that drive AAF nets). Skip users (the external readers).
+    for cname, cell in ctx.cells:
+        if AAF_PREFIX in cname:
+            na += _pull(cell, AAF_REGION)
+    for nname, net in ctx.nets:
+        if AAF_PREFIX not in nname:
+            continue
+        drv = getattr(net, "driver", None)
+        if drv is not None:
+            na += _pull(getattr(drv, "cell", None), AAF_REGION)
+    print("[floorplan_usb] AAF: %d cells -> %s (X %d..%d, Y %d..%d)"
+          % (na, AAF_REGION, AX0, AX1, AY0, AY1))
+
 print("[floorplan_usb] USB: %d cells (via %d nets + name match) -> %s (X %d..%d, Y %d..%d)"
       % (nu, nnets, USB_REGION, UX0, UX1, UY0, UY1))
 if _eth_on:

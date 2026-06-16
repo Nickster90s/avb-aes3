@@ -550,13 +550,7 @@ static void check_uart_cmd(void)
              * (compare to usbmon ~46979); first_rate should match usb_samp/8 —
              * if first_rate is higher, `first` is glitching (phantom pushes). */
             {
-            static uint32_t pr_str, pr_usb, pr_push, pr_pop, pr_first, pr_ms;
-            static uint32_t pr_rxb, pr_epo, pr_pkts;
-            uint32_t cs = aaf_pkt_dbg_raw_strobe_read();
-            uint32_t cu = aaf_pkt_dbg_usb_samp_read();
-            uint32_t cpush = aaf_pkt_dbg_block_push_read();
-            uint32_t cpop  = aaf_pkt_dbg_block_pop_read();
-            uint32_t cfirst= aaf_pkt_dbg_first_read();
+            static uint32_t pr_ms, pr_rxb, pr_epo, pr_pkts;
             uint32_t cpkts = aaf_pkt_packet_count_read();    // AAF frames handed to MAC
             uint32_t crxb  = main_usb_dbg_rx_beats_read();   // core->EP raw byte beats
             uint32_t cepo  = main_usb_dbg_ep_out_read();     // EP->decoder beats
@@ -564,41 +558,18 @@ static void check_uart_cmd(void)
             uint32_t dms = now - pr_ms;
             if (dms == 0) dms = 1;
             // *** AAF TX FRAME RATE *** — should be ~8000/s (6 samples/pkt at
-            // 48 kHz). This is the AUTHORITATIVE "are we transmitting at rate"
-            // number; aaf_pkt.packet_count increments only when the MAC core
-            // ACCEPTS a frame's last beat, so this == frames put on the wire.
-            // If it's not ~8000, the media-clock strobe is wrong (not a
-            // forwarding/listener problem).
+            // 48 kHz). AUTHORITATIVE "are we transmitting at rate": packet_count
+            // increments only when the MAC ACCEPTS a frame's last beat = frames
+            // on the wire. (The per-stage soft-ILA rates were removed with the
+            // debug CSRs once the rate-match path was proven.)
             printf("  *** AAF TX = %lu pkt/s (expect ~8000) ***\n",
                    (unsigned long)((uint64_t)(cpkts - pr_pkts) * 1000u / dms));
-            printf("  rates(/s): strobe=%lu usb_samp=%lu (frames=%lu) push=%lu pop=%lu first=%lu  [host~46979]\n",
-                   (unsigned long)((uint64_t)(cs - pr_str)   * 1000u / dms),
-                   (unsigned long)((uint64_t)(cu - pr_usb)   * 1000u / dms),
-                   (unsigned long)((uint64_t)(cu - pr_usb)   * 1000u / dms / 8u),
-                   (unsigned long)((uint64_t)(cpush - pr_push) * 1000u / dms),
-                   (unsigned long)((uint64_t)(cpop  - pr_pop)  * 1000u / dms),
-                   (unsigned long)((uint64_t)(cfirst- pr_first)* 1000u / dms));
             // localisation: rx_beats = core->EP raw bytes/s (real RX rate, ~384k
-            // clean for 2ch); ep_out = EP->decoder bytes/s. >> 384k => real RX
-            // duplication; ~384k while usb_samp floods => EP re-presents.
+            // clean for 2ch); ep_out = EP->decoder bytes/s.
             printf("  rx-loc(/s): rx_beats=%lu ep_out=%lu  [clean 2ch ~384000 B/s]\n",
                    (unsigned long)((uint64_t)(crxb - pr_rxb) * 1000u / dms),
                    (unsigned long)((uint64_t)(cepo - pr_epo) * 1000u / dms));
-            pr_str = cs; pr_usb = cu; pr_push = cpush; pr_pop = cpop; pr_first = cfirst;
             pr_rxb = crxb; pr_epo = cepo; pr_ms = now; pr_pkts = cpkts;
-            }
-            // *** MEDIA-CLOCK / avtp_timestamp validity ***  The listener
-            // recovers its media clock from our avtp_timestamp. It must be
-            // ~gPTP_now + 2 ms; if pres-now is garbage (not ~+2,000,000 ns) the
-            // stream carries no usable media clock and AxC can't lock.
-            {
-                ptp_timestamp_t _now = gptp_read_time();
-                uint32_t _now32 = (uint32_t)((uint64_t)_now.seconds * 1000000000ULL
-                                             + _now.nanoseconds);
-                uint32_t _pres = aaf_pkt_dbg_pres_read();
-                int32_t  _diff = (int32_t)(_pres - _now32);
-                printf("  *** avtp_ts=%lu gptp_now=%lu  pres-now=%ld ns (expect ~+2000000) ***\n",
-                       (unsigned long)_pres, (unsigned long)_now32, (long)_diff);
             }
             printf("\n[AAF] bound=%d rx_en=%d tx_en=%d\n"
                    "  rx[gw-extractor]: match=%lu eof=%lu  <-- AUTHORITATIVE AAF RX\n"
@@ -606,8 +577,7 @@ static void check_uart_cmd(void)
                    "  tx: count=%lu underrun=%lu lvl=%lu seq=%u\n"
                    "  usb-bridge: frames=%lu fifo_ovf=%lu\n"
                    "  aaf_pkt(gw): en=%d pkts=%lu underrun=%lu ovr=%lu fifo=%lu\n"
-                   "  soft-ila: push=%lu pop=%lu first=%lu\n"
-                   "  usb-fifo: level=%ld min=%lu max=%lu fbovr=0x%lx step=0x%lx inc=%lu calls=%lu\n"
+                   "  usb-fifo: level=%ld fbovr=0x%lx step=0x%lx inc=%lu calls=%lu\n"
                    "  last_pres_ts=%08lx\n",
                    aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
                    (unsigned long)avtp_extractor_slot0_match_count_read(),
@@ -626,18 +596,12 @@ static void check_uart_cmd(void)
                    (unsigned long)aaf_pkt_underrun_count_read(),
                    (unsigned long)aaf_pkt_overrun_count_read(),
                    (unsigned long)aaf_pkt_fifo_level_read(),
-                   (unsigned long)aaf_pkt_dbg_block_push_read(),
-                   (unsigned long)aaf_pkt_dbg_block_pop_read(),
-                   (unsigned long)aaf_pkt_dbg_first_read(),
                    (long)mcr.usb_last_level,
-                   (unsigned long)aaf_pkt_dbg_level_min_read(),
-                   (unsigned long)aaf_pkt_dbg_level_max_read(),
                    (unsigned long)main_usb_fb_ovr_read(),
                    (unsigned long)aaf_pkt_src_step_read(),
                    (unsigned long)mcr.current_increment,
                    (unsigned long)usb_lock_calls,
                    (unsigned long)aaf.last_presentation_ts);
-            aaf_pkt_dbg_level_rst_write(1);   // restart min/max window for next 'a'
             break;
         case 'f': {
             usb_nco_freeze = !usb_nco_freeze;
@@ -698,22 +662,12 @@ static void check_uart_cmd(void)
             srp_talker_enable(&srp, 0);
             printf("[DIAG] AAF TX force-disabled\n");
             break;
-        case 'F': {
-            // Dump the EXACT assembled AAF frame the gateware puts on the wire,
-            // byte 0 first. Verify dst(0-5)/src(6-11)/TPID 8100(12-13)/TCI(14-15
-            // = 60 02 => PCP3 VID2)/ethertype 22F0(16-17)/AAF hdr(18+)/payload.
-            printf("\n[FRAME] gateware AAF frame, byte 0 first (234 bytes):\n");
-            for (int w = 0; w < 59; w++) {
-                aaf_pkt_dbg_frame_addr_write(w);
-                uint32_t word = aaf_pkt_dbg_frame_data_read();
-                printf("%02x %02x %02x %02x ",
-                       (unsigned)(word & 0xFF),  (unsigned)((word >> 8) & 0xFF),
-                       (unsigned)((word >> 16) & 0xFF), (unsigned)((word >> 24) & 0xFF));
-                if ((w & 3) == 3) printf("\n");
-            }
-            printf("\n");
+        case 'F':
+            // Frame-buffer dump removed with the dbg_frame_addr/data CSRs
+            // (2026-06-12, to shrink the AAF CSR bank / lift sys_clk). Use a
+            // tcpdump on the wire instead.
+            printf("[FRAME] dump removed (dbg CSRs trimmed for sys_clk); use tcpdump\n");
             break;
-        }
         case 'b':
             // Per-second windowed rates — Stage-0 baseline for the
             // firmware-on-audio architecture. Each subsequent

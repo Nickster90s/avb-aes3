@@ -192,39 +192,13 @@ class AAFPacketizer(LiteXModule):
         self.underrun_count = CSRStatus(32, description="Media-clock ticks where block_fifo was empty (silence inserted).")
         self.overrun_count  = CSRStatus(32, description="send_req arriving while builder busy (packet skipped — should stay 0).")
         self.fifo_level     = CSRStatus(blk_bits + 8, description="block_fifo occupancy (blocks).")
-        # Flow-control diagnostics (soft ILA): measure block production vs
-        # consumption to resolve the FIFO-overflow contradiction. Rate them
-        # over a precise interval from the firmware `a` command.
-        self.dbg_block_push = CSRStatus(32, description="blocks PRODUCED (block_fifo.we) — assembler frame rate.")
-        self.dbg_block_pop  = CSRStatus(32, description="blocks CONSUMED (block_fifo.re) — packetizer strobe rate.")
-        self.dbg_first      = CSRStatus(32, description="`first` markers consumed (do_pop & first) — host frame boundaries.")
-        # Min/max of block_fifo.level since last reset — resolves "stuck full" vs
-        # "oscillating full↔empty" (aggregate counters can't). Write dbg_level_rst
-        # to start a fresh window.
-        self.dbg_level_min  = CSRStatus(16, description="min block_fifo.level since reset.")
-        self.dbg_level_max  = CSRStatus(16, description="max block_fifo.level since reset.")
-        self.dbg_level_rst  = CSRStorage(1, description="write 1 → restart min/max window at current level.")
-        # THE two numbers that break the level/strobe/host contradiction:
-        #  - dbg_raw_strobe: mcr.sample_strobe counted UNGATED (no en/primed gate),
-        #    i.e. the true NCO/consumer demand rate. Distinguishes 48000 (1041.7
-        #    cyc) from 48007 independent of FIFO state.
-        #  - dbg_usb_samp: actual samples DRAINED from the cd_usb→sys bridge
-        #    (usb_readable & do_pop) = true USB producer rate. /8 = frame rate,
-        #    directly comparable to usbmon (46979) and to dbg_first. If
-        #    dbg_first > dbg_usb_samp/8 then `first` is glitching (phantom push).
-        self.dbg_raw_strobe = CSRStatus(32, description="mcr.sample_strobe UNGATED — true NCO consumer rate.")
-        self.dbg_usb_samp   = CSRStatus(32, description="samples drained from USB bridge (usb_readable & do_pop) — true producer rate.")
-        # Live avtp_timestamp (presentation time, ns mod 2^32) of the last emitted
-        # packet. Firmware compares it to gPTP-now: it MUST be ~now + pres_offset
-        # (2 ms). If it's garbage / not ~2 ms ahead, the stream carries no
-        # recoverable media clock and a listener can't lock.
-        self.dbg_pres       = CSRStatus(32, description="last emitted avtp_timestamp (ns mod 2^32). Expect ~gPTP_now + 2 ms.")
-        # Frame-buffer dump: read the ACTUAL assembled frame the gateware puts on
-        # the wire, word by word. firmware writes dump_addr (0..N_WORDS-1) and
-        # reads dump_data. Lets us verify EVERY byte (dst/src/VLAN/ethertype/AAF
-        # header/payload) directly, instead of trusting the construction.
-        self.dbg_frame_addr = CSRStorage(8,  description="frame_ram word index to read back via dbg_frame_data.")
-        self.dbg_frame_data = CSRStatus(32, description="frame_ram[dbg_frame_addr] — the exact 32-bit word on the wire (byte0 in LSB).")
+        # NOTE: the soft-ILA debug CSRs (dbg_block_push/pop/first, level min/max,
+        # raw_strobe, usb_samp, pres, frame_addr/data) were REMOVED 2026-06-12.
+        # They had done their diagnostic job, and the large AAF CSR bank was the
+        # sys_clk critical path: the CPU->CSR-decode routing (csrbank10) capped sys
+        # at 43.97 MHz, and sub-50 setup violations corrupted the AAF builder's
+        # high-bit channel paths (ch1/3/5/6 = wrong MSBs, low bytes clean). Trimming
+        # the bank shrinks that decode mux. See [[csr-mux-explodes-sys-clk]].
 
         # MAC error lane is always 0 for our generated frames.
         self.comb += source.error.eq(0)
@@ -244,12 +218,24 @@ class AAFPacketizer(LiteXModule):
         # the wrapper's free-running producer (root cause, 2026-06-01). Here the
         # OUTPUT rate is gPTP and does NOT feed back to the host, so no runaway;
         # USB feedback is pinned nominal (0x60000).
-        assert (fifo_depth & (fifo_depth - 1)) == 0, "SRC ring depth must be power of 2"
-        log2depth = log2_int(fifo_depth)
-        mem = Memory(channels * 32, fifo_depth)   # BRAM (sync reads), not LUT-RAM
+        # SAMPLE ring (32-bit entries) in BRAM — holds the raw interleaved stream
+        # ch0,ch1,...,ch7,ch0,... read ONE SAMPLE AT A TIME by the byte builder.
+        # No 256-bit frame is ever assembled in LUTs/FFs, so none of the wide
+        # variable muxes / wide shift registers that openXC7 mis-synthesised
+        # (pink noise, ch1/3/5/6, ch2/4) exist anymore — only BRAM is wide. depth
+        # = 8x the old frame depth (same buffering time). Read pipeline verified in
+        # /tmp/sim_sring.py.
+        SRING_DEPTH = fifo_depth * channels        # samples
+        assert (SRING_DEPTH & (SRING_DEPTH - 1)) == 0, "sample-ring depth must be pow2"
+        log2depth = log2_int(SRING_DEPTH)
+        # 36-bit entries: the 32 sample bits are spread to AVOID the RAMB36 parity
+        # positions (8,17,26,35), which nextpnr-xilinx drops when packing a 32-bit
+        # BRAM (observed: input 0xFFFFFFFF -> 0xFBFDFEFF, mask 0x04020100 = bits
+        # 8/17/26). Dummies land on parity; real data survives. See pack/unpack below.
+        mem = Memory(36, SRING_DEPTH)              # BRAM; data spread around parity
         self.specials += mem
         wp  = mem.get_port(write_capable=True)
-        rp  = mem.get_port()                       # single read port: bit-exact, 1 frame/strobe
+        rp  = mem.get_port()                       # 1 read port, sample at rdf
         self.specials += wp, rp
 
         # Retained for CSR-layout / firmware compat — UNUSED now. The host is
@@ -259,45 +245,31 @@ class AAFPacketizer(LiteXModule):
             description="(unused) legacy SRC ratio; bit-exact passthrough now.")
         self.fifo_depth = fifo_depth
 
-        wr     = Signal(32)
-        rd     = Signal(32)
-        # SIGNED occupancy: if the consumer ever reaches the producer an unsigned
-        # wr-rd underflows to a huge value that masquerades as "full"; signed,
-        # it goes negative -> have1 false -> consumer stalls and waits.
-        level  = Signal((33, True))
+        wr     = Signal(32)                         # sample write pointer
+        rd     = Signal(32)                         # sample read/consumed pointer
+        # SIGNED sample occupancy (negative if consumer overtakes producer).
+        level  = Signal((34, True))
         self.comb += level.eq(wr - rd)
+        # block_level for the wrapper PI servo — SAME scale as the old frame level
+        # (samples >> 3 = frames), so the servo CENTER/KP/clamps carry over with no
+        # change to the wrapper or the .v.
         self.block_level = Signal(max=fifo_depth + 1)
-        self.comb += self.block_level.eq(level)        # legacy port for avb_soc
-        # unsigned, range-clamped copy for the level CSR + min/max tracker
+        self.comb += If(level < 0,
+            self.block_level.eq(0),
+        ).Elif((level >> 5) > fifo_depth,
+            self.block_level.eq(fifo_depth),
+        ).Else(
+            self.block_level.eq(level >> 5),   # samples(0..4096) -> 0..128, servo CENTER=mid
+        )
         level_u = Signal(max=fifo_depth + 1)
-        self.comb += If(level < 0, level_u.eq(0)).Elif(level > fifo_depth, level_u.eq(fifo_depth)).Else(level_u.eq(level))
+        self.comb += level_u.eq(self.block_level)   # fifo_level CSR = frame-equiv
+        # rp.adr is driven by the byte builder's fetch pointer (rdf), below.
 
-        self.comb += rp.adr.eq(rd[0:log2depth])    # frame at rd (stable between strobes)
-
-        # Min/max level tracker (resolves stuck-full vs oscillating vs centred).
-        _lvl_min = Signal(max=fifo_depth + 1, reset=fifo_depth)
-        _lvl_max = Signal(max=fifo_depth + 1, reset=0)
-        self.sync += [
-            If(self.dbg_level_rst.re,
-                _lvl_min.eq(level_u), _lvl_max.eq(level_u),
-            ).Else(
-                If(level_u < _lvl_min, _lvl_min.eq(level_u)),
-                If(level_u > _lvl_max, _lvl_max.eq(level_u)),
-            ),
-        ]
-        self.comb += [self.dbg_level_min.status.eq(_lvl_min),
-                      self.dbg_level_max.status.eq(_lvl_max)]
-
-        cur  = Array([Signal(32) for _ in range(channels)])
-        have = Signal()
-
-        # Register the bridge-FIFO output one cycle before the channel demux.
-        # The comb cone FIFO-read → samp/ch → 8-way cur[ch] write violated setup
-        # at our ~50-56 MHz sys_clk, intermittently latching a corrupted sample
-        # → an audible noise floor on the real audio (a gateware ramp injected
-        # at cur[0] played clean while the real USB samples were noisy, and it
-        # was placement-sensitive — the timing-marginal signature). Latch the
-        # FIFO output on the pop, demux from the registered value next cycle.
+        # SEQUENTIAL sample write — each USB sample goes straight into the ring in
+        # arrival order. No demux, no frame shift, nothing wide. Writing STARTS at
+        # the first ch0 (first marker) so ring[0]=ch0; thereafter every sample is
+        # stored, and the reader (48 samples/packet = a multiple of 8) stays
+        # channel-aligned. Register the bridge output first (stable, timing-clean).
         do_pop = usb_readable
         samp_lo_r = Signal(32)
         samp_hi_r = Signal(4)            # bits 0..2 = channel, bit 3 = first
@@ -309,132 +281,62 @@ class AAFPacketizer(LiteXModule):
                 samp_hi_r.eq(usb_sample_hi[0:4]),
             ),
         ]
-        ch    = samp_hi_r[0:ch_bits]
-        first = samp_hi_r[3]
-        # Full 32-bit sample: carry ALL bytes (host sends a live LSB). Was
-        # Cat(Signal(8), samp_lo_r[8:32]) = 24-bit MSB-aligned (LSB zeroed).
+        first  = samp_hi_r[3]
         samp32 = samp_lo_r                          # true 32-bit, no truncation
-
-        need_push = first & have
         en = self.enable.storage
-        # ALWAYS drain the wrapper bridge — do NOT stall on ring-full. The
-        # cd_usb->sys bridge is a 2nd buffer in series with this ring; stalling
-        # do_pop when the ring fills lets the bridge accumulate, making it a
-        # second integrator. Two cascaded integrators + the proportional
-        # src_step servo = a relaxation limit-cycle (ring rode full with deep
-        # dips, on-HW 2026-06-01). Draining unconditionally keeps the bridge
-        # near-empty (pure CDC latency, not an integrator) so only the ring
-        # integrates -> the P servo is first-order stable. On ring-full we DROP
-        # the just-completed frame (don't write) instead of back-pressuring;
-        # once the servo centres (~level 286) the ring never nears full, so
-        # drops happen only during the startup transient.
+        started   = Signal()                        # high once the first ch0 seen
+        ch0_phase = Signal(ch_bits)                 # low addr bits where ch0 lands
+        # Drop new samples only if the ring is genuinely full (startup transient);
+        # the servo keeps it centred so this never fires in steady state.
         have_space = Signal()
-        self.comb += have_space.eq(level < (fifo_depth - 2))
-        # Textbook AsyncFIFO read: r_en = r_rdy (consume one entry per cycle data
-        # is available). usb_readable = the wrapper's cd_usb->sys AsyncFIFO r_rdy;
-        # usb_pop -> sample_pop -> r_en. The earlier "over-read" that prompted a
-        # rate-limit then a registered toggle was actually the DECODER over-
-        # producing (wrong clock domain — fixed by DomainRenamer); the read itself
-        # is fine. The registered toggle (pop-every-other-cycle off a 1-cycle-lagged
-        # usb_rdy_r) actually SKEWED the read — it re-read first-entries ~1.5x
-        # (on-HW: first=72k vs the true 48k, usb_samp=96k, fifo_ovf=0) and
-        # re-pushed duplicate frames, keeping the ring full. Reverted to the simple
-        # combinational read: each entry consumed exactly once.
-        ring_wr = Signal()
+        self.comb += have_space.eq(level < (SRING_DEPTH - 2))
+        do_write = Signal()
         self.comb += [
-            self.usb_pop.eq(do_pop),                     # pop the FIFO when data ready
-            ring_wr.eq(en & samp_vld & need_push & have_space),
+            self.usb_pop.eq(do_pop),                # always drain the bridge FIFO
+            do_write.eq(en & samp_vld & (started | first) & have_space),
             wp.adr.eq(wr[0:log2depth]),
-            wp.dat_w.eq(Cat(*cur)),    # the just-completed frame (cur updates same edge)
-            wp.we.eq(ring_wr),
+            # Spread 32 data bits around the parity positions (8,17,26,35).
+            wp.dat_w.eq(Cat(samp32[0:8],  Constant(0, 1),
+                            samp32[8:16], Constant(0, 1),
+                            samp32[16:24],Constant(0, 1),
+                            samp32[24:32],Constant(0, 1))),
+            wp.we.eq(do_write),
         ]
         self.sync += [
-            If(ring_wr, wr.eq(wr + 1)),
-            If(samp_vld,
-                # Frame start (need_push ⟹ ch==0): zero ch1..N-1 so un-written
-                # slots (ch2..7 for a 2ch stream) stay silent. cur[0] is written
-                # by cur[ch] below — NOT cleared here — so index 0 has no
-                # same-cycle double-write. Demux from the REGISTERED sample.
-                If(need_push,
-                    *[cur[i].eq(0) for i in range(1, channels)],
-                ),
-                cur[ch].eq(samp32),
-                have.eq(1),
+            If(~en, started.eq(0)).Elif(samp_vld & first, started.eq(1)),
+            If(do_write,
+                wr.eq(wr + 1),
+                # Record the low address bits where ch0 is written. All ch0s share
+                # these bits (writes are sequential), so the reader can snap to a
+                # ch0. Updates if a drop (en low on ACMP re-bind) shifts the phase.
+                If(first, ch0_phase.eq(wr[0:ch_bits])),
             ),
         ]
 
         # =========================================================
         # 2) Media-clock-paced SRC read -> pay ping-pong buffer
         # =========================================================
-        pay      = Array([Signal(channels * 32) for _ in range(16)])
-        fill_buf = Signal()
-        send_buf = Signal()
+        # 2) Media-clock PACING: one packet every samples_per_packet (=6) media
+        #    strobes. The byte builder (section 4) drains 48 samples from the ring
+        #    per packet and advances `rd` there — no per-strobe frame read, no wide
+        #    packet accumulator. Nothing here is wider than a counter.
         blk_idx  = Signal(blk_bits)
         send_req = Signal()
-
-        # Prime the ring to centre before consuming (equal jitter headroom).
-        primed = Signal()
-        _center = fifo_depth // 2
+        # Prime to half-full (in SAMPLES) before consuming real audio; until then
+        # the builder emits silence so the listener (AxC) can still lock.
+        primed  = Signal()
+        _center = (fifo_depth // 2) * channels
         self.sync += [If(~en, primed.eq(0)).Elif(level >= _center, primed.eq(1))]
         strobe = Signal()
-        # Emit at the media rate whenever the talker is ENABLED — not gated on
-        # `primed`. With no USB source (ring never primes) we still send a
-        # continuous silence stream so the listener (AxC) can lock/stay-locked
-        # regardless of the audio source. Real ring audio is used only once
-        # primed (see `primed & have1` below); otherwise the existing silence
-        # path fills zeros.
         self.comb += strobe.eq(mcr.sample_strobe & en)
-
-        # BIT-EXACT read: pop ONE ring frame per media strobe (no resampling).
-        # The host is rate-slaved by USB async feedback (it tracks our NCO/SOF
-        # rate), so produce == consume and the ring stays balanced — bit-perfect
-        # passthrough, no interpolator, no per-channel multiplier, no DSP. rp.dat_r
-        # is mem[rd], stable between strobes (BRAM read long-settled).
-        have1 = Signal(); self.comb += have1.eq(level >= 1)   # >=1 frame -> can pop
-
         underruns = Signal(32)
         self.comb += [self.underrun_count.status.eq(underruns),
                       self.fifo_level.status.eq(level_u)]
-
-        # Soft-ILA counters: production (ring_wr), consumption (strobe), firsts,
-        # raw ungated NCO tick, and true USB samples drained.
-        _push_cnt = Signal(32); _pop_cnt = Signal(32); _first_cnt = Signal(32)
-        _rawstr_cnt = Signal(32); _usbsamp_cnt = Signal(32)
-        self.sync += [
-            If(ring_wr,               _push_cnt.eq(_push_cnt + 1)),
-            If(strobe,                _pop_cnt.eq(_pop_cnt + 1)),
-            If(samp_vld & first,      _first_cnt.eq(_first_cnt + 1)),
-            If(mcr.sample_strobe,     _rawstr_cnt.eq(_rawstr_cnt + 1)),
-            If(samp_vld,              _usbsamp_cnt.eq(_usbsamp_cnt + 1)),
-        ]
-        self.comb += [
-            self.dbg_block_push.status.eq(_push_cnt),
-            self.dbg_block_pop.status.eq(_pop_cnt),
-            self.dbg_first.status.eq(_first_cnt),
-            self.dbg_raw_strobe.status.eq(_rawstr_cnt),
-            self.dbg_usb_samp.status.eq(_usbsamp_cnt),
-        ]
-
         self.sync += [
             send_req.eq(0),
             If(strobe,
-                If(primed & have1,
-                    # Bit-exact: pop exactly one frame (rp.dat_r = mem[rd]) into
-                    # the packet buffer, advance rd by exactly 1. have1 gates the
-                    # advance so rd can never overtake wr.
-                    pay[Cat(blk_idx, fill_buf)].eq(rp.dat_r),
-                    rd.eq(rd + 1),
-                ).Else(
-                    # Underrun: emit silence, HOLD the read pointer. (Rare — the
-                    # PI servo keeps the ring centered — so the cheap zero-fill is
-                    # fine; a 256-bit hold-last register cost ~8 MHz of sys Fmax.)
-                    pay[Cat(blk_idx, fill_buf)].eq(0),
-                    underruns.eq(underruns + 1),
-                ),
                 If(blk_idx == (samples_per_packet - 1),
                     blk_idx.eq(0),
-                    send_buf.eq(fill_buf),
-                    fill_buf.eq(~fill_buf),
                     send_req.eq(1),
                 ).Else(
                     blk_idx.eq(blk_idx + 1),
@@ -451,7 +353,6 @@ class AAFPacketizer(LiteXModule):
 
         seq  = Signal(8)
         pres = Signal(32)
-        self.comb += self.dbg_pres.status.eq(pres)   # expose live avtp_timestamp
 
         # ---- Deterministic CRF-dilated presentation-time ramp (gst-avtp model) ----
         # Instead of re-sampling gPTP every packet (which carries strobe->latch
@@ -538,8 +439,6 @@ class AAFPacketizer(LiteXModule):
         # 4) Builder FSM: bytes → frame_ram, then stream frame_ram → source
         # =========================================================
         frame_ram = Array([Signal(32) for _ in range(N_WORDS)])
-        # Debug readback of the assembled frame (see dbg_frame_addr/data above).
-        self.comb += self.dbg_frame_data.status.eq(frame_ram[self.dbg_frame_addr.storage])
         byte_idx  = Signal(max=TOTAL + 1)
         wacc      = Signal(24)            # holds lanes 0..2 of the in-progress word
         rd_idx    = Signal(max=N_WORDS)
@@ -550,44 +449,55 @@ class AAFPacketizer(LiteXModule):
             self.overrun_count.status.eq(overruns),
         ]
 
-        # Current byte value: header for idx<42, else payload (big-endian sample).
-        cur_byte = Signal(8)
-        pi   = byte_idx - HDR_LEN                 # payload byte offset (valid when >=0)
-        n    = pi[2:]                             # sample number within packet (0..47)
-        k    = pi[0:2]                            # byte within sample (0..3)
-        p_blk = n[3:]                             # block 0..5
-        p_ch  = n[0:3]                            # channel 0..7
-        blk_word = pay[Cat(p_blk[0:3], send_buf)]            # 256-bit block
-        # Explicit channel + byte selection via muxes. The original variable
-        # barrel shifts (blk_word >> p_ch*32) and (p_samp >> (3-k)*8)
-        # MIS-SYNTHESIZE on openXC7 (yosys/nextpnr truncates the shift amount):
-        # channels aliased mod-2 (ch0==ch2==ch4==ch6) and each sample's bytes
-        # MSB-replicated -> [A,0,A,0] = THE pink noise. Identical at every
-        # sys_clk 49-57 MHz (a logic bug, not timing). Muxes have no barrel shift.
-        p_samp = Signal(32)
-        self.comb += Case(p_ch, {i: p_samp.eq(blk_word[i*32 : i*32 + 32])
-                                 for i in range(channels)})
-        p_byte = Signal(8)
-        self.comb += Case(k, {
-            0: p_byte.eq(p_samp[24:32]),   # big-endian: MSB byte first
-            1: p_byte.eq(p_samp[16:24]),
-            2: p_byte.eq(p_samp[8:16]),
-            3: p_byte.eq(p_samp[0:8]),
-        })
+        # Current byte: header (idx<42), else the current sample's bytes (big-endian,
+        # MSB first) from a 32-bit samp_hold register. samp_hold is fed one sample at
+        # a time by the BRAM ring read pipeline in BUILD (rdf leads, latched at the
+        # sample's last byte) — verified in /tmp/sim_sring.py. NOTHING here is wider
+        # than 32 bits, so no wide LUT/FF structure for openXC7 to mis-synthesise
+        # (the per-channel muxes AND the wide shift registers are both gone).
+        cur_byte   = Signal(8)
+        samp_hold  = Signal(32)
+        rdf        = Signal(32)              # ring fetch pointer (leads rd by 1)
+        pkt_primed = Signal()                # `primed` latched at packet start
+        self.comb += rp.adr.eq(rdf[0:log2depth])
+        # Strip the parity-position dummy bits back out -> the original 32-bit sample.
+        samp_rd = Signal(32)
+        self.comb += samp_rd.eq(Cat(rp.dat_r[0:8], rp.dat_r[9:17],
+                                    rp.dat_r[18:26], rp.dat_r[27:35]))
+        pi = Signal(max=TOTAL + 1)
+        self.comb += pi.eq(byte_idx - HDR_LEN)         # payload byte offset (k = pi[0:2])
         self.comb += If(byte_idx < HDR_LEN,
             cur_byte.eq(header[byte_idx[0:6]]),
         ).Else(
-            cur_byte.eq(p_byte),
+            Case(pi[0:2], {
+                0: cur_byte.eq(samp_hold[24:32]),
+                1: cur_byte.eq(samp_hold[16:24]),
+                2: cur_byte.eq(samp_hold[8:16]),
+                3: cur_byte.eq(samp_hold[0:8]),
+            }),
         )
 
         lane = byte_idx[0:2]
         widx = byte_idx[2:]
 
+        # Self-aligning read: snap rd forward 0..7 samples so the packet's first
+        # sample is a ch0 (rd low bits == ch0_phase). When already aligned the snap
+        # is 0; after a phase shift (drop) it costs one re-sync of <8 samples then
+        # stays aligned (48/packet is a multiple of 8). Robust to the startup race.
+        rd_skip    = Signal(ch_bits)
+        rd_aligned = Signal(32)
+        self.comb += [
+            rd_skip.eq((ch0_phase - rd[0:ch_bits]) & (channels - 1)),
+            rd_aligned.eq(rd + rd_skip),
+        ]
         fsm = FSM(reset_state="IDLE")
         self.submodules.fsm = fsm
         fsm.act("IDLE",
             If(send_req,
                 NextValue(byte_idx, 0),
+                NextValue(rd,  rd_aligned),       # snap to the next ch0 boundary
+                NextValue(rdf, rd_aligned),       # fetch pointer = packet's first sample
+                NextValue(pkt_primed, primed),    # whole packet is silence OR audio
                 NextState("BUILD"),
             ),
         )
@@ -618,6 +528,24 @@ class AAFPacketizer(LiteXModule):
             }),
             If(commit_full,
                 NextValue(frame_ram[widx], Cat(wacc, cur_byte)),
+            ),
+            # BRAM ring read pipeline (verified sim_sring.py), overlapped with the
+            # header so the first payload sample is ready at byte 42:
+            #   byte 0: rp.adr=rdf=rd this cycle -> bump rdf so dat_r prefetches rd+1
+            #   byte 1: latch samp_hold = ring[rd]
+            #   payload last byte (pi&3==3): latch next sample, advance rd + rdf
+            # A silence packet (~pkt_primed) holds samp_hold=0 and does NOT advance
+            # rd, so the ring fills until primed; 48 samples/packet keeps ch-align.
+            If(pkt_primed,
+                If(byte_idx == 0, NextValue(rdf, rd + 1)),
+                If(byte_idx == 1, NextValue(samp_hold, samp_rd)),
+                If((byte_idx >= HDR_LEN) & (pi[0:2] == 3),
+                    NextValue(samp_hold, samp_rd),
+                    NextValue(rdf, rdf + 1),
+                    NextValue(rd,  rd + 1),
+                ),
+            ).Else(
+                NextValue(samp_hold, 0),
             ),
             If(is_last,
                 # Final word (rem=2 → lanes 0,1 valid). wacc[0:8]=byte232,

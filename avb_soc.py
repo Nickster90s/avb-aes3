@@ -673,16 +673,18 @@ class AVBSoC(SoCCore):
         # feed it the consumer-FIFO level. When the gateware doesn't own the USB
         # drain (firmware path), report mid-level so the wrapper applies no trim
         # (feedback = pure measured media-clock rate).
-        # Scale the 10-bit ring level (0..512) down by 4 into the 8-bit block_level
-        # port (0..128). WITHOUT this, ring levels >255 WRAP in the 8-bit port, so
-        # the bridge feedback reads a falsely-LOW level on every host burst → tells
-        # the host "send MORE" → ring overflows → frames DROPPED → broadband pink
-        # noise. With >>2, the feedback's CENTRE=64 correctly targets ring level
-        # 256 (mid of 512). else-branch (gateware not draining) = fifo_depth>>3 =
+        # aaf_pkt.block_level is ALREADY scaled to 0..128 in the packetizer
+        # (level>>5; samples 0..4096 -> 0..128), so feed it STRAIGHT THROUGH:
+        # the bridge feedback's CENTRE=64 targets ring mid (block 64 = 2048 of
+        # 4096 samples). A stale >>2 here (left over from an OLD 0..512
+        # block_level) DOUBLE-scaled it to 0..32, so err = CENTRE - level was
+        # ALWAYS positive -> feedback always told the host "send MORE" -> ring
+        # pinned FULL (level=127) -> have_space gated writes DROPPED samples ->
+        # not-clean audio. else-branch (gateware not draining) = fifo_depth>>3 =
         # 64 = same mid-level so the wrapper applies no trim.
         self.comb += usb_block_level.eq(
             Mux(aaf_pkt.enable.storage,
-                aaf_pkt.block_level >> 2, aaf_pkt.fifo_depth >> 3))
+                aaf_pkt.block_level, aaf_pkt.fifo_depth >> 3))
 
         # Frame-atomic TX mux: firmware SRAM reader (priority) + gateware AAF
         # talker → MAC core sink. Claim the wishbone-TX seam (see the LiteEth

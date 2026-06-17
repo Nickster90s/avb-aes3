@@ -91,6 +91,13 @@
 // the worst observed steady-state requirement.
 #define SERVO_INTEGRAL_CLAMP_NS 100000000LL
 
+// Anti-windup GATE: skip integrating any single offset whose magnitude exceeds
+// this (1 ms). Defends against a large transient (or a residual the accurate
+// step didn't catch) slamming the integral in one sample. Set well above the
+// real convergence offset range (peaks ~0.2 ms) so it never blocks normal
+// frequency convergence, and below the old ~4 ms step residual.
+#define SERVO_ANTIWINDUP_NS     1000000LL
+
 // ---------------------------------------------------------------------------
 // PTP timestamp (80-bit: 48-bit seconds + 32-bit nanoseconds)
 // ---------------------------------------------------------------------------
@@ -216,6 +223,22 @@ typedef struct {
     uint32_t rx_wrong_domain_count;
     uint8_t  rx_last_msg_type;
     uint8_t  rx_last_domain;
+
+    // --- Convergence ring-log (instrumentation for fast-lock work) ---------
+    // One entry per servo update (Sync): the median offset (phase error) and
+    // the addend delta from base (frequency correction in effect). Lets one
+    // power-cycle capture the whole boot->lock curve (the console drops on
+    // reboot, so live capture is impossible). Freezes a few samples after the
+    // servo locks so a later `G` dump still shows the convergence, and records
+    // the boot->lock wall time. Pure observation — touches no control path.
+    struct {
+        int32_t offset_ns;     // median offset this Sync (saturated to ±2e9)
+        int32_t addend_delta;  // current_addend_full - base_addend_full (sat)
+        uint8_t locked;        // servo_locked at this Sync
+    } conv_log[400];
+    uint16_t conv_idx;         // circular write pointer
+    uint16_t conv_count;       // entries written (<= 400)
+    uint8_t  conv_postlock;    // samples logged since lock (freezes at 8)
 } gptp_t;
 
 // ---------------------------------------------------------------------------
@@ -224,6 +247,9 @@ typedef struct {
 
 void gptp_init(gptp_t *g, const uint8_t *mac_addr);
 void gptp_poll(gptp_t *g);
+// Dump the convergence ring-log over UART (console 'G'): boot->lock time +
+// per-Sync (offset_ns, addend_delta, locked). Diagnostic only.
+void gptp_dump_conv_log(const gptp_t *g);
 
 // Helpers called from main loop
 void gptp_process_rx(gptp_t *g, const uint8_t *frame, uint32_t len);

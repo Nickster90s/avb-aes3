@@ -711,7 +711,15 @@ def main():
     parser.add_argument("--build",        action="store_true", help="Build bitstream.")
     parser.add_argument("--soft-only",    action="store_true", help="Generate software headers only (no P&R).")
     parser.add_argument("--load",         action="store_true", help="Load bitstream.")
-    parser.add_argument("--seed", default=4, type=int, help="nextpnr P&R seed.")
+    parser.add_argument("--seed", default=1, type=int, help="nextpnr P&R seed. "
+        "Pinned to 1: with the gPTP fast-lock firmware it places sys_clk at "
+        "64.23 MHz (HW-verified clean). The CSR-bus address decode is the "
+        "structural Fmax cap (~53-68 MHz band, scattered routing — see "
+        "csr-mux-explodes-sys-clk); seed picks placement WITHIN the band, and "
+        "53 MHz (seed 4) left the USB-feedback datapath marginal -> ring stuck "
+        "low -> glitch. TX is seed-robust (TX-sys-datapath fix). If the firmware "
+        "changes enough to drop Fmax <~57, sweep seeds for one >=57 (seed 3 = "
+        "67.74 was the sweep best).")
     parser.add_argument("--no-floorplan", action="store_true",
         help="Disable the USB-near-ULPI proximity floorplan (floorplan_usb.py "
              "constrains USB cells to X<=30, Y=10-70 — close to the ULPI pins "

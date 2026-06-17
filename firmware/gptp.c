@@ -188,6 +188,37 @@ int64_t gptp_ts_diff_ns(ptp_timestamp_t a, ptp_timestamp_t b)
     return sec_diff * 1000000000LL + ns_diff;
 }
 
+// Dump the convergence ring-log (console 'G'). Shows the boot->lock curve so we
+// can SEE where the cold-lock time goes and verify a fast-lock change, all from
+// one power-cycle (live capture is impossible — the console UART drops on
+// reboot). offset_ns = phase error per Sync; addend_delta = the frequency
+// correction in effect (current_addend_full - base_addend_full). Index is the
+// time axis at ~one Sync interval (≈125 ms) per entry.
+void gptp_dump_conv_log(const gptp_t *g)
+{
+    uint16_t n     = g->conv_count;
+    uint16_t start = (n < 400) ? 0 : g->conv_idx;   // oldest entry (handles wrap)
+    int first_lock = -1;
+    for (uint16_t k = 0; k < n; k++) {
+        uint16_t i = (uint16_t)((start + k) % 400);
+        if (g->conv_log[i].locked) { first_lock = (int)k; break; }
+    }
+    printf("\n[gPTP-CONV] entries=%u  (~125 ms/entry)\n", (unsigned)n);
+    if (first_lock >= 0)
+        printf("  LOCK at entry %d  (~%d ms after first logged Sync)\n",
+               first_lock, first_lock * 125);
+    else
+        printf("  (did not lock within the logged window)\n");
+    printf("  idx   offset_ns   addend_delta  lk\n");
+    for (uint16_t k = 0; k < n; k++) {
+        uint16_t i = (uint16_t)((start + k) % 400);
+        printf("  %3u  %10ld  %12ld   %u\n", (unsigned)k,
+               (long)g->conv_log[i].offset_ns,
+               (long)g->conv_log[i].addend_delta,
+               (unsigned)g->conv_log[i].locked);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Build PTP common header
 // ---------------------------------------------------------------------------
@@ -529,6 +560,27 @@ void gptp_servo_update(gptp_t *g)
 {
     int64_t offset = g->offset_from_master_ns;
 
+    // Convergence ring-log (instrumentation). One entry per Sync: this Sync's
+    // median offset (phase error) + the addend correction currently in effect
+    // (frequency, as delta from base). Index == time (≈ one Sync interval per
+    // entry). Freezes 8 samples after the servo locks so a later `G` dump still
+    // shows the whole boot->lock curve (the console drops on reboot, so live
+    // capture is impossible). Pure observation — does not touch any control path.
+    if (g->conv_postlock < 8) {
+        int64_t od = offset;
+        int64_t ad = (int64_t)g->current_addend_full - (int64_t)g->base_addend_full;
+        if (od >  2000000000LL) od =  2000000000LL;
+        if (od < -2000000000LL) od = -2000000000LL;
+        if (ad >  2000000000LL) ad =  2000000000LL;
+        if (ad < -2000000000LL) ad = -2000000000LL;
+        g->conv_log[g->conv_idx].offset_ns    = (int32_t)od;
+        g->conv_log[g->conv_idx].addend_delta = (int32_t)ad;
+        g->conv_log[g->conv_idx].locked       = g->servo_locked;
+        g->conv_idx = (uint16_t)((g->conv_idx + 1) % 400);
+        if (g->conv_count < 400) g->conv_count++;
+        if (g->servo_locked) g->conv_postlock++;
+    }
+
     // Show offset+addend in hex every 2048th servo call (~4 min). Was 256
     // — but the ~80-char print blocks the main loop for ~7 ms and stacks
     // up with the dump print one line above. Available on demand via 's'.
@@ -551,29 +603,40 @@ void gptp_servo_update(gptp_t *g)
     // 34-bit TSU offset register and reserves stepping for true outliers.
     int64_t big_thresh = 500000000LL;
     if (g->servo_step_count == 0 || offset > big_thresh || offset < -big_thresh) {
-        ptp_timestamp_t tgt = g->sync_origin_ts;
-        uint64_t add_ns = (uint64_t)tgt.nanoseconds + (uint64_t)g->mean_path_delay_ns;
-        if (add_ns >= 1000000000ULL) {
-            tgt.seconds += add_ns / 1000000000ULL;
-            tgt.nanoseconds = (uint32_t)(add_ns % 1000000000ULL);
-        } else {
-            tgt.nanoseconds = (uint32_t)add_ns;
-        }
+        // Log FIRST — a printf blocks ~ms over UART, and if we read `now` before
+        // it the step target goes ~ms stale (lands in the past), defeating the
+        // accurate step (measured: 2.76 ms residual purely from this log line).
         if (g->servo_step_count == 0) {
-            printf("[gPTP] Initial step to master ts %lu.%09lu (off=%lld ns)\n",
-                   (unsigned long)tgt.seconds, (unsigned long)tgt.nanoseconds,
-                   (long long)offset);
+            printf("[gPTP] Initial step (off=%lld ns)\n", (long long)offset);
         } else {
             static uint32_t big_step_log = 0;
             if ((big_step_log++ & 0x3F) == 0)
                 printf("[gPTP] Big step (offset=%lld ns)\n", (long long)offset);
         }
+        // ACCURATE (latency-immune) step: target = current LOCAL time - measured
+        // offset. `offset` (median) = local - master, valid at "now" to within
+        // ppm, so (now - offset) = master-time-NOW. Read `now` HERE — immediately
+        // before the apply, AFTER the slow printf — so it's fresh; the residual is
+        // then just the few µs to compute + write the step, not the ms parse/log
+        // latency. Absolute step (the boot gap exceeds the 49-bit offset reg);
+        // NOT now - sync_rx_ts (that spans the GM's Sync->Follow_Up gap).
+        ptp_timestamp_t now_ts = gptp_read_time();
+        int64_t now_ns = (int64_t)now_ts.seconds * 1000000000LL + now_ts.nanoseconds;
+        int64_t new_ns = now_ns - offset;
+        if (new_ns < 0) new_ns = 0;
+        ptp_timestamp_t tgt;
+        tgt.seconds     = (uint64_t)(new_ns / 1000000000LL);
+        tgt.nanoseconds = (uint32_t)(new_ns % 1000000000LL);
         gptp_step_time(tgt);
         // Reset servo state so the integrator doesn't carry pre-step bias.
         g->servo_step_count    = 1;
         g->freq_integral       = 0;
         g->current_addend_full = g->base_addend_full;
         gptp_set_addend_full(g->current_addend_full);
+        // Flush the offset median — it still holds pre-step values whose median
+        // would poison the first post-step Syncs fed to the PI servo.
+        g->off_median_filled = 0;
+        g->off_median_idx    = 0;
         // After stepping the TSU, gptp_uptime_ms() returns values in a
         // NEW time domain (now reflects the master's clock). Every *_ms
         // stamp captured before the step is invalid — using them for
@@ -591,9 +654,18 @@ void gptp_servo_update(gptp_t *g)
     // PI servo on the 52-bit addend (frequency word).
     // Positive offset means slave clock is AHEAD of master → we want to
     // SLOW the slave by reducing addend.
-    g->freq_integral += offset;
-    if (g->freq_integral >  SERVO_INTEGRAL_CLAMP_NS) g->freq_integral =  SERVO_INTEGRAL_CLAMP_NS;
-    if (g->freq_integral < -SERVO_INTEGRAL_CLAMP_NS) g->freq_integral = -SERVO_INTEGRAL_CLAMP_NS;
+    // Anti-windup: only integrate when |offset| is within the trim band. A large
+    // offset (the step residual, or a transient burst) is in ns — 100 µs = 1e5 —
+    // and accumulating it would slam the integral in one sample, overshoot the
+    // steady-state frequency, and cost tens of seconds to unwind (the windup that
+    // dominated the old 45 s lock; the accurate step removes its main source, the
+    // ~4 ms residual). Large offsets are handled by the proportional term (and,
+    // if huge, the step); the integral only supplies the slow DC frequency trim.
+    if (offset < SERVO_ANTIWINDUP_NS && offset > -SERVO_ANTIWINDUP_NS) {
+        g->freq_integral += offset;
+        if (g->freq_integral >  SERVO_INTEGRAL_CLAMP_NS) g->freq_integral =  SERVO_INTEGRAL_CLAMP_NS;
+        if (g->freq_integral < -SERVO_INTEGRAL_CLAMP_NS) g->freq_integral = -SERVO_INTEGRAL_CLAMP_NS;
+    }
 
     // Adaptive Kp for moderate offsets. Aggressive multipliers (>3x)
     // caused oscillation around -10 µs steady state because each Sync

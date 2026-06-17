@@ -336,10 +336,13 @@ void mcr_servo_update(mcr_state_t *m)
 
     int64_t off = m->latest_offset_ns;
 
-    // First sample after bind — capture baseline, don't act yet.
+    // First sample after bind — seed baselines, don't act yet.
     if (!m->have_prev) {
-        m->prev_offset_ns = off;
-        m->have_prev      = 1;
+        m->prev_offset_ns    = off;
+        m->crf_off_filt      = off;
+        m->crf_off_win_start = off;
+        m->crf_win_start_ms  = gptp_uptime_ms();
+        m->have_prev         = 1;
         return;
     }
 
@@ -363,64 +366,68 @@ void mcr_servo_update(mcr_state_t *m)
         return;
     }
 
-    // PI on delta. Integral accumulates the rate error → equivalent to
-    // absolute phase drift since bind. Anti-windup clamp.
-    m->servo_integral += delta;
-    if (m->servo_integral >  MCR_INTEGRAL_CLAMP) m->servo_integral =  MCR_INTEGRAL_CLAMP;
-    if (m->servo_integral < -MCR_INTEGRAL_CLAMP) m->servo_integral = -MCR_INTEGRAL_CLAMP;
+    // EWMA-smooth the offset -> attenuates per-packet RX jitter on the window
+    // endpoints (avg|d|~238ns, 18us spikes observed on HW). Divides by 2^SHIFT.
+    m->crf_off_filt += (off - m->crf_off_filt) >> CRF_OFF_FILT_SHIFT;
 
-    int64_t p_term = (delta             * MCR_KP_NUM) / MCR_KP_DEN;
-    int64_t i_term = (m->servo_integral * MCR_KI_NUM) / MCR_KI_DEN;
-    int64_t correction = -(p_term + i_term);
-
-    if (correction >  MCR_INCREMENT_MAX_DELTA) correction =  MCR_INCREMENT_MAX_DELTA;
-    if (correction < -MCR_INCREMENT_MAX_DELTA) correction = -MCR_INCREMENT_MAX_DELTA;
-
-    int64_t inc = (int64_t)m->base_increment + correction;
-    if (inc < 1) inc = 1;
-    if (inc > 0xFFFFFFFFLL) inc = 0xFFFFFFFFLL;
-    m->current_increment = (uint32_t)inc;
-
-    // Write to NCO CSR
-    mcr_increment_write(m->current_increment);
-
-    // Asymmetric hysteresis: lock fast (1 good sample) but unlock slow
-    // (4 consecutive bad samples). Single-sample exit caused MEDIA_LOCKED/
-    // UNLOCKED to climb in lockstep under occasional Class A jitter
-    // spikes (max|d|=17.8 µs observed even with avg|d|=367 ns).
-    // 4-sample exit treats those as transient and stays locked.
-    #define MCR_LOCK_ENTER_NS    2000
-    #define MCR_LOCK_EXIT_NS    10000
-    #define MCR_LOCK_ENTER_STREAK  1
-    #define MCR_LOCK_EXIT_STREAK   4
+    // Rolling raw-delta stats (diagnostics / 'C' instrument) — the INPUT jitter.
     int64_t abs_delta = (delta < 0) ? -delta : delta;
-
-    // Roll a 500-sample (1s at 500fps) stats window for diagnostics.
     if (abs_delta > m->delta_max_abs) m->delta_max_abs = abs_delta;
     m->delta_sum_abs += abs_delta;
     m->delta_window_count++;
-    if (m->servo_locked) {
-        if (abs_delta > MCR_LOCK_EXIT_NS) {
-            if (m->lock_streak < MCR_LOCK_EXIT_STREAK) m->lock_streak++;
-            if (m->lock_streak >= MCR_LOCK_EXIT_STREAK) {
-                m->servo_locked = 0;
-                m->lock_streak  = 0;
+
+    // FIXED-WINDOW servo (#2a): adjust the NCO only once per CRF_WINDOW_MS, on the
+    // drift integrated over the window. The per-packet jitter -- which the old
+    // per-packet servo turned straight into ~560ppm NCO rate hunting -- averages
+    // out. Integral accumulates the FULL windowed drift (phase), so the
+    // convergence rate matches the old per-packet loop; the proportional damps on
+    // the per-ms drift. Same gains, same lock thresholds.
+    uint32_t now_ms = gptp_uptime_ms();
+    uint32_t dt_ms  = now_ms - m->crf_win_start_ms;
+    if (dt_ms >= CRF_WINDOW_MS) {
+        int64_t rate_err = m->crf_off_filt - m->crf_off_win_start;   // drift over window (ns)
+        m->crf_off_win_start = m->crf_off_filt;
+        m->crf_win_start_ms  = now_ms;
+        int64_t avg_drift = rate_err / (int64_t)dt_ms;               // per-ms drift
+
+        m->servo_integral += rate_err;                              // total phase drift
+        if (m->servo_integral >  MCR_INTEGRAL_CLAMP) m->servo_integral =  MCR_INTEGRAL_CLAMP;
+        if (m->servo_integral < -MCR_INTEGRAL_CLAMP) m->servo_integral = -MCR_INTEGRAL_CLAMP;
+
+        int64_t p_term = (avg_drift         * MCR_KP_NUM) / MCR_KP_DEN;
+        int64_t i_term = (m->servo_integral * MCR_KI_NUM) / MCR_KI_DEN;
+        int64_t correction = -(p_term + i_term);
+        if (correction >  MCR_INCREMENT_MAX_DELTA) correction =  MCR_INCREMENT_MAX_DELTA;
+        if (correction < -MCR_INCREMENT_MAX_DELTA) correction = -MCR_INCREMENT_MAX_DELTA;
+        int64_t inc = (int64_t)m->base_increment + correction;
+        if (inc < 1) inc = 1;
+        if (inc > 0xFFFFFFFFLL) inc = 0xFFFFFFFFLL;
+        m->current_increment = (uint32_t)inc;
+        mcr_increment_write(m->current_increment);
+
+        // Lock hysteresis on the windowed per-ms drift (fast enter, slow exit).
+        #define MCR_LOCK_ENTER_NS    2000
+        #define MCR_LOCK_EXIT_NS    10000
+        #define MCR_LOCK_ENTER_STREAK  1
+        #define MCR_LOCK_EXIT_STREAK   4
+        int64_t abs_drift = (avg_drift < 0) ? -avg_drift : avg_drift;
+        if (m->servo_locked) {
+            if (abs_drift > MCR_LOCK_EXIT_NS) {
+                if (m->lock_streak < MCR_LOCK_EXIT_STREAK) m->lock_streak++;
+                if (m->lock_streak >= MCR_LOCK_EXIT_STREAK) { m->servo_locked = 0; m->lock_streak = 0; }
+            } else {
+                m->lock_streak = 0;
             }
         } else {
-            m->lock_streak = 0;     // reset exit streak on good sample
-        }
-    } else {
-        if (abs_delta < MCR_LOCK_ENTER_NS) {
-            if (m->lock_streak < MCR_LOCK_ENTER_STREAK) m->lock_streak++;
-            if (m->lock_streak >= MCR_LOCK_ENTER_STREAK) {
-                m->servo_locked = 1;
-                m->lock_streak  = 0;
+            if (abs_drift < MCR_LOCK_ENTER_NS) {
+                if (m->lock_streak < MCR_LOCK_ENTER_STREAK) m->lock_streak++;
+                if (m->lock_streak >= MCR_LOCK_ENTER_STREAK) { m->servo_locked = 1; m->lock_streak = 0; }
+            } else {
+                m->lock_streak = 0;
             }
-        } else {
-            m->lock_streak = 0;
         }
+        m->servo_step_count++;
     }
-    m->servo_step_count++;
 
     // CRF convergence ring-log (instrument): ~10ms-decimated snapshot of the
     // recovery (offset, rate delta, NCO correction, lock). ROLLING window (no
@@ -428,7 +435,6 @@ void mcr_servo_update(mcr_state_t *m)
     // so the useful view is STEADY-STATE jitter/hunting, not a convergence ramp.
     // A 'C' dump always shows the last 320 entries (~3.2 s). Observation only.
     {
-        uint32_t now_ms = gptp_uptime_ms();
         if (m->crf_log_count == 0 || (uint32_t)(now_ms - m->crf_log_last_ms) >= 10) {
             m->crf_log_last_ms = now_ms;
             int64_t o = off, d = delta;

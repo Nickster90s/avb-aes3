@@ -30,6 +30,16 @@
 #define MCR_INTEGRAL_CLAMP    1000000        // ±1 ms worth of phase
 #define MCR_INCREMENT_MAX_DELTA  (1 << 24)   // ~4 Mppm guard against wild swings
 
+// Fixed-window CRF servo (#2a, jitter smoothing). The old per-packet servo
+// turned each packet's RX jitter (avg|d|~238ns, 18us spikes) directly into NCO
+// rate hunting (~560ppm span measured). Instead, adjust the NCO only once per
+// CRF_WINDOW_MS on the drift integrated over the window (per-packet jitter
+// averages out), with the window endpoints EWMA-smoothed (÷2^FILT_SHIFT) to
+// attenuate endpoint RX jitter. The integral accumulates the FULL windowed
+// drift so the phase-convergence rate is unchanged vs per-packet.
+#define CRF_WINDOW_MS         32   // fixed servo window
+#define CRF_OFF_FILT_SHIFT     3   // EWMA on offset (÷8) for endpoint jitter
+
 // USB-source media-clock recovery (NCO follows the USB block FIFO). Used when
 // we are the USB→AVB talker + clock master and NOT locked to a CRF: servo the
 // NCO so AVTP consumption exactly tracks the USB host delivery rate, keeping
@@ -150,6 +160,11 @@ typedef struct {
     uint16_t crf_log_count;
     uint8_t  crf_log_postlock;     // entries logged since lock (freezes at 8)
     uint32_t crf_log_last_ms;
+
+    // Fixed-window CRF servo state (#2a)
+    int64_t  crf_off_filt;         // EWMA-smoothed offset (endpoint jitter filter)
+    int64_t  crf_off_win_start;    // crf_off_filt snapshot at window start
+    uint32_t crf_win_start_ms;     // window start (gptp_uptime_ms)
 } mcr_state_t;
 
 void mcr_init  (mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs);

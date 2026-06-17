@@ -132,6 +132,24 @@ typedef struct {
     const gptp_t *gptp;
     uint32_t gptp_locked_base;       // base_increment scaled by the gPTP rate ratio
     uint32_t pres_base_last;         // last value written to aaf_pkt pres_base (deadband)
+
+    // --- CRF convergence ring-log (instrument, mirrors the gPTP 'G' log) ----
+    // While a CRF stream is bound, a ~10ms-decimated snapshot of the recovery:
+    // offset (avtp-local), per-packet rate delta, NCO increment correction, and
+    // lock state. Time-decimated via gptp_uptime_ms (valid: CRF recovery needs
+    // gPTP locked) so a multi-second convergence fits 320 entries; freezes 8
+    // entries after lock so a later 'C' dump shows the whole curve. Pure
+    // observation -- touches no control path. Reset on each bind.
+    struct {
+        int32_t offset_ns;   // avtp_ts - local_ts at this snapshot (saturated)
+        int32_t delta_ns;    // last per-packet rate delta (saturated)
+        int32_t inc_delta;   // current_increment - base_increment (NCO correction)
+        uint8_t locked;      // servo_locked at this snapshot
+    } crf_log[320];
+    uint16_t crf_log_idx;
+    uint16_t crf_log_count;
+    uint8_t  crf_log_postlock;     // entries logged since lock (freezes at 8)
+    uint32_t crf_log_last_ms;
 } mcr_state_t;
 
 void mcr_init  (mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs);
@@ -155,6 +173,11 @@ void mcr_pump_hw(mcr_state_t *m);
 // Called once per main loop iteration; runs the PI servo if there's a
 // new sample. Safe to call when not bound (no-op).
 void mcr_servo_update(mcr_state_t *m);
+
+// Dump the CRF convergence ring-log over UART (console 'C'): bound state +
+// delta-jitter stats + per-snapshot (offset_ns, delta_ns, inc_delta, locked).
+// Diagnostic only -- shows the CRF media-clock recovery curve from one capture.
+void mcr_dump_conv_log(const mcr_state_t *m);
 
 // USB-source clock recovery: drive the NCO so the USB block FIFO stays at
 // `center`, i.e. AVTP consumption tracks the USB host's delivery rate. Call at

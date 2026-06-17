@@ -167,6 +167,11 @@ void mcr_bind(mcr_state_t *m, const uint8_t *stream_id)
     m->servo_locked   = 0;
     m->servo_step_count = 0;
     m->hw_rx_count    = 0;
+    // CRF convergence ring-log: fresh capture for this bind (instrument).
+    m->crf_log_idx      = 0;
+    m->crf_log_count    = 0;
+    m->crf_log_postlock = 0;
+    m->crf_log_last_ms  = 0;
     // Don't touch base_increment / current_increment — preserve servo state
     // across rebinds so the integrator's accumulated tuning isn't lost.
 
@@ -416,6 +421,79 @@ void mcr_servo_update(mcr_state_t *m)
         }
     }
     m->servo_step_count++;
+
+    // CRF convergence ring-log (instrument): ~10ms-decimated snapshot of the
+    // recovery (offset, rate delta, NCO correction, lock). ROLLING window (no
+    // freeze): CRF locks instantly (NCO starts at the gPTP rate ~= the CRF rate),
+    // so the useful view is STEADY-STATE jitter/hunting, not a convergence ramp.
+    // A 'C' dump always shows the last 320 entries (~3.2 s). Observation only.
+    {
+        uint32_t now_ms = gptp_uptime_ms();
+        if (m->crf_log_count == 0 || (uint32_t)(now_ms - m->crf_log_last_ms) >= 10) {
+            m->crf_log_last_ms = now_ms;
+            int64_t o = off, d = delta;
+            int64_t ic = (int64_t)m->current_increment - (int64_t)m->base_increment;
+            if (o >  2000000000LL) o =  2000000000LL;
+            if (o < -2000000000LL) o = -2000000000LL;
+            if (d >  2000000000LL) d =  2000000000LL;
+            if (d < -2000000000LL) d = -2000000000LL;
+            if (ic >  2000000000LL) ic =  2000000000LL;
+            if (ic < -2000000000LL) ic = -2000000000LL;
+            m->crf_log[m->crf_log_idx].offset_ns = (int32_t)o;
+            m->crf_log[m->crf_log_idx].delta_ns  = (int32_t)d;
+            m->crf_log[m->crf_log_idx].inc_delta = (int32_t)ic;
+            m->crf_log[m->crf_log_idx].locked    = m->servo_locked;
+            m->crf_log_idx = (uint16_t)((m->crf_log_idx + 1) % 320);
+            if (m->crf_log_count < 320) m->crf_log_count++;
+        }
+    }
+}
+
+// Dump the CRF convergence ring-log (console 'C'). Shows the recovery curve so
+// CRF media-clock lock + per-packet jitter are measurable from one capture.
+// offset_ns = avtp-local; delta_ns = per-packet rate error; inc_delta = NCO
+// increment correction; index is the time axis at ~10 ms/entry.
+void mcr_dump_conv_log(const mcr_state_t *m)
+{
+    uint16_t n     = m->crf_log_count;
+    uint16_t start = (n < 320) ? 0 : m->crf_log_idx;   // oldest entry (handles wrap)
+    int first_lock = -1;
+    for (uint16_t k = 0; k < n; k++) {
+        uint16_t i = (uint16_t)((start + k) % 320);
+        if (m->crf_log[i].locked) { first_lock = (int)k; break; }
+    }
+    // Range of the NCO correction + offset over the logged window — the NCO
+    // "hunt" magnitude is the before/after metric for the fixed-window change.
+    int32_t inc_min = 0x7fffffff, inc_max = -0x7fffffff - 1;
+    int32_t off_min = 0x7fffffff, off_max = -0x7fffffff - 1;
+    for (uint16_t k = 0; k < n; k++) {
+        uint16_t i = (uint16_t)((start + k) % 320);
+        int32_t ic = m->crf_log[i].inc_delta, of = m->crf_log[i].offset_ns;
+        if (ic < inc_min) inc_min = ic; if (ic > inc_max) inc_max = ic;
+        if (of < off_min) off_min = of; if (of > off_max) off_max = of;
+    }
+    printf("\n[CRF-CONV] entries=%u (~10 ms/entry)  bound=%d locked=%d\n",
+           (unsigned)n, m->bound, m->servo_locked);
+    printf("  jitter(rolling win): max|d|=%ld ns  avg|d|=%ld ns  outlier_rejects=%lu seq_err=%lu\n",
+           (long)m->delta_max_abs,
+           (long)(m->delta_window_count ? (m->delta_sum_abs / (int64_t)m->delta_window_count) : 0),
+           (unsigned long)m->servo_outlier_rejects, (unsigned long)m->seq_errors);
+    if (n)
+        printf("  NCO-hunt: inc_delta range [%ld..%ld] span=%ld units | offset range span=%ld ns\n",
+               (long)inc_min, (long)inc_max, (long)(inc_max - inc_min),
+               (long)(off_max - off_min));
+    if (first_lock >= 0)
+        printf("  LOCK at entry %d (~%d ms after first logged sample)\n",
+               first_lock, first_lock * 10);
+    else
+        printf("  (not locked within the logged window)\n");
+    printf("  idx   offset_ns    delta_ns   inc_delta  lk\n");
+    for (uint16_t k = 0; k < n; k++) {
+        uint16_t i = (uint16_t)((start + k) % 320);
+        printf("  %3u  %10ld  %10ld  %10ld   %u\n", (unsigned)k,
+               (long)m->crf_log[i].offset_ns, (long)m->crf_log[i].delta_ns,
+               (long)m->crf_log[i].inc_delta, (unsigned)m->crf_log[i].locked);
+    }
 }
 
 void mcr_pump_hw(mcr_state_t *m)

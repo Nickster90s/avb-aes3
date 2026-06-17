@@ -737,6 +737,9 @@ static void check_uart_cmd(void)
         case 'G':
             gptp_dump_conv_log(&gptp);
             break;
+        case 'C':
+            mcr_dump_conv_log(&mcr);
+            break;
         case 'h':
         case '?':
             printf("\n  s   status (gPTP / AVTP / SRP / AVDECC)\n"
@@ -749,6 +752,7 @@ static void check_uart_cmd(void)
                      "  D   force-clear all listener bindings (clears stale FAST_CONNECT)\n"
                      "  v   toggle verbose debug prints (SRP-RX / gPTP dump) — default OFF\n"
                      "  G   dump gPTP convergence ring-log (boot->lock curve)\n"
+                     "  C   dump CRF media-clock convergence ring-log (when bound)\n"
                      "  r   reboot\n"
                      "  h   help\n");
             break;

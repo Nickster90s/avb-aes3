@@ -132,10 +132,26 @@ class AAFPacketizer(LiteXModule):
     """
     def __init__(self, mcr, tsu, *, usb_sample_lo, usb_sample_hi,
                  usb_readable, channels=8, samples_per_packet=6,
-                 fifo_depth=64):
+                 fifo_depth=64, streams=1):
         dw = 32
         ch_bits  = max(1, log2_int(channels, need_pow2=False))
         blk_bits = max(1, log2_int(samples_per_packet, need_pow2=False))
+
+        # TIME-MUX geometry: `streams` AAF frames of `channels` each share one
+        # media clock and one USB ingress. The host delivers BLOCK_CH interleaved
+        # channels per media frame (ch0..ch47 for 6x8); the ring stores them in
+        # arrival order and the reader strides out each stream's 8-ch slice.
+        # Frame s sample (row r, slice-ch c) is at ring offset r*BLOCK_CH+s*ch+c;
+        # the reader advances +1 within a slice and +ROW_JUMP at the row boundary
+        # (proven in sims/sim_stride_timemux.py).
+        self.streams = streams
+        BLOCK_CH      = streams * channels                 # 48 for 6x8
+        ROW_JUMP      = BLOCK_CH - channels + 1             # 41: ch7 -> next row's slice
+        FRAME_SAMPLES = channels * samples_per_packet       # 48 samples in one AAF frame
+        BLOCK_SAMPLES = BLOCK_CH * samples_per_packet        # 288 ring samples per block
+        # samp_hi channel-index field width; `first` marker sits just above it.
+        first_bit     = max(1, (BLOCK_CH - 1).bit_length()) # 6 for 48ch, 3 for 8ch
+        st_bits       = max(1, log2_int(streams, need_pow2=False))
 
         # ---- Frame geometry (computed once, Python-side) ----
         HDR_LEN  = 42                                 # 14 eth + 4 vlan + 24 avtp
@@ -169,8 +185,15 @@ class AAFPacketizer(LiteXModule):
         self.src_mac_lo    = CSRStorage(32, description="Source MAC [31:0].")
         self.dst_mac_hi    = CSRStorage(16, description="Dest MAC [47:32] (SRP/ACMP learned multicast).")
         self.dst_mac_lo    = CSRStorage(32, description="Dest MAC [31:0].")
-        self.stream_id_hi  = CSRStorage(32, description="AVTP stream_id [63:32] (byte0 = bits[31:24]).")
-        self.stream_id_lo  = CSRStorage(32, description="AVTP stream_id [31:0].")
+        # TIME-MUX: dst_mac + stream_id are PER-STREAM (indirect-addressed to keep
+        # the CSR count low — see [[csr-mux-explodes-sys-clk]]). Firmware writes
+        # ctx_select=s, then dst_mac_hi/lo + stream_id_hi/lo; the gateware latches
+        # each {hi,lo} into context[s] on the _lo write strobe. streams=1 reduces
+        # to the original single binding (ctx_select always 0).
+        self.ctx_select    = CSRStorage(max(1, st_bits),
+                             description="Per-stream binding context index (0..streams-1) for the writes below.")
+        self.stream_id_hi  = CSRStorage(32, description="AVTP stream_id [63:32] for context ctx_select (latched on stream_id_lo write).")
+        self.stream_id_lo  = CSRStorage(32, description="AVTP stream_id [31:0] for context ctx_select (write LAST -> latches the pair).")
         self.vlan_tci      = CSRStorage(16, reset=(3 << 13) | 2,
                              description="802.1Q TCI = (pcp<<13)|vid. Class A default pcp=3, vid=2.")
         self.pres_offset   = CSRStorage(32, reset=2_000_000,
@@ -225,9 +248,13 @@ class AAFPacketizer(LiteXModule):
         # (pink noise, ch1/3/5/6, ch2/4) exist anymore — only BRAM is wide. depth
         # = 8x the old frame depth (same buffering time). Read pipeline verified in
         # /tmp/sim_sring.py.
-        SRING_DEPTH = fifo_depth * channels        # samples
-        assert (SRING_DEPTH & (SRING_DEPTH - 1)) == 0, "sample-ring depth must be pow2"
-        log2depth = log2_int(SRING_DEPTH)
+        # Ring holds BLOCK_CH-interleaved samples; depth = next pow2 >= the buffer
+        # requirement. 48 is not pow2, but the depth still IS (the pow2 mask just
+        # wraps the address; blocks are logically contiguous so the strided read
+        # mask-wraps correctly).
+        _need_depth = fifo_depth * BLOCK_CH        # samples of buffering wanted
+        SRING_DEPTH = 1 << max(1, (_need_depth - 1).bit_length())
+        log2depth   = log2_int(SRING_DEPTH)
         # 36-bit entries: the 32 sample bits are spread to AVOID the RAMB36 parity
         # positions (8,17,26,35), which nextpnr-xilinx drops when packing a 32-bit
         # BRAM (observed: input 0xFFFFFFFF -> 0xFBFDFEFF, mask 0x04020100 = bits
@@ -253,13 +280,17 @@ class AAFPacketizer(LiteXModule):
         # block_level for the wrapper PI servo — SAME scale as the old frame level
         # (samples >> 3 = frames), so the servo CENTER/KP/clamps carry over with no
         # change to the wrapper or the .v.
+        # Scale the ring fill to 0..128 (servo CENTER=64) regardless of BLOCK_CH:
+        # SRING_DEPTH >> _bl_sh == 128, so a half-full ring reads ~64. (8ch: shift
+        # 5 == the old >>5; 48ch ring 32768 -> shift 8.)
+        _bl_sh = log2depth - 7
         self.block_level = Signal(max=fifo_depth + 1)
         self.comb += If(level < 0,
             self.block_level.eq(0),
-        ).Elif((level >> 5) > fifo_depth,
+        ).Elif((level >> _bl_sh) > fifo_depth,
             self.block_level.eq(fifo_depth),
         ).Else(
-            self.block_level.eq(level >> 5),   # samples(0..4096) -> 0..128, servo CENTER=mid
+            self.block_level.eq(level >> _bl_sh),   # ring samples -> 0..128, CENTER=mid
         )
         level_u = Signal(max=fifo_depth + 1)
         self.comb += level_u.eq(self.block_level)   # fifo_level CSR = frame-equiv
@@ -272,20 +303,23 @@ class AAFPacketizer(LiteXModule):
         # channel-aligned. Register the bridge output first (stable, timing-clean).
         do_pop = usb_readable
         samp_lo_r = Signal(32)
-        samp_hi_r = Signal(4)            # bits 0..2 = channel, bit 3 = first
+        samp_hi_r = Signal(first_bit + 1)   # [0:first_bit]=channel(0..BLOCK_CH-1), [first_bit]=first
         samp_vld  = Signal()
         self.sync += [
             samp_vld.eq(do_pop),
             If(do_pop,
                 samp_lo_r.eq(usb_sample_lo),
-                samp_hi_r.eq(usb_sample_hi[0:4]),
+                samp_hi_r.eq(usb_sample_hi[0:first_bit + 1]),
             ),
         ]
-        first  = samp_hi_r[3]
+        first  = samp_hi_r[first_bit]               # block channel-0 marker
         samp32 = samp_lo_r                          # true 32-bit, no truncation
         en = self.enable.storage
-        started   = Signal()                        # high once the first ch0 seen
-        ch0_phase = Signal(ch_bits)                 # low addr bits where ch0 lands
+        started   = Signal()                        # high once the first block-ch0 seen
+        # ANCHOR-ONCE block alignment (48 is not pow2, so no & mask). rd_anchor =
+        # the ring address where the first block-ch0 after enable lands; the reader
+        # starts there and consumes whole BLOCK_SAMPLES, staying block-aligned.
+        rd_anchor = Signal(32)
         # Drop new samples only if the ring is genuinely full (startup transient);
         # the servo keeps it centred so this never fires in steady state.
         have_space = Signal()
@@ -306,11 +340,10 @@ class AAFPacketizer(LiteXModule):
             If(~en, started.eq(0)).Elif(samp_vld & first, started.eq(1)),
             If(do_write,
                 wr.eq(wr + 1),
-                # Record the low address bits where ch0 is written. All ch0s share
-                # these bits (writes are sequential), so the reader can snap to a
-                # ch0. Updates if a drop (en low on ACMP re-bind) shifts the phase.
-                If(first, ch0_phase.eq(wr[0:ch_bits])),
             ),
+            # Capture the read anchor at the FIRST block-ch0 after enable (the wr
+            # address where that ch0 is being written). Set once per enable.
+            If(en & ~started & samp_vld & first & have_space, rd_anchor.eq(wr)),
         ]
 
         # =========================================================
@@ -325,7 +358,7 @@ class AAFPacketizer(LiteXModule):
         # Prime to half-full (in SAMPLES) before consuming real audio; until then
         # the builder emits silence so the listener (AxC) can still lock.
         primed  = Signal()
-        _center = (fifo_depth // 2) * channels
+        _center = SRING_DEPTH // 2                    # half the ring, in samples
         self.sync += [If(~en, primed.eq(0)).Elif(level >= _center, primed.eq(1))]
         strobe = Signal()
         self.comb += strobe.eq(mcr.sample_strobe & en)
@@ -346,12 +379,28 @@ class AAFPacketizer(LiteXModule):
 
         # 3) Header byte vector (LSB index = first byte on the wire)
         # =========================================================
+        # Per-stream binding contexts (indirect-written above). dst_mac + stream_id
+        # are selected by `stream_idx` (the frame being built); src_mac/tci/pres are
+        # shared. Array indexing -> a clean Case mux (NOT a barrel shift), safe on
+        # openXC7. seq is per-stream.
+        sid_arr  = Array([Signal(64) for _ in range(streams)])
+        dmac_arr = Array([Signal(48) for _ in range(streams)])
+        seq_arr  = Array([Signal(8)  for _ in range(streams)])
+        ctx_sel  = self.ctx_select.storage
+        self.sync += [
+            If(self.stream_id_lo.re,
+               sid_arr[ctx_sel].eq(Cat(self.stream_id_lo.storage, self.stream_id_hi.storage))),
+            If(self.dst_mac_lo.re,
+               dmac_arr[ctx_sel].eq(Cat(self.dst_mac_lo.storage, self.dst_mac_hi.storage))),
+        ]
+
+        stream_idx = Signal(max=streams) if streams > 1 else Signal()
         src_mac = Cat(self.src_mac_lo.storage, self.src_mac_hi.storage)   # [0:48], byte0 = [40:48]
-        dst_mac = Cat(self.dst_mac_lo.storage, self.dst_mac_hi.storage)
-        sid     = Cat(self.stream_id_lo.storage, self.stream_id_hi.storage)  # [0:64], byte0 = [56:64]
+        dst_mac = dmac_arr[stream_idx]                                    # selected context
+        sid     = sid_arr[stream_idx]                                     # [0:64], byte0 = [56:64]
         tci     = self.vlan_tci.storage
 
-        seq  = Signal(8)
+        seq  = seq_arr[stream_idx]                                        # per-stream sequence_num
         pres = Signal(32)
 
         # ---- Deterministic CRF-dilated presentation-time ramp (gst-avtp model) ----
@@ -457,9 +506,8 @@ class AAFPacketizer(LiteXModule):
         # (the per-channel muxes AND the wide shift registers are both gone).
         cur_byte   = Signal(8)
         samp_hold  = Signal(32)
-        rdf        = Signal(32)              # ring fetch pointer (leads rd by 1)
+        rdf        = Signal(32)              # strided ring fetch address (combinational)
         pkt_primed = Signal()                # `primed` latched at packet start
-        self.comb += rp.adr.eq(rdf[0:log2depth])
         # Strip the parity-position dummy bits back out -> the original 32-bit sample.
         samp_rd = Signal(32)
         self.comb += samp_rd.eq(Cat(rp.dat_r[0:8], rp.dat_r[9:17],
@@ -480,24 +528,32 @@ class AAFPacketizer(LiteXModule):
         lane = byte_idx[0:2]
         widx = byte_idx[2:]
 
-        # Self-aligning read: snap rd forward 0..7 samples so the packet's first
-        # sample is a ch0 (rd low bits == ch0_phase). When already aligned the snap
-        # is 0; after a phase shift (drop) it costs one re-sync of <8 samples then
-        # stays aligned (48/packet is a multiple of 8). Robust to the startup race.
-        rd_skip    = Signal(ch_bits)
-        rd_aligned = Signal(32)
-        self.comb += [
-            rd_skip.eq((ch0_phase - rd[0:ch_bits]) & (channels - 1)),
-            rd_aligned.eq(rd + rd_skip),
-        ]
+        # TIME-MUX strided read: `sc` = the sample index (0..FRAME_SAMPLES-1) being
+        # PREFETCHED on rp.adr; samp_hold lags it by one. Frame `stream_idx` reads
+        # its `channels`-wide slice: address = rd(block base) + row*BLOCK_CH +
+        # stream_idx*channels + ch, with row=sc//channels, ch=sc%channels (proven in
+        # sims/sim_stride_timemux.py). row*BLOCK_CH is a constant shift-add (no DSP).
+        sc       = Signal(max=FRAME_SAMPLES + 2)
+        sc_row   = sc[ch_bits:]
+        _rowexpr = None
+        for _b in range(BLOCK_CH.bit_length()):
+            if (BLOCK_CH >> _b) & 1:
+                _t = sc_row << _b
+                _rowexpr = _t if _rowexpr is None else (_rowexpr + _t)
+        row_off  = Signal(max=BLOCK_CH * samples_per_packet + channels + 1)
+        self.comb += row_off.eq(_rowexpr if _rowexpr is not None else 0)
+        self.comb += rdf.eq(rd + row_off + (stream_idx << ch_bits) + sc[0:ch_bits])
+        self.comb += rp.adr.eq(rdf[0:log2depth])
+        aligned_once = Signal()   # read anchored to the first block (anchor-once align)
         fsm = FSM(reset_state="IDLE")
         self.submodules.fsm = fsm
         fsm.act("IDLE",
             If(send_req,
                 NextValue(byte_idx, 0),
-                NextValue(rd,  rd_aligned),       # snap to the next ch0 boundary
-                NextValue(rdf, rd_aligned),       # fetch pointer = packet's first sample
-                NextValue(pkt_primed, primed),    # whole packet is silence OR audio
+                NextValue(sc, 0),                 # prefetch sample 0 of frame 0
+                NextValue(stream_idx, 0),         # first stream of the block
+                NextValue(pkt_primed, primed),    # whole block is silence OR audio
+                If(~aligned_once, NextValue(rd, rd_anchor)),  # first block: anchor the read
                 NextState("BUILD"),
             ),
         )
@@ -510,10 +566,12 @@ class AAFPacketizer(LiteXModule):
         self.sync += [
             If(~en,
                 anchored.eq(0),
+                aligned_once.eq(0),               # re-anchor the read on re-enable
             ).Elif(do_emit,
                 pres_acc.eq(new_acc),
                 pres.eq(new_acc[_PRES_F:_PRES_F + 32]),
                 anchored.eq(1),
+                aligned_once.eq(1),
             ),
         ]
         # BUILD: one byte/cycle into wacc; commit a word every 4th byte and on
@@ -537,12 +595,11 @@ class AAFPacketizer(LiteXModule):
             # A silence packet (~pkt_primed) holds samp_hold=0 and does NOT advance
             # rd, so the ring fills until primed; 48 samples/packet keeps ch-align.
             If(pkt_primed,
-                If(byte_idx == 0, NextValue(rdf, rd + 1)),
-                If(byte_idx == 1, NextValue(samp_hold, samp_rd)),
+                If(byte_idx == 0, NextValue(sc, 1)),         # prefetch sample 1 during header
+                If(byte_idx == 1, NextValue(samp_hold, samp_rd)),   # latch sample 0
                 If((byte_idx >= HDR_LEN) & (pi[0:2] == 3),
-                    NextValue(samp_hold, samp_rd),
-                    NextValue(rdf, rdf + 1),
-                    NextValue(rd,  rd + 1),
+                    NextValue(samp_hold, samp_rd),           # latch the prefetched sample
+                    NextValue(sc, sc + 1),                   # strided fetch advances via rdf(sc)
                 ),
             ).Else(
                 NextValue(samp_hold, 0),
@@ -571,8 +628,19 @@ class AAFPacketizer(LiteXModule):
             If(source.ready,
                 If(source.last,
                     NextValue(pkt_count, pkt_count + 1),
-                    NextValue(seq, seq + 1),
-                    NextState("IDLE"),
+                    NextValue(seq, seq + 1),                 # per-stream (seq = seq_arr[stream_idx])
+                    If(stream_idx != (streams - 1),
+                        # More frames in this block: build the next stream's slice
+                        # from the SAME 288-sample block (rd unchanged).
+                        NextValue(stream_idx, stream_idx + 1),
+                        NextValue(byte_idx, 0),
+                        NextValue(sc, 0),
+                        NextState("BUILD"),
+                    ).Else(
+                        # Block done: consume BLOCK_SAMPLES (audio only) + re-arm.
+                        If(pkt_primed, NextValue(rd, rd + BLOCK_SAMPLES)),
+                        NextState("IDLE"),
+                    ),
                 ).Else(
                     NextValue(rd_idx, rd_idx + 1),
                 ),

@@ -514,6 +514,9 @@ static void check_uart_cmd(void)
                    (unsigned long)mcr.base_frequency,
                    mcr.timestamp_interval, mcr.timestamps_per_pdu,
                    mcr.type, mcr.pull);
+            printf("  CRF-RATE(phc): cs=%u valid=%u warmup=%u/%u ppb=%ld last_err=%ld\n",
+                   mcr.cs, mcr.crf_rate_valid, mcr.crf_meas_count, CRF_MEAS_SAMPLES,
+                   (long)(int32_t)mcr.crf_ppb_filt, (long)(int32_t)mcr.crf_last_err_ppb);
             printf("  offset_ns=%08lx_%08lx integral=%08lx_%08lx\n",
                    (unsigned long)(uint32_t)(mcr.latest_offset_ns >> 32),
                    (unsigned long)(uint32_t)mcr.latest_offset_ns,

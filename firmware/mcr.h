@@ -40,6 +40,11 @@
 #define CRF_WINDOW_MS         32   // fixed servo window
 #define CRF_OFF_FILT_SHIFT     3   // EWMA on offset (÷8) for endpoint jitter
 
+// phc_freq_sync-style CRF rate recovery (intra-packet avtp-spacing -> IIR LPF).
+#define CRF_PPB_SHIFT          4        // IIR alpha = 1/16 (open-loop low-pass)
+#define CRF_MEAS_SAMPLES      16        // warmup packets before crf_rate_valid
+#define CRF_PPB_OUTLIER   300000        // reject |err| > 300 ppm (loss / epoch blip)
+
 // USB-source media-clock recovery (NCO follows the USB block FIFO). Used when
 // we are the USB→AVB talker + clock master and NOT locked to a CRF: servo the
 // NCO so AVTP consumption exactly tracks the USB host delivery rate, keeping
@@ -166,10 +171,19 @@ typedef struct {
     uint8_t  crf_log_postlock;     // entries logged since lock (freezes at 8)
     uint32_t crf_log_last_ms;
 
-    // Fixed-window CRF servo state (#2a)
+    // Fixed-window CRF servo state (#2a) — legacy (avtp-vs-local) diagnostics only
     int64_t  crf_off_filt;         // EWMA-smoothed offset (endpoint jitter filter)
     int64_t  crf_off_win_start;    // crf_off_filt snapshot at window start
     uint32_t crf_win_start_ms;     // window start (gptp_uptime_ms)
+
+    // phc_freq_sync-style CRF RATE recovery (intra-packet avtp-spacing). The
+    // media rate is recovered from the avtp TIMESTAMP SPACING (which encodes the
+    // talker's media clock), open-loop, IIR-smoothed -- NOT a PI integrator and
+    // NOT the rate-insensitive (avtp - local) offset. See mcr.c mcr_process_rx.
+    int64_t  crf_ppb_filt;         // IIR-smoothed rate deviation from nominal (ppb, signed)
+    int64_t  crf_last_err_ppb;     // most recent raw per-packet error (diagnostics)
+    uint16_t crf_meas_count;       // warmup sample counter (-> crf_rate_valid)
+    uint8_t  crf_rate_valid;       // 1 once warmed up: NCO tracks the recovered CRF rate
 } mcr_state_t;
 
 void mcr_init  (mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs);

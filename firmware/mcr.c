@@ -24,6 +24,20 @@ static inline uint64_t be64(const uint8_t *p) {
     return ((uint64_t)be32(p) << 32) | be32(p + 4);
 }
 
+// CRF pull factor as a rational num/den (IEEE 1722-2016 Table 28). effective
+// media rate = base_frequency * num / den. Mirrors phc_freq_sync apply_pull().
+static inline void crf_pull_frac(uint8_t pull, uint32_t *num, uint32_t *den) {
+    switch (pull) {
+        case 1: *num = 1000;  *den = 1001;  break;   // base / 1.001  (e.g. 44.1k pulldown)
+        case 2: *num = 1001;  *den = 1000;  break;   // base * 1.001
+        case 3: *num = 24;    *den = 25;    break;   // base * 24/25
+        case 4: *num = 25;    *den = 24;    break;   // base * 25/24
+        case 5: *num = 10000; *den = 10001; break;   // base / 1.0001
+        case 6: *num = 10001; *den = 10000; break;   // base * 1.0001
+        default:*num = 1;     *den = 1;     break;   // pull 0 = 1/1
+    }
+}
+
 void mcr_init(mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs)
 {
     memset(m, 0, sizeof(*m));
@@ -61,6 +75,9 @@ void mcr_set_clock_source(mcr_state_t *m, uint8_t cs)
     m->servo_integral     = 0;
     m->servo_locked       = 0;
     m->lock_streak        = 0;
+    m->crf_meas_count     = 0;   // restart avtp-spacing rate-recovery warmup
+    m->crf_rate_valid     = 0;
+    m->crf_ppb_filt       = 0;
     m->crf_log_idx        = 0;
     m->crf_log_count      = 0;
     m->crf_log_last_ms    = 0;
@@ -159,6 +176,18 @@ void mcr_watchdog_tick(mcr_state_t *m, uint32_t now_ms)
         // Servo path will take over; clear the reset flag so a future
         // stale event triggers another snap-back.
         m->watchdog_reset_active  = 0;
+        // During the avtp-spacing rate-recovery WARMUP (before crf_rate_valid)
+        // hold the NCO at the gPTP base -- a good seed since the CRF rate is
+        // within ppm of gPTP. mcr_process_rx takes over the exact recovered rate
+        // once warmed up (then it owns current_increment; we don't fight it).
+        if (!m->crf_rate_valid) {
+            uint32_t d2 = (gbase > m->current_increment) ? gbase - m->current_increment
+                                                          : m->current_increment - gbase;
+            if (d2 > MCR_GPTP_DEADBAND) {
+                m->current_increment = gbase;
+                mcr_increment_write(gbase);
+            }
+        }
         return;
     }
     uint32_t age_ms = now_ms - m->last_rx_check_ms;
@@ -170,6 +199,8 @@ void mcr_watchdog_tick(mcr_state_t *m, uint32_t now_ms)
             m->have_prev            = 0;
             m->servo_locked         = 0;
             m->lock_streak          = 0;
+            m->crf_meas_count       = 0;   // restart avtp-spacing rate-recovery warmup
+            m->crf_rate_valid       = 0;
             m->watchdog_reset_active = 1;
             printf("[MCR] CRF stale %lums — increment snapped to base\n",
                    (unsigned long)age_ms);
@@ -193,6 +224,10 @@ void mcr_bind(mcr_state_t *m, const uint8_t *stream_id)
     m->servo_locked   = 0;
     m->servo_step_count = 0;
     m->hw_rx_count    = 0;
+    // phc_freq_sync-style avtp-spacing rate recovery: fresh warmup per bind.
+    m->crf_meas_count = 0;
+    m->crf_rate_valid = 0;
+    m->crf_ppb_filt   = 0;
     // CRF convergence ring-log: fresh capture for this bind (instrument).
     m->crf_log_idx      = 0;
     m->crf_log_count    = 0;
@@ -305,6 +340,70 @@ void mcr_process_rx(mcr_state_t *m, const uint8_t *frame, uint32_t len)
     // minimizing residual transit time spread.
     const uint8_t *ts_array = pdu + CRF_HDR_LEN;
     uint64_t avtp_ts = be64(ts_array + 8 * (ts_count - 1));
+
+    // ---- phc_freq_sync-style CRF RATE recovery (THE media rate) ------------
+    // Recover the rate from the avtp TIMESTAMP SPACING, which directly encodes
+    // the talker's media clock. We measure INTRA-packet: dt = last_ts - first_ts
+    // spans (ts_count-1)*timestamp_interval media events -- immune to our RX
+    // latency, to network jitter, AND to packet loss (one PDU). Compare to the
+    // expected gPTP-ns for those events at the nominal rate; the deviation IS the
+    // CRF-vs-nominal rate error. It is an OPEN-LOOP measurement (our NCO can't
+    // influence the next packet), so we smooth it with a single-pole IIR -- NOT a
+    // PI integrator (which winds up on an open-loop input -- that was the ~131ppm
+    // bias that dropped the audio). Ref: avdecc-endpoint/tools/phc_freq_sync.c
+    // (--src=crf), GenAVB avtp/crf.c crf_measure_period.
+    // Pick the timestamp spacing: prefer INTRA-packet (last_ts - first_ts, immune
+    // to packet loss); fall back to INTER-packet when the PDU carries a single
+    // timestamp (this AxC stream: ts/pdu=1) using the previous packet's ts, still
+    // in latest_avtp_ts (updated below, after this block). events = media events
+    // spanned by that gap.
+    int64_t  d_avtp    = 0;
+    uint64_t events    = 0;
+    int      have_meas = 0;
+    if (ts_count >= 2) {
+        d_avtp    = (int64_t)(avtp_ts - be64(ts_array));
+        events    = (uint64_t)(ts_count - 1) * m->timestamp_interval;
+        have_meas = 1;
+    } else if (m->have_latest) {
+        d_avtp    = (int64_t)(avtp_ts - m->latest_avtp_ts);
+        events    = (uint64_t)m->timestamps_per_pdu * m->timestamp_interval;
+        have_meas = 1;
+    }
+    if (have_meas && m->base_frequency && m->timestamp_interval && events) {
+        uint32_t pnum, pden;
+        crf_pull_frac(m->pull, &pnum, &pden);
+        int64_t  expected = (int64_t)((events * 1000000000ull * pden) /
+                                      ((uint64_t)m->base_frequency * pnum));
+        if (expected > 0) {
+            int64_t err_ppb = ((d_avtp - expected) * 1000000000ll) / expected;
+            if (err_ppb < CRF_PPB_OUTLIER && err_ppb > -CRF_PPB_OUTLIER) {
+                m->crf_last_err_ppb = err_ppb;
+                if (m->crf_meas_count == 0)
+                    m->crf_ppb_filt = err_ppb;                       // seed (no startup transient)
+                else
+                    m->crf_ppb_filt += (err_ppb - m->crf_ppb_filt) >> CRF_PPB_SHIFT;
+                if (m->crf_meas_count < CRF_MEAS_SAMPLES) {
+                    m->crf_meas_count++;
+                    if (m->crf_meas_count >= CRF_MEAS_SAMPLES) m->crf_rate_valid = 1;
+                }
+                // Apply the recovered rate when CRF is the selected clock (cs=1).
+                // inc = gptp_locked_base * (1 - err) : start from the gPTP-
+                // disciplined base (carries our crystal correction) and apply the
+                // measured CRF-vs-nominal deviation on top. err>0 (ts more spaced)
+                // => CRF slower => lower inc.
+                if (m->cs == 1 && m->crf_rate_valid) {
+                    int64_t corr = ((int64_t)m->gptp_locked_base * m->crf_ppb_filt)
+                                   / 1000000000ll;
+                    int64_t inc  = (int64_t)m->gptp_locked_base - corr;
+                    if (inc < 1) inc = 1;
+                    m->current_increment = (uint32_t)inc;
+                    mcr_increment_write(m->current_increment);
+                    m->servo_locked = 1;
+                }
+            }
+        }
+    }
+    // ------------------------------------------------------------------------
 
     ptp_timestamp_t rx = gptp_read_rx_timestamp();
     uint64_t local_ts = (uint64_t)rx.seconds * 1000000000ull + rx.nanoseconds;
@@ -419,42 +518,14 @@ void mcr_servo_update(mcr_state_t *m)
         m->crf_win_start_ms  = now_ms;
         int64_t avg_drift = rate_err / (int64_t)dt_ms;               // per-ms drift
 
-        m->servo_integral += rate_err;                              // total phase drift
-        if (m->servo_integral >  MCR_INTEGRAL_CLAMP) m->servo_integral =  MCR_INTEGRAL_CLAMP;
-        if (m->servo_integral < -MCR_INTEGRAL_CLAMP) m->servo_integral = -MCR_INTEGRAL_CLAMP;
-
-        int64_t p_term = (avg_drift         * MCR_KP_NUM) / MCR_KP_DEN;
-        int64_t i_term = (m->servo_integral * MCR_KI_NUM) / MCR_KI_DEN;
-        int64_t correction = -(p_term + i_term);
-        if (correction >  MCR_INCREMENT_MAX_DELTA) correction =  MCR_INCREMENT_MAX_DELTA;
-        if (correction < -MCR_INCREMENT_MAX_DELTA) correction = -MCR_INCREMENT_MAX_DELTA;
-        int64_t inc = (int64_t)m->base_increment + correction;
-        if (inc < 1) inc = 1;
-        if (inc > 0xFFFFFFFFLL) inc = 0xFFFFFFFFLL;
-        m->current_increment = (uint32_t)inc;
-        mcr_increment_write(m->current_increment);
-
-        // Lock hysteresis on the windowed per-ms drift (fast enter, slow exit).
-        #define MCR_LOCK_ENTER_NS    2000
-        #define MCR_LOCK_EXIT_NS    10000
-        #define MCR_LOCK_ENTER_STREAK  1
-        #define MCR_LOCK_EXIT_STREAK   4
-        int64_t abs_drift = (avg_drift < 0) ? -avg_drift : avg_drift;
-        if (m->servo_locked) {
-            if (abs_drift > MCR_LOCK_EXIT_NS) {
-                if (m->lock_streak < MCR_LOCK_EXIT_STREAK) m->lock_streak++;
-                if (m->lock_streak >= MCR_LOCK_EXIT_STREAK) { m->servo_locked = 0; m->lock_streak = 0; }
-            } else {
-                m->lock_streak = 0;
-            }
-        } else {
-            if (abs_drift < MCR_LOCK_ENTER_NS) {
-                if (m->lock_streak < MCR_LOCK_ENTER_STREAK) m->lock_streak++;
-                if (m->lock_streak >= MCR_LOCK_ENTER_STREAK) { m->servo_locked = 1; m->lock_streak = 0; }
-            } else {
-                m->lock_streak = 0;
-            }
-        }
+        // The media-clock RATE and LOCK are now driven by the phc_freq_sync-style
+        // avtp-timestamp-spacing recovery in mcr_process_rx. This legacy windowed
+        // (avtp_ts - local_ts) offset is RATE-INSENSITIVE (both sides gPTP-locked
+        // advance together) so it CANNOT recover the rate -- the old PI servo just
+        // integrated startup jitter into a ~131ppm bias that dropped the audio. We
+        // keep this window only to feed the 'C' instrument's offset/drift view; no
+        // NCO write, no lock decision here.
+        (void)avg_drift;
         m->servo_step_count++;
     }
 

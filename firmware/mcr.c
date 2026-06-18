@@ -48,6 +48,29 @@ void mcr_set_gptp(mcr_state_t *m, const gptp_t *g)
     m->pres_base_last   = 0;   // force the first pres_base CSR write
 }
 
+void mcr_set_clock_source(mcr_state_t *m, uint8_t cs)
+{
+    cs = (cs == 1) ? 1 : 0;
+    if (cs == m->cs) return;
+    m->cs = cs;
+    // Re-baseline so the switch converges cleanly: snap the NCO to the gPTP base
+    // immediately (safe default). cs=1 re-converges to CRF once samples arrive;
+    // cs=0 holds the gPTP-disciplined base and ignores any bound CRF stream.
+    m->have_prev          = 0;
+    m->servo_consumed     = 1;
+    m->servo_integral     = 0;
+    m->servo_locked       = 0;
+    m->lock_streak        = 0;
+    m->crf_log_idx        = 0;
+    m->crf_log_count      = 0;
+    m->crf_log_last_ms    = 0;
+    m->current_increment  = m->gptp_locked_base;
+    mcr_increment_write(m->gptp_locked_base);
+    m->watchdog_reset_active = 1;
+    printf("[MCR] clock source -> %s\n",
+           cs == 1 ? "CRF (input stream)" : "gPTP (internal)");
+}
+
 // Compute the NCO increment that produces exactly 48000 gPTP-Hz. The nominal
 // base_increment makes the NCO emit 48000 at the NOMINAL sys_clk; the actual
 // crystal is off by tens of ppm. gPTP already measures that error and applies
@@ -112,11 +135,14 @@ void mcr_watchdog_tick(mcr_state_t *m, uint32_t now_ms)
         aaf_pkt_pres_base_write(gbase);
     }
 
-    if (!m->bound) {
-        // Not bound — free-run the NCO at the gPTP-DISCIPLINED base (exactly
-        // 48000 gPTP-Hz), NOT the raw nominal-crystal base. Covers both
-        // "never bound since boot" and "user disconnected CRF". Re-apply when
-        // it moves beyond the deadband so it tracks the gPTP servo.
+    if (m->cs != 1 || !m->bound) {
+        // Follow the gPTP-DISCIPLINED base (exactly 48000 gPTP-Hz), NOT the raw
+        // nominal-crystal base. This path runs whenever CRF is NOT the active
+        // media clock: clock source = gPTP/internal (cs=0, even if a CRF stream
+        // is connected -- it is IGNORED), or no CRF bound. Re-apply when it moves
+        // beyond the deadband so it tracks the gPTP servo. THIS is what keeps a
+        // cs=0 endpoint on pure gPTP and prevents a stray CRF binding from
+        // pulling the media clock off-rate (the "out of sync after a while" bug).
         uint32_t d2 = (gbase > m->current_increment) ? gbase - m->current_increment
                                                       : m->current_increment - gbase;
         if (!m->watchdog_reset_active || d2 > MCR_GPTP_DEADBAND) {
@@ -331,7 +357,10 @@ void mcr_usb_lock(mcr_state_t *m, int fifo_level, int center)
 
 void mcr_servo_update(mcr_state_t *m)
 {
-    if (!m->bound || m->servo_consumed) return;
+    // cs=1 only: the CRF servo drives the NCO solely when CRF is the selected
+    // clock source. At cs=0 the NCO follows gPTP (mcr_watchdog_tick) and a
+    // connected CRF stream is ignored. (mcr_pump_hw still drains the FIFO.)
+    if (!m->bound || m->servo_consumed || m->cs != 1) return;
     m->servo_consumed = 1;
 
     int64_t off = m->latest_offset_ns;

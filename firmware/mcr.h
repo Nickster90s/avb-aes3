@@ -140,6 +140,11 @@ typedef struct {
     // watchdog tick; also pushed to the AAF packetizer's pres_base CSR so the
     // presentation-time ramp uses the SAME reference (no double correction).
     const gptp_t *gptp;
+    // AVDECC clock source select (CLOCK_DOMAIN.clock_source_index): 0 = INTERNAL
+    // (pure gPTP-disciplined NCO; a connected CRF stream is IGNORED), 1 = INPUT
+    // STREAM (CRF servo drives the NCO when bound). Set via mcr_set_clock_source
+    // from the AVDECC SET_CLOCK_SOURCE callback. Default 0.
+    uint8_t  cs;
     uint32_t gptp_locked_base;       // base_increment scaled by the gPTP rate ratio
     uint32_t pres_base_last;         // last value written to aaf_pkt pres_base (deadband)
 
@@ -171,6 +176,10 @@ void mcr_init  (mcr_state_t *m, uint32_t sys_clk_freq, uint32_t fs);
 // Give the MCR a gPTP handle so it can discipline the free-running (cs=0) NCO
 // to the network media rate. Call once after mcr_init + gptp_init.
 void mcr_set_gptp(mcr_state_t *m, const gptp_t *g);
+// Select the media clock source (AVDECC SET_CLOCK_SOURCE). 0 = INTERNAL/gPTP
+// (ignore CRF), 1 = CRF input stream. Re-baselines the servo + snaps the NCO to
+// the gPTP base so the switch converges cleanly.
+void mcr_set_clock_source(mcr_state_t *m, uint8_t cs);
 void mcr_bind  (mcr_state_t *m, const uint8_t *stream_id);
 void mcr_unbind(mcr_state_t *m);
 

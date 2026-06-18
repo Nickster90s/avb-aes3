@@ -971,6 +971,17 @@ static void on_listener_disconnect(uint16_t uid)
     }
 }
 
+// AVDECC SET_CLOCK_SOURCE → gate the MCR media clock source so the AVDECC clock
+// model is actually honoured: index 1 = CRF input stream (CRF servo drives the
+// NCO when bound), anything else = INTERNAL/gPTP (pure gPTP NCO; a connected CRF
+// stream is ignored). Without this, the media clock was decided purely by CRF
+// bind-state regardless of cs -> a cs=0 endpoint with a stray CRF binding got
+// pulled off pure gPTP and drifted.
+static void on_clock_source_change(uint16_t src_idx)
+{
+    mcr_set_clock_source(&mcr, (src_idx == 1) ? 1 : 0);
+}
+
 // ---------------------------------------------------------------------------
 // USB → AAF bridge drain (task #67)
 //
@@ -1184,6 +1195,9 @@ int main(void)
     avdecc.on_talker_disconnect = on_talker_disconnect;
     avdecc.on_listener_connect  = on_listener_connect;
     avdecc.on_listener_disconnect = on_listener_disconnect;
+    avdecc.on_clock_source_change = on_clock_source_change;
+    // Align the MCR with the entity's initial clock source (default 0 = gPTP).
+    mcr_set_clock_source(&mcr, (avdecc.current_clock_source == 1) ? 1 : 0);
 
     printf("[main] Press 'h' for commands.\n\n");
 
@@ -1295,8 +1309,14 @@ int main(void)
             // media clock is gPTP-disciplined stamps wrong presentation times →
             // the listener can't media-lock → broadband noise on the audio.
             // Hold the DATA off until locked; enable + anchor on the lock edge;
-            // drop back off if gPTP unlocks.
-            if (aaf_gw_enabled && gptp.servo_locked) {
+            // drop back off if gPTP unlocks. The SELECTED media clock must ALSO be
+            // locked: cs=0 -> gPTP, cs=1 -> CRF (mcr.servo_locked). At cs=1 with no
+            // CRF source mcr.servo_locked=0 -> talker held OFF = no audio, per the
+            // AVDECC clock model (don't source a stream from an unlocked clock
+            // domain). gPTP must be locked regardless (the pres-time is gPTP-based;
+            // at cs=1 the CRF rate is carried by the pres-ramp dilation).
+            uint8_t media_clock_ok = (mcr.cs == 1) ? mcr.servo_locked : gptp.servo_locked;
+            if (aaf_gw_enabled && gptp.servo_locked && media_clock_ok) {
                 if (!reanchored) {
                     aaf_pkt_enable_write(0);   // reset gateware `anchored`
                     aaf_pkt_enable_write(1);   // enable + anchor to locked TSU
@@ -1306,9 +1326,10 @@ int main(void)
             } else {
                 reanchored = 0;
                 if (talker_on) {
-                    aaf_pkt_enable_write(0);   // hold OFF until gPTP (re)locks
+                    aaf_pkt_enable_write(0);   // hold OFF until the media clock (re)locks
                     talker_on = 0;
-                    printf("[main] AAF talker held OFF — gPTP not locked\n");
+                    printf("[main] AAF talker held OFF — %s not locked\n",
+                           (mcr.cs == 1 && !mcr.servo_locked) ? "CRF media clock" : "gPTP");
                 }
             }
         }

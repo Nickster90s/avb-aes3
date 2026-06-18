@@ -654,9 +654,11 @@ class AVBSoC(SoCCore):
             usb_sample_lo     = sample_lo_w,
             usb_sample_hi     = sample_hi_w,
             usb_readable      = sample_rdy_w,
-            fifo_depth        = 512,   # deep elastic buffer: smooths the bursty host
-                                       # delivery so block_fifo.level is a stable,
-                                       # meaningful number for the feedback servo
+            channels          = 8,     # per AAF stream
+            streams           = 6,     # 6x8ch time-muxed = 48ch host -> 6 AAF talkers
+            fifo_depth        = 64,    # ring = next_pow2(64*48)=4096 samples (~1.7ms @48k,
+                                       # 4 RAMB36 — same footprint as the old 8ch ring);
+                                       # half-ring prime (2048) >> one 288-sample block
         )
         # USB FIFO pop is ALWAYS owned by the gateware assembler now: its do_pop
         # drains-and-discards while the talker is disabled (see aaf_packetizer),

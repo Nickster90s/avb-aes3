@@ -215,6 +215,16 @@ class AAFPacketizer(LiteXModule):
         self.underrun_count = CSRStatus(32, description="Media-clock ticks where block_fifo was empty (silence inserted).")
         self.overrun_count  = CSRStatus(32, description="send_req arriving while builder busy (packet skipped — should stay 0).")
         self.fifo_level     = CSRStatus(blk_bits + 8, description="block_fifo occupancy (blocks).")
+        # Timestamp instrument: the ACTUAL emitted avtp_timestamp (pres) and the
+        # live gPTP-ns(low32) latched at the SAME packet emit. effective offset =
+        # dbg_last_pres - dbg_emit_gptp should hold ~= pres_offset (2ms); if it
+        # drifts/goes negative the pres ramp is wrong (chasing AxC Late-Timestamp).
+        self.dbg_last_pres  = CSRStatus(32, description="Last emitted AAF avtp_timestamp (gateware pres).")
+        self.dbg_emit_gptp  = CSRStatus(32, description="gPTP ns low32 at that emit (pres - this = effective offset).")
+        _dbg_pres_r = Signal(32)
+        _dbg_gptp_r = Signal(32)
+        self.comb += [self.dbg_last_pres.status.eq(_dbg_pres_r),
+                      self.dbg_emit_gptp.status.eq(_dbg_gptp_r)]
         # NOTE: the soft-ILA debug CSRs (dbg_block_push/pop/first, level min/max,
         # raw_strobe, usb_samp, pres, frame_addr/data) were REMOVED 2026-06-12.
         # They had done their diagnostic job, and the large AAF CSR bank was the
@@ -443,11 +453,17 @@ class AAFPacketizer(LiteXModule):
         step_scaled = Signal((40, True))                  # per-packet period, ns<<F
         self.comb += step_scaled.eq((_P0_ns << _PRES_F) - dinc_K)
         new_acc = Signal(32 + _PRES_F)
-        self.comb += If(~anchored,
-            new_acc.eq(Cat(Constant(0, _PRES_F), anchor_ns)),  # anchor: gPTP now + offset
-        ).Else(
-            new_acc.eq(pres_acc + step_scaled),                # advance one packet period
-        )
+        # RE-ANCHOR EVERY PACKET to gPTP_now + pres_offset. The deterministic
+        # dilated ramp (pres_acc + step_scaled) drifted -87us/s on HW (pres fell
+        # ~11ms into the PAST -> the AxC discarded every frame as Late = no audio):
+        # it relies on pres_base/inc being exactly the gPTP-disciplined values and
+        # they were not. Re-sampling gPTP at each emit CANNOT drift and tracks the
+        # media clock automatically (the emit cadence IS the media clock, so
+        # gPTP@emit advances at the media rate). do_emit fires at send_req with the
+        # FSM already IDLE (ovr=0) so the sample timing is media-clock-regular (low
+        # jitter). (anchored/step_scaled/dinc kept above but no longer drive pres.)
+        self.comb += new_acc.eq(Cat(Constant(0, _PRES_F), anchor_ns))
+        _ = step_scaled  # (retained for the 'C'/dilation diagnostics; unused here)
 
         def mac_byte(sig, i):   # i=0 is the wire-first (MSB) byte of a 48-bit MAC
             hi = 48 - i * 8
@@ -572,6 +588,9 @@ class AAFPacketizer(LiteXModule):
                 pres.eq(new_acc[_PRES_F:_PRES_F + 32]),
                 anchored.eq(1),
                 aligned_once.eq(1),
+                # Timestamp instrument: capture the emitted pres + the raw gPTP now.
+                _dbg_pres_r.eq(new_acc[_PRES_F:_PRES_F + 32]),
+                _dbg_gptp_r.eq((_mul_1e9_lo32(tsu.seconds) + tsu.nanoseconds)[0:32]),
             ),
         ]
         # BUILD: one byte/cycle into wacc; commit a word every 4th byte and on

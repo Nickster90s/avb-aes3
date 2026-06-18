@@ -582,6 +582,9 @@ static void check_uart_cmd(void)
                    (unsigned long)((uint64_t)(cepo - pr_epo) * 1000u / dms));
             pr_rxb = crxb; pr_epo = cepo; pr_ms = now; pr_pkts = cpkts;
             }
+            uint32_t gw_pres = aaf_pkt_dbg_last_pres_read();
+            uint32_t gw_gptp = aaf_pkt_dbg_emit_gptp_read();
+            int32_t  eff_off = (int32_t)(gw_pres - gw_gptp);
             printf("\n[AAF] bound=%d rx_en=%d tx_en=%d\n"
                    "  rx[gw-extractor]: match=%lu eof=%lu  <-- AUTHORITATIVE AAF RX\n"
                    "  rx[cpu-seen]: count=%lu seq_err=%lu other=%lu fmt_err=%lu lvl=%lu (0 is normal: gw discards matched frames)\n"
@@ -589,7 +592,7 @@ static void check_uart_cmd(void)
                    "  usb-bridge: frames=%lu fifo_ovf=%lu\n"
                    "  aaf_pkt(gw): en=%d pkts=%lu underrun=%lu ovr=%lu fifo=%lu\n"
                    "  usb-fifo: level=%ld fbovr=0x%lx step=0x%lx inc=%lu calls=%lu\n"
-                   "  last_pres_ts=%08lx\n",
+                   "  pres(gw)=%08lx gptp@emit=%08lx eff_offset=%ld ns (expect ~%d)\n",
                    aaf.bound, aaf.rx_enabled, aaf.tx_enabled,
                    (unsigned long)avtp_extractor_slot0_match_count_read(),
                    (unsigned long)avtp_extractor_diag_eof_count_read(),
@@ -612,7 +615,10 @@ static void check_uart_cmd(void)
                    (unsigned long)aaf_pkt_src_step_read(),
                    (unsigned long)mcr.current_increment,
                    (unsigned long)usb_lock_calls,
-                   (unsigned long)aaf.last_presentation_ts);
+                   (unsigned long)gw_pres,
+                   (unsigned long)gw_gptp,
+                   (long)eff_off,
+                   AAF_PRESENTATION_OFFSET_NS);
             break;
         case 'f': {
             usb_nco_freeze = !usb_nco_freeze;

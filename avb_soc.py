@@ -656,9 +656,12 @@ class AVBSoC(SoCCore):
             usb_readable      = sample_rdy_w,
             channels          = 8,     # per AAF stream
             streams           = 6,     # 6x8ch time-muxed = 48ch host -> 6 AAF talkers
-            fifo_depth        = 64,    # ring = next_pow2(64*48)=4096 samples (~1.7ms @48k,
-                                       # 4 RAMB36 — same footprint as the old 8ch ring);
-                                       # half-ring prime (2048) >> one 288-sample block
+            fifo_depth        = 64,    # ring = next_pow2(64*48)=4096 samples — the SAME
+                                       # SRING_DEPTH as the proven 8ch build (512*8). A
+                                       # deeper ring (256 -> 16384) is a SLOWER plant for
+                                       # the USB feedback servo -> it overshoots -> the ring
+                                       # level oscillated 7..64. 4096 keeps the servo's
+                                       # proven dynamics; half-ring prime (2048) >> 288/block
         )
         # USB FIFO pop is ALWAYS owned by the gateware assembler now: its do_pop
         # drains-and-discards while the talker is disabled (see aaf_packetizer),

@@ -573,11 +573,11 @@ static void check_uart_cmd(void)
             // increments only when the MAC ACCEPTS a frame's last beat = frames
             // on the wire. (The per-stage soft-ILA rates were removed with the
             // debug CSRs once the rate-match path was proven.)
-            printf("  *** AAF TX = %lu pkt/s (expect ~8000) ***\n",
+            printf("  *** AAF TX = %lu pkt/s (expect ~48000 = 6 streams x 8000) ***\n",
                    (unsigned long)((uint64_t)(cpkts - pr_pkts) * 1000u / dms));
-            // localisation: rx_beats = core->EP raw bytes/s (real RX rate, ~384k
-            // clean for 2ch); ep_out = EP->decoder bytes/s.
-            printf("  rx-loc(/s): rx_beats=%lu ep_out=%lu  [clean 2ch ~384000 B/s]\n",
+            // localisation: rx_beats = core->EP raw bytes/s (real RX rate; 48ch @
+            // 48k x 4B = ~9.216M B/s clean); ep_out = EP->decoder bytes/s.
+            printf("  rx-loc(/s): rx_beats=%lu ep_out=%lu  [clean 48ch ~9216000 B/s]\n",
                    (unsigned long)((uint64_t)(crxb - pr_rxb) * 1000u / dms),
                    (unsigned long)((uint64_t)(cepo - pr_epo) * 1000u / dms));
             pr_rxb = crxb; pr_epo = cepo; pr_ms = now; pr_pkts = cpkts;
@@ -751,6 +751,18 @@ static void check_uart_cmd(void)
         case 'C':
             mcr_dump_conv_log(&mcr);
             break;
+        case 'P': {
+            // Sweep the AAF presentation-time offset (ns) to chase AxC "Late
+            // Timestamp": +1 ms per press, wrap 2..10 ms. Larger offset = more
+            // listener headroom (absorbs bridge queuing under the 6-stream load).
+            static uint32_t po = AAF_PRESENTATION_OFFSET_NS;   // 2 ms reset
+            po += 1000000;
+            if (po > 10000000) po = 2000000;
+            aaf_pkt_pres_offset_write(po);
+            printf("[AAF] pres_offset = %lu ns (%lu ms)\n",
+                   (unsigned long)po, (unsigned long)(po / 1000000));
+            break;
+        }
         case 'h':
         case '?':
             printf("\n  s   status (gPTP / AVTP / SRP / AVDECC)\n"

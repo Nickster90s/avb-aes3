@@ -623,16 +623,16 @@ class AVBSoC(SoCCore):
         #           32-bit signed sample (= Milan AAF 32-bit INT), no shift.
         # Firmware: while(guard){ v=usb_sample_data; if(!(v&0x10)) break;
         #            ...; usb_sample_pop=1; }
-        self.usb_sample_data     = CSRStatus(32, description="USB→AAF FIFO head: [31:8]audio [4]valid [3]first [2:0]ch.")
+        # 48ch bridge: sample_hi = {channel[0:6], first[6]} (6-bit channel 0..47).
+        self.usb_sample_data     = CSRStatus(32, description="USB→AAF FIFO head: [31:8]audio [7]valid [6]first [5:0]ch.")
         self.usb_sample_pop      = CSRStorage(1, description="Write 1 to advance the USB→AAF FIFO read pointer.")
         self.usb_sample_overflow = CSRStatus(32, description="Samples dropped at the cd_usb-side FIFO write port.")
         # Localisation diagnostics (cd_usb, synced): where the ~25x replay enters.
         self.usb_dbg_rx_beats = CSRStatus(32, description="core->EP raw byte beats (rx.next & rx.valid).")
         self.usb_dbg_ep_out   = CSRStatus(32, description="EP->decoder beats (stream.valid & ready).")
         self.comb += [
-            self.usb_sample_data.status.eq(Cat(sample_hi_w[0:4],   # [3:0] channel+first
-                                               sample_rdy_w,        # [4]   valid
-                                               Signal(3),           # [7:5] reserved
+            self.usb_sample_data.status.eq(Cat(sample_hi_w[0:7],   # [6:0] channel(6)+first
+                                               sample_rdy_w,        # [7]   valid
                                                sample_lo_w[8:32])), # [31:8] audio MSB-aligned
             self.usb_sample_overflow.status.eq(sample_ovf_w),
             self.usb_dbg_rx_beats.status.eq(dbg_rxbeats_w),

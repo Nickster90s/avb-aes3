@@ -361,11 +361,25 @@ static void srp_send_one_pdu(uint8_t *frame, uint8_t *p)
 
 static void srp_send_talker_leave(srp_state_t *s)
 {
-    uint8_t *frame = srp_tx_buf();
-    uint8_t *p = msrp_frame_begin(frame, s->src_mac);
-    p = msrp_emit_talker_adv(p, &s->talker, 0, MRP_EVT_LV);
-    srp_send_one_pdu(frame, p);
-    SRPLOG("[SRP] Talker Leave (Lv) sent\n");
+    for (uint8_t i = 0; i < s->n_talkers; i++) {
+        uint8_t *frame = srp_tx_buf();
+        uint8_t *p = msrp_frame_begin(frame, s->src_mac);
+        p = msrp_emit_talker_adv(p, &s->talkers[i], 0, MRP_EVT_LV);
+        srp_send_one_pdu(frame, p);
+    }
+    SRPLOG("[SRP] Talker Leave (Lv) sent for all streams\n");
+}
+
+// Does an 8-byte stream_id match ANY of our configured talker streams?
+static int srp_match_any_talker(const srp_state_t *s, const uint8_t *sid)
+{
+    for (uint8_t i = 0; i < s->n_talkers; i++) {
+        int eq = 1;
+        for (int j = 0; j < 8; j++)
+            if (sid[j] != s->talkers[i].stream_id[j]) { eq = 0; break; }
+        if (eq) return 1;
+    }
+    return 0;
 }
 
 static void srp_send_listener_leave(srp_state_t *s, const srp_listener_t *l)
@@ -423,22 +437,26 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
 
     // ---- PDU 2: TalkerAdvertise ALONE (decoupled from the listeners above).
     if (s->talker_enabled) {
-        // Explicit Class A: priority 3, rank 1, 1 frame per 125us interval, VID 2.
-        s->talker.priority_and_rank = (uint8_t)((SR_CLASS_A_PRIO << 5) | (1 << 4));
-        s->talker.vlan_id = SR_CLASS_A_VID;
-        s->talker.max_interval_frames = 1;
-
         // MRP applicant event tracks the registrar: NEW(0)x2, then JoinMt(3) while
-        // no listener is registered for OUR stream, JoinIn(1) once one is.
+        // no listener is registered for OUR stream, JoinIn(1) once one is. Shared
+        // across all 6 time-mux streams (they advertise together).
         uint8_t tk_event = (s->talker_new_count < 2) ? MRP_EVT_NEW
                          : (s->talker_listener_seen  ? MRP_EVT_JOININ
                                                      : MRP_EVT_JOINMT);
-        uint8_t *frame = srp_tx_buf();
-        uint8_t *p = msrp_frame_begin(frame, s->src_mac);
-        p = msrp_emit_talker_adv(p, &s->talker, leaveall, tk_event);
+        // Emit each stream's TalkerAdvertise as its OWN MSRP PDU (distinct
+        // stream_ids -> not a packable vector). LeaveAll rides only the first PDU.
+        for (uint8_t i = 0; i < s->n_talkers; i++) {
+            srp_talker_attr_t *tk = &s->talkers[i];
+            tk->priority_and_rank = (uint8_t)((SR_CLASS_A_PRIO << 5) | (1 << 4));
+            tk->vlan_id = SR_CLASS_A_VID;
+            tk->max_interval_frames = 1;
+            uint8_t *frame = srp_tx_buf();
+            uint8_t *p = msrp_frame_begin(frame, s->src_mac);
+            p = msrp_emit_talker_adv(p, tk, (i == 0) ? leaveall : 0, tk_event);
+            srp_send_one_pdu(frame, p);   // EndMark + pad + send
+        }
         if (s->talker_new_count < 2)
             s->talker_new_count++;
-        srp_send_one_pdu(frame, p);   // EndMark + pad + send
     }
 
     s->join_count++;
@@ -550,9 +568,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                     // IEEE 802.1Q Table 35-6 code (0x06=no bandwidth, 0x05=dest
                     // in use, 0x16=class/priority, ...).
                     if (s->talker_enabled) {
-                        int ours = 1;
-                        for (int j = 0; j < 8; j++)
-                            if (sid[j] != s->talker.stream_id[j]) { ours = 0; break; }
+                        int ours = srp_match_any_talker(s, sid);
                         if (ours) {
                             s->talker_fail_code = code;
                             s->talker_fail_count++;
@@ -595,9 +611,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
 
                 // Flood guard + DIAGNOSTIC: does a remote listener want OUR
                 // talker stream? (vp[0..7] = Listener FirstValue = stream_id.)
-                int eq = 1;
-                for (int k = 0; k < 8; k++)
-                    if (vp[k] != s->talker.stream_id[k]) { eq = 0; break; }
+                int eq = srp_match_any_talker(s, vp);
 
                 // Log EVERY Listener declaration we receive (rate-limited 2s)
                 // so we can see whether AxC ever declares a listener for our
@@ -818,16 +832,18 @@ const srp_remote_talker_t *srp_find_talker(const srp_state_t *s,
     return NULL;
 }
 
-void srp_talker_set(srp_state_t *s, const uint8_t *stream_id,
+void srp_talker_set(srp_state_t *s, uint8_t idx, const uint8_t *stream_id,
                     const uint8_t *dest_mac, uint16_t max_frame_size)
 {
-    memcpy(s->talker.stream_id, stream_id, 8);
-    memcpy(s->talker.dest_addr, dest_mac, 6);
-    s->talker.vlan_id = SR_CLASS_A_VID;
-    s->talker.max_frame_size = max_frame_size;
-    s->talker.max_interval_frames = 1;  // Class A: 1 frame per 125us interval
+    if (idx >= N_SRP_TALKERS) return;
+    srp_talker_attr_t *tk = &s->talkers[idx];
+    memcpy(tk->stream_id, stream_id, 8);
+    memcpy(tk->dest_addr, dest_mac, 6);
+    tk->vlan_id = SR_CLASS_A_VID;
+    tk->max_frame_size = max_frame_size;
+    tk->max_interval_frames = 1;  // Class A: 1 frame per 125us interval
     // Priority 3 (Class A), Rank 1 (non-emergency)
-    s->talker.priority_and_rank = (SR_CLASS_A_PRIO << 5) | (1 << 4);
+    tk->priority_and_rank = (SR_CLASS_A_PRIO << 5) | (1 << 4);
     // AccumulatedLatency: worst-case sample-reference-to-egress latency, ns.
     // 0 is a deviation — every reference talker declares non-zero (OpenAvnu
     // simple_talker 3900, GenAVB adds CFG_PORT_TC_MAX_LATENCY=500/hop, the
@@ -836,7 +852,8 @@ void srp_talker_set(srp_state_t *s, const uint8_t *stream_id,
     // talker latency is ~that order; declare 250 us (well under the 2 ms Class
     // A bound, matches the MOTU ecosystem magnitude). See memory
     // [[msrp-maxframesize-must-be-real-frame-size]].
-    s->talker.accumulated_latency_ns = 500000;   // match the working reference talker (avb_session_mgr2)
+    tk->accumulated_latency_ns = 500000;   // match the working reference talker (avb_session_mgr2)
+    if ((uint8_t)(idx + 1) > s->n_talkers) s->n_talkers = idx + 1;
 }
 
 void srp_talker_enable(srp_state_t *s, uint8_t enable)

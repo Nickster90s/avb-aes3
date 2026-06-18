@@ -84,7 +84,7 @@ static inline uint32_t av_get_be32(const uint8_t *p)
 
 // Per-stream identity
 #define N_STREAM_INPUTS   2     // [0]=CRF Media Clock, [1]=AAF Audio Input
-#define N_STREAM_OUTPUTS  1     // [0]=AAF Audio Output
+#define N_STREAM_OUTPUTS  6     // 6x8ch AAF Audio Output (time-mux talker)
 #define N_CLOCK_SOURCES   2     // [0]=Internal osc, [1]=CRF stream
 #define N_AUDIO_CHANNELS  8     // 8ch AAF I/O
 #define LISTENER_CRF_INDEX 0
@@ -988,7 +988,7 @@ static uint32_t build_desc_audio_unit(uint8_t *d, uint16_t idx)
     av_put_be16(d + 70, 0);                       // clock_domain_index
     av_put_be16(d + 72, 1);                       // number_of_stream_input_ports
     av_put_be16(d + 74, 0);                       // base_stream_input_port
-    av_put_be16(d + 76, 1);                       // number_of_stream_output_ports
+    av_put_be16(d + 76, N_STREAM_OUTPUTS);        // number_of_stream_output_ports (1 per stream)
     av_put_be16(d + 78, 0);                       // base_stream_output_port
     // 80..95 = other port counts (all 0)
     av_put_be32(d + 136, 48000);                  // current_sampling_rate
@@ -1196,7 +1196,11 @@ static uint32_t build_desc_strings(uint8_t *d, uint16_t idx)
 
 static uint32_t build_desc_stream_port(uint8_t *d, uint16_t desc_type, uint16_t idx)
 {
-    if (idx != 0) return 0;
+    // 1 input stream-port (AAF listener); N_STREAM_OUTPUTS output stream-ports
+    // (one per 8ch AAF talker stream). 0 clusters/0 maps on each (channel info
+    // is in the stream_format) — matches the Hive-validated session_mgr.aemt.
+    uint16_t max_idx = (desc_type == AEM_DESC_STREAM_PORT_OUTPUT) ? N_STREAM_OUTPUTS : 1;
+    if (idx >= max_idx) return 0;
     // 7.2.13 — 20 bytes (jdksavdecc JDKSAVDECC_DESCRIPTOR_STREAM_PORT_LEN)
     //  +0  desc_type
     //  +2  desc_index
@@ -1214,7 +1218,7 @@ static uint32_t build_desc_stream_port(uint8_t *d, uint16_t desc_type, uint16_t 
     // — matching that gets Milan-compliant validation through Hive.
     memset(d, 0, 20);
     av_put_be16(d +  0, desc_type);
-    av_put_be16(d +  2, 0);
+    av_put_be16(d +  2, idx);                              // descriptor_index
     av_put_be16(d +  4, 0);                                // clock_domain_index
     av_put_be16(d +  6, STREAM_PORT_FLAG_CLOCK_SYNC_SOURCE);
     av_put_be16(d +  8, 0);                                // number_of_controls

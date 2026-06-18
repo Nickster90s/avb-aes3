@@ -115,9 +115,14 @@ typedef struct {
 typedef struct {
     uint8_t  src_mac[6];
 
-    // Talker state
+    // Talker state — N_SRP_TALKERS reservations (6x8ch time-mux), each emitted
+    // as its own TalkerAdvertise PDU. n_talkers = how many srp_talker_set has
+    // configured. talker_enabled / talker_new_count / talker_listener_seen are
+    // shared (all streams advertise together, gated by the same gPTP/CRF lock).
+#define N_SRP_TALKERS 6
     uint8_t  talker_enabled;
-    srp_talker_attr_t talker;
+    uint8_t  n_talkers;
+    srp_talker_attr_t talkers[N_SRP_TALKERS];
 
     // Listener state — one entry per concurrently-registered listener
     // stream (CRF + AAF + spare). srp_listener_enable() adds/removes by
@@ -216,8 +221,8 @@ void srp_set_bridge_mac(srp_state_t *s, const uint8_t *bridge_mac);
 const srp_remote_talker_t *srp_find_talker(const srp_state_t *s,
                                             const uint8_t *stream_id);
 
-// Configure talker advertisement for our stream.
-void srp_talker_set(srp_state_t *s, const uint8_t *stream_id,
+// Configure talker advertisement for stream `idx` (0..N_SRP_TALKERS-1).
+void srp_talker_set(srp_state_t *s, uint8_t idx, const uint8_t *stream_id,
                     const uint8_t *dest_mac, uint16_t max_frame_size);
 
 // Enable/disable talker and listener SRP declarations.

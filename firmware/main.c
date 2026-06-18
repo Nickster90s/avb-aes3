@@ -34,7 +34,15 @@ static aaf_state_t    aaf;
 // Local stream UIDs (must match build_desc_* in avdecc.c)
 #define LISTENER_UID_CRF  0
 #define LISTENER_UID_AAF  1
-#define TALKER_UID_AAF    0
+#define TALKER_UID_AAF    0          // stream 0 of N_AAF_STREAMS
+
+// 6x8ch time-mux talker: 6 AAF streams (= N_STREAM_OUTPUTS = AVDECC_MAX_TALKERS).
+// One shared identity table feeds the gateware contexts, the AVDECC talkers, AND
+// the SRP reservations so all three agree. stream_id[s] = MAC + 00:s (unique);
+// dst_mac[s] = 91:E0:F0:00:FE:(mac[5]&0xF8 | s) (6 distinct SR multicasts).
+#define N_AAF_STREAMS     6
+static uint8_t talker_sid [N_AAF_STREAMS][8];
+static uint8_t talker_dmac[N_AAF_STREAMS][6];
 
 // AVTP gateware filter slot — shrunk to single AAF slot for first-light.
 // CRF still goes through CPU dispatcher (low-rate). SLOT_CRF kept as a
@@ -423,8 +431,8 @@ static void check_uart_cmd(void)
                    srp.domain_received,
                    srp_any_talker_registered(&srp),
                    srp.rx_sr_class, srp.rx_sr_prio, srp.rx_sr_vid,
-                   srp.talker.priority_and_rank,
-                   srp.talker.max_interval_frames, srp.have_bridge_mac);
+                   srp.talkers[0].priority_and_rank,
+                   srp.talkers[0].max_interval_frames, srp.have_bridge_mac);
             // Talker-side diagnostic: did a remote listener (AxC) declare OUR
             // stream (so the bridge propagated its want to us)? and did the
             // bridge fail our talker (code)? Tells us which side is stuck.
@@ -649,7 +657,7 @@ static void check_uart_cmd(void)
             // fast-connect "pending". 230 → 14.7 Mbps fits. (Matches the real
             // AVDECC-connect binding at srp_talker_set(...,230) on init, and
             // the MOTU's own TalkerAdvertise declares 224 for 8ch AAF.)
-            srp_talker_set(&srp, dummy_sid, dummy_dest,
+            srp_talker_set(&srp, 0, dummy_sid, dummy_dest,
                            230 /* 14 eth + 24 AVTP-AAF hdr + 192 payload */);
             srp_talker_enable(&srp, 1);
             aaf_gw_set(1);            // also source via the gateware packetizer
@@ -876,7 +884,7 @@ static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_ma
 static void on_talker_connect(uint16_t uid, const uint8_t *listener_entity_id)
 {
     (void)listener_entity_id;
-    if (uid != TALKER_UID_AAF) return;
+    if (uid >= N_AAF_STREAMS) return;   // any of the 6 time-mux talker streams
     aaf_tx_enable(&aaf, 1);
     // Re-assert the talker advertise (idempotent; it's already enabled from
     // boot). This resets the NEW counter so the next 2 advertises emit NEW(0),
@@ -888,7 +896,7 @@ static void on_talker_connect(uint16_t uid, const uint8_t *listener_entity_id)
 
 static void on_talker_disconnect(uint16_t uid)
 {
-    if (uid != TALKER_UID_AAF) return;
+    if (uid >= N_AAF_STREAMS) return;
     // Keep BOTH the SRP reservation AND the continuous-silence emission running
     // after a listener disconnects — the stream stays present and reserved so
     // the next listener can lock immediately. (We stream silence from boot; a
@@ -1010,26 +1018,34 @@ static void on_clock_source_change(uint16_t src_idx)
 // binding. Disabled (default) leaves the proven firmware path untouched.
 static void aaf_gw_push_binding(void)
 {
+    // Shared across all 6 time-mux streams: src_mac + VLAN TCI.
     aaf_pkt_src_mac_hi_write(((uint32_t)aaf.src_mac[0] << 8) | aaf.src_mac[1]);
     aaf_pkt_src_mac_lo_write(((uint32_t)aaf.src_mac[2] << 24) |
                              ((uint32_t)aaf.src_mac[3] << 16) |
                              ((uint32_t)aaf.src_mac[4] <<  8) |
                               (uint32_t)aaf.src_mac[5]);
-    aaf_pkt_dst_mac_hi_write(((uint32_t)aaf.dest_mac[0] << 8) | aaf.dest_mac[1]);
-    aaf_pkt_dst_mac_lo_write(((uint32_t)aaf.dest_mac[2] << 24) |
-                             ((uint32_t)aaf.dest_mac[3] << 16) |
-                             ((uint32_t)aaf.dest_mac[4] <<  8) |
-                              (uint32_t)aaf.dest_mac[5]);
-    aaf_pkt_stream_id_hi_write(((uint32_t)aaf.stream_id[0] << 24) |
-                               ((uint32_t)aaf.stream_id[1] << 16) |
-                               ((uint32_t)aaf.stream_id[2] <<  8) |
-                                (uint32_t)aaf.stream_id[3]);
-    aaf_pkt_stream_id_lo_write(((uint32_t)aaf.stream_id[4] << 24) |
-                               ((uint32_t)aaf.stream_id[5] << 16) |
-                               ((uint32_t)aaf.stream_id[6] <<  8) |
-                                (uint32_t)aaf.stream_id[7]);
     aaf_pkt_vlan_tci_write(((uint32_t)(aaf.tx_pcp & 0x07) << 13) |
                             (aaf.tx_vid & 0x0FFF));
+    // Per-stream dst_mac + stream_id, written into the gateware's indirect
+    // context (ctx_select=s, then the data regs). The packetizer latches
+    // dmac[s] on the dst_mac_lo write and stream_id[s] on the stream_id_lo
+    // write, so those must come LAST in each context.
+    for (int s = 0; s < N_AAF_STREAMS; s++) {
+        aaf_pkt_ctx_select_write(s);
+        aaf_pkt_dst_mac_hi_write(((uint32_t)talker_dmac[s][0] << 8) | talker_dmac[s][1]);
+        aaf_pkt_dst_mac_lo_write(((uint32_t)talker_dmac[s][2] << 24) |
+                                 ((uint32_t)talker_dmac[s][3] << 16) |
+                                 ((uint32_t)talker_dmac[s][4] <<  8) |
+                                  (uint32_t)talker_dmac[s][5]);
+        aaf_pkt_stream_id_hi_write(((uint32_t)talker_sid[s][0] << 24) |
+                                   ((uint32_t)talker_sid[s][1] << 16) |
+                                   ((uint32_t)talker_sid[s][2] <<  8) |
+                                    (uint32_t)talker_sid[s][3]);
+        aaf_pkt_stream_id_lo_write(((uint32_t)talker_sid[s][4] << 24) |
+                                   ((uint32_t)talker_sid[s][5] << 16) |
+                                   ((uint32_t)talker_sid[s][6] <<  8) |
+                                    (uint32_t)talker_sid[s][7]);
+    }
     // pres_offset keeps its 2 ms CSR reset value (matches AAF_PRESENTATION_OFFSET_NS).
 }
 
@@ -1127,20 +1143,23 @@ int main(void)
     // the network media rate (exactly 48000 gPTP-Hz) instead of the raw crystal.
     mcr_set_gptp(&mcr, &gptp);
     {
-        // AAF uses the same talker stream_id/dest_mac advertised in AVDECC.
-        // stream_id = MAC + 0x00 0x01 (matches avtp_set_stream_id default).
-        uint8_t aaf_stream_id[8] = {0,0,0,0,0,0, 0x00, 0x01};
-        memcpy(aaf_stream_id, mac_addr, 6);
-        // Stream destination MAC = 91:E0:F0:00:FE:mac[5]. The 0xFE slice is the
-        // locally-administered range OUTSIDE the MAAP dynamic pool (00:00..FD:FF)
-        // — chosen to avoid colliding with a MAAP allocation. NOTE: avb_session
-        // itself transmits to 91:E0:F0:00:FE:00 (same 0xFE range) fine, so the
-        // reserved range is NOT a forwarding problem. (A brief experiment with an
-        // in-pool 0x42:xx address was reverted: it risked MAAP collision and the
-        // reserved range was never the issue — D3 is still about data delivery,
-        // not the dest range.) TODO: proper MAAP allocate+defend if needed.
-        uint8_t aaf_mcast[6] = {0x91, 0xE0, 0xF0, 0x00, 0xFE, mac_addr[5]};
-        aaf_init(&aaf, mac_addr, aaf_stream_id, aaf_mcast);
+        // Derive the 6 stream identities (shared by the gateware contexts, the
+        // AVDECC talkers, AND the SRP reservations so all three agree).
+        // stream_id[s] = MAC + 00:s ; dst_mac[s] = 91:E0:F0:00:FE:(mac[5]&0xF8 | s).
+        // The 0xFE slice is the locally-administered SR-multicast range outside the
+        // MAAP dynamic pool (avb_session uses the same range fine). TODO: MAAP
+        // allocate+defend if needed.
+        for (int s = 0; s < N_AAF_STREAMS; s++) {
+            memcpy(talker_sid[s], mac_addr, 6);
+            talker_sid[s][6] = 0x00;
+            talker_sid[s][7] = (uint8_t)s;
+            talker_dmac[s][0] = 0x91; talker_dmac[s][1] = 0xE0; talker_dmac[s][2] = 0xF0;
+            talker_dmac[s][3] = 0x00; talker_dmac[s][4] = 0xFE;
+            talker_dmac[s][5] = (uint8_t)((mac_addr[5] & 0xF8) | s);
+        }
+        // The `aaf` firmware struct represents stream 0: it provides src_mac and
+        // the shared TCI/pres for the gateware binding (the gateware emits all 6).
+        aaf_init(&aaf, mac_addr, talker_sid[0], talker_dmac[0]);
     }
 
     // Configure SRP talker to advertise our AAF stream.
@@ -1153,7 +1172,8 @@ int main(void)
     // 6+6+4+2+avtp_payload.) Must be the EXACT size — over-declaring (e.g. 1500)
     // overflows the Class-A bandwidth budget; see
     // [[msrp-maxframesize-must-be-real-frame-size]].
-    srp_talker_set(&srp, aaf.stream_id, aaf.dest_mac, 234);   // 6+6+4+2+24+192
+    for (int s = 0; s < N_AAF_STREAMS; s++)
+        srp_talker_set(&srp, s, talker_sid[s], talker_dmac[s], 234);  // 6+6+4+2+24+192 per stream
 
     // Advertise the MSRP TalkerAdvertise CONTINUOUSLY from boot — decoupled
     // from AVDECC/ACMP. This mirrors avb_session_mgr2's do_srp_register() at
@@ -1193,7 +1213,8 @@ int main(void)
     avdecc_set_gptp(&gptp);   // surface GM identity in ADP/AVB_INTERFACE
     avdecc_set_mcr(&mcr);     // CLOCK_DOMAIN lock follows MCR when source=1
     avdecc_set_srp(&srp);     // GET_AVB_INFO emits matching msrp_mapping
-    avdecc_set_talker_stream(&avdecc, TALKER_UID_AAF, aaf.stream_id, aaf.dest_mac);
+    for (int s = 0; s < N_AAF_STREAMS; s++)
+        avdecc_set_talker_stream(&avdecc, s, talker_sid[s], talker_dmac[s]);
     avdecc.on_talker_connect    = on_talker_connect;
     avdecc.on_talker_disconnect = on_talker_disconnect;
     avdecc.on_listener_connect  = on_listener_connect;

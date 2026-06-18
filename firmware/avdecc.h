@@ -289,7 +289,7 @@ typedef struct {
     uint16_t stream_vlan_id;
 } avdecc_listener_stream_t;
 
-#define AVDECC_MAX_TALKERS    1   // N_STREAM_OUTPUTS in avdecc.c
+#define AVDECC_MAX_TALKERS    6   // N_STREAM_OUTPUTS in avdecc.c (6x8ch time-mux)
 #define AVDECC_MAX_LISTENERS  2   // N_STREAM_INPUTS  in avdecc.c
 
 // Slow-path resolve state (IEEE 1722.1 §8.2.2 Path B). When CONNECT_RX

@@ -452,18 +452,36 @@ class AAFPacketizer(LiteXModule):
         self.comb += dinc_K.eq(_kexpr)
         step_scaled = Signal((40, True))                  # per-packet period, ns<<F
         self.comb += step_scaled.eq((_P0_ns << _PRES_F) - dinc_K)
+        # PLL-style presentation timestamp. Pure free-running ramp DRIFTS (the old
+        # dilated ramp fell ~11ms into the past -> AxC discarded all frames = no
+        # audio). Pure per-packet re-anchor JITTERS (gPTP-sample noise + the 1-second
+        # TSU seconds/ns wrap glitch -> AxC saw Early AND Late). This does both right:
+        # a SMOOTH nominal ramp (+P0/packet) plus a GENTLE pull (err>>K) toward
+        # gPTP_now+offset, with a large-error CLAMP that rejects the 1s wrap glitch.
+        # => no drift (the pull cancels any rate error), low jitter (gPTP noise /2^K),
+        # glitch-immune.
+        _PLL_K = 6                                          # correction = err >> 6
+        pres_ns  = Signal(32)
+        self.comb += pres_ns.eq(pres_acc[_PRES_F:_PRES_F + 32])
+        pres_err = Signal((32, True))                       # signed 32-bit ns error (wraps clean)
+        # Error vs the PREDICTED next pres (pres_ns + P0), not the current one —
+        # otherwise the loop locks one packet-period ahead (eff_offset = +2.12ms not
+        # +2ms). With the prediction it settles at exactly pres_offset (sim-verified
+        # sims/sim_pll_pres.py: mean 1.9995ms, stdev 104ns, no drift, glitch-immune).
+        self.comb += pres_err.eq(anchor_ns - pres_ns - _P0_ns)
+        pres_corr = Signal((32, True))
+        self.comb += If((pres_err < 1000000) & (pres_err > -1000000),   # |err|<1ms: track
+            pres_corr.eq(pres_err >> _PLL_K),
+        ).Else(
+            pres_corr.eq(0),                                # |err|>=1ms (1s TSU wrap): hold ramp
+        )
         new_acc = Signal(32 + _PRES_F)
-        # RE-ANCHOR EVERY PACKET to gPTP_now + pres_offset. The deterministic
-        # dilated ramp (pres_acc + step_scaled) drifted -87us/s on HW (pres fell
-        # ~11ms into the PAST -> the AxC discarded every frame as Late = no audio):
-        # it relies on pres_base/inc being exactly the gPTP-disciplined values and
-        # they were not. Re-sampling gPTP at each emit CANNOT drift and tracks the
-        # media clock automatically (the emit cadence IS the media clock, so
-        # gPTP@emit advances at the media rate). do_emit fires at send_req with the
-        # FSM already IDLE (ovr=0) so the sample timing is media-clock-regular (low
-        # jitter). (anchored/step_scaled/dinc kept above but no longer drive pres.)
-        self.comb += new_acc.eq(Cat(Constant(0, _PRES_F), anchor_ns))
-        _ = step_scaled  # (retained for the 'C'/dilation diagnostics; unused here)
+        self.comb += If(~anchored,
+            new_acc.eq(Cat(Constant(0, _PRES_F), anchor_ns)),                    # seed: lock to gPTP+offset
+        ).Else(
+            new_acc.eq(pres_acc + (_P0_ns << _PRES_F) + (pres_corr << _PRES_F)), # smooth ramp + gentle pull
+        )
+        _ = step_scaled  # (dilation retained for diagnostics; PLL replaces it)
 
         def mac_byte(sig, i):   # i=0 is the wire-first (MSB) byte of a 48-bit MAC
             hi = 48 - i * 8

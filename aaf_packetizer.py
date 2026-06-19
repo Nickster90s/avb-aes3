@@ -478,11 +478,18 @@ class AAFPacketizer(LiteXModule):
         anchor_ns_r = Signal(32)
         self.sync += anchor_ns_r.eq(anchor_ns)              # register the *1e9 tree output ONLY
         self.comb += pres_err.eq(anchor_ns_r - pres_ns - _P0_ns)
+        # Clamp at 100ms, NOT 1ms: only the 1-second TSU seconds/ns wrap glitch
+        # (~1e9 ns) must be rejected. A 1ms clamp was a TRAP -- once a transient
+        # (overrun under an MRP burst, NCO state shift, wrap edge) pushed the pres
+        # error past 1ms the PLL could NEVER correct it back -> stuck -> timestamp
+        # "corrupt after ~30s" (the longer 6-stream build hits this; 8ch rarely did).
+        # 100ms lets the gentle pull RECOVER from any few-ms transient (err>>6 of a
+        # few ms = tens of us/pkt -> back in ~ms) while still rejecting the 1s wrap.
         pres_corr = Signal((32, True))
-        self.comb += If((pres_err < 1000000) & (pres_err > -1000000),   # |err|<1ms: track
+        self.comb += If((pres_err < 100000000) & (pres_err > -100000000),  # |err|<100ms: track
             pres_corr.eq(pres_err >> _PLL_K),
         ).Else(
-            pres_corr.eq(0),                                # |err|>=1ms (1s TSU wrap): hold ramp
+            pres_corr.eq(0),                                # |err|>=100ms = 1s TSU wrap: hold ramp
         )
         new_acc = Signal(32 + _PRES_F)
         self.comb += If(~anchored,

@@ -23,6 +23,18 @@
 #
 
 import os
+import sys
+
+# REPRODUCIBLE BUILD: migen/litex name signals + the floorplan iterates dict/set
+# collections whose order depends on PYTHONHASHSEED (randomized per process by
+# default). That made the SAME --seed scatter 52-65 MHz run-to-run -> the seed
+# roulette. PYTHONHASHSEED must be set BEFORE the interpreter starts, so if it is
+# not already 0 we re-exec ourselves once with it fixed. Result: --seed 3 is now
+# a STABLE 57.57 MHz, build once, no sweeping (see the --seed help below).
+if os.environ.get("PYTHONHASHSEED") != "0":
+    os.environ["PYTHONHASHSEED"] = "0"
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
 import argparse
 
 from migen import *
@@ -716,15 +728,13 @@ def main():
     parser.add_argument("--build",        action="store_true", help="Build bitstream.")
     parser.add_argument("--soft-only",    action="store_true", help="Generate software headers only (no P&R).")
     parser.add_argument("--load",         action="store_true", help="Load bitstream.")
-    parser.add_argument("--seed", default=1, type=int, help="nextpnr P&R seed. "
-        "Pinned to 1: with the gPTP fast-lock firmware it places sys_clk at "
-        "64.23 MHz (HW-verified clean). The CSR-bus address decode is the "
-        "structural Fmax cap (~53-68 MHz band, scattered routing — see "
-        "csr-mux-explodes-sys-clk); seed picks placement WITHIN the band, and "
-        "53 MHz (seed 4) left the USB-feedback datapath marginal -> ring stuck "
-        "low -> glitch. TX is seed-robust (TX-sys-datapath fix). If the firmware "
-        "changes enough to drop Fmax <~57, sweep seeds for one >=57 (seed 3 = "
-        "67.74 was the sweep best).")
+    parser.add_argument("--seed", default=3, type=int, help="nextpnr P&R seed. "
+        "PINNED to 3: with PYTHONHASHSEED=0 (forced at the top of this file so the "
+        "build is REPRODUCIBLE) seed 3 places the 48ch/6-ring SoC at 57.57 MHz, "
+        "clear of the ~57 MHz USB-feedback floor. WITHOUT the fixed hash seed the "
+        "same seed scattered 52-65 MHz run-to-run (migen/floorplan dict/set ordering "
+        "depends on PYTHONHASHSEED) -- that was the seed-roulette. If a future change "
+        "drops Fmax <~57, sweep seeds (now reproducible) for one >=57 and re-pin here.")
     parser.add_argument("--no-floorplan", action="store_true",
         help="Disable the USB-near-ULPI proximity floorplan (floorplan_usb.py "
              "constrains USB cells to X<=30, Y=10-70 — close to the ULPI pins "

@@ -519,20 +519,17 @@ class AAFPacketizer(LiteXModule):
             pres_corr.eq(0),                                # |err|>=100ms = 1s TSU wrap: hold ramp
         )
         new_acc = Signal(32 + _PRES_F)
-        # DETERMINISTIC CRF-dilated ramp (gst-avtp model), NOT the PLL. The PLL
-        # tracked gPTP fine at cs=0 but FREE-RAN in cs=1 on HW (pres drifted at
-        # -CRF_ppm, eff_offset -> -33ms): re-sampling gPTP every packet can't follow
-        # a media clock that runs at the CRF rate, not gPTP. The dilated ramp anchors
-        # gPTP ONCE then advances by step_scaled = P0 - dinc*Kfix, where dinc = (MCR
-        # increment - pres_base) tracks the CRF media clock relative to gPTP -> the
-        # avtp_ts advances at exactly the AxC's rate, smooth, no per-packet jitter.
-        # cs=0: dinc=0 -> step=P0 (pure gPTP). cs=1: step dilates to CRF.
-        self.comb += If(~anchored,
-            new_acc.eq(Cat(Constant(0, _PRES_F), anchor_ns_r)),   # seed once: gPTP+offset
-        ).Else(
-            new_acc.eq(pres_acc + step_scaled),                   # dilated ramp -> tracks media clock
-        )
-        _ = pres_corr  # (PLL correction retained for diagnostics; dilated ramp replaces it)
+        # PURE RE-ANCHOR: pres = gPTP_now + offset EVERY packet. Both the dilated ramp
+        # AND the PLL DRIFTED open-loop on HW (eff_offset -> -20ms cs=0 / -33ms cs=1,
+        # ~-90us/s): any tiny step error accumulates with no correction, and the AxC
+        # then gets presentation times tens of ms in the past -> mis-timed/dropped
+        # audio (the "buzzy tone with breaks"). Re-sampling gPTP every packet pins
+        # eff_offset = pres_offset (+2ms) BY CONSTRUCTION -- no drift, ever. do_emit is
+        # media-clock-paced (regular) so avtp_ts spacing stays smooth (AxC recovers a
+        # clean rate); gPTP jitter is the servo's ~18ns, far below the AxC buffer.
+        # anchor_ns_r = registered *1e9 tree (1 cycle ~20ns stale = negligible).
+        self.comb += new_acc.eq(Cat(Constant(0, _PRES_F), anchor_ns_r))
+        _ = (pres_corr, step_scaled, anchored)  # (ramp/PLL machinery retained for diagnostics)
 
         def mac_byte(sig, i):   # i=0 is the wire-first (MSB) byte of a 48-bit MAC
             hi = 48 - i * 8

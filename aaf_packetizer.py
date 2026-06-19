@@ -306,11 +306,17 @@ class AAFPacketizer(LiteXModule):
         self.comb += level_u.eq(self.block_level)   # fifo_level CSR = frame-equiv
         # rp.adr is driven by the byte builder's fetch pointer (rdf), below.
 
-        # SEQUENTIAL sample write — each USB sample goes straight into the ring in
-        # arrival order. No demux, no frame shift, nothing wide. Writing STARTS at
-        # the first ch0 (first marker) so ring[0]=ch0; thereafter every sample is
-        # stored, and the reader (48 samples/packet = a multiple of 8) stays
-        # channel-aligned. Register the bridge output first (stable, timing-clean).
+        # CHANNEL-ADDRESSED write (ADAT BundleDemultiplexer style): place every USB
+        # sample at frame_base + channel_nr, NOT sequentially. The decoder labels
+        # each sample with its explicit channel (0..BLOCK_CH-1) plus a `first`(ch0)
+        # marker; frame_base advances ONE media-frame (BLOCK_CH) per `first`. The old
+        # SEQUENTIAL write (wr+=1) inferred channel from POSITION, so a single dropped
+        # sample (ring full) shifted the write phase and ROTATED ALL channels
+        # permanently — the 48ch "corrupt after a while". 8ch survived only because
+        # that rotation was a constant offset fixed once by chan_rot. With explicit
+        # addressing a drop leaves ONE stale channel slot (a tiny per-channel glitch)
+        # and the frame grid self-aligns every `first`, so drift heals within one
+        # media-frame. Register the bridge output first (stable, timing-clean).
         do_pop = usb_readable
         samp_lo_r = Signal(32)
         samp_hi_r = Signal(first_bit + 1)   # [0:first_bit]=channel(0..BLOCK_CH-1), [first_bit]=first
@@ -322,13 +328,24 @@ class AAFPacketizer(LiteXModule):
                 samp_hi_r.eq(usb_sample_hi[0:first_bit + 1]),
             ),
         ]
-        first  = samp_hi_r[first_bit]               # block channel-0 marker
-        samp32 = samp_lo_r                          # true 32-bit, no truncation
+        first   = samp_hi_r[first_bit]              # block channel-0 marker
+        chan_nr = samp_hi_r[0:first_bit]            # explicit channel 0..BLOCK_CH-1
+        samp32  = samp_lo_r                         # true 32-bit, no truncation
         en = self.enable.storage
         started   = Signal()                        # high once the first block-ch0 seen
-        # ANCHOR-ONCE block alignment (48 is not pow2, so no & mask). rd_anchor =
-        # the ring address where the first block-ch0 after enable lands; the reader
-        # starts there and consumes whole BLOCK_SAMPLES, staying block-aligned.
+        frame_base = Signal(32)                     # ring addr of current media-frame ch0
+        new_base   = Signal(32)
+        self.comb += new_base.eq(frame_base + BLOCK_CH)   # next media-frame slot
+        wr_addr    = Signal(32)
+        # On `first` the sample is ch0 of a NEW frame -> address it in new_base; for
+        # ch1..N-1 stay in the current frame_base. (chan_nr==0 when first.)
+        self.comb += If(samp_vld & first,
+            wr_addr.eq(new_base + chan_nr),
+        ).Else(
+            wr_addr.eq(frame_base + chan_nr),
+        )
+        # rd_anchor = the first frame's base; reader starts there, consumes whole
+        # BLOCK_SAMPLES (=6 media-frames) and stays frame-aligned.
         rd_anchor = Signal(32)
         # Drop new samples only if the ring is genuinely full (startup transient);
         # the servo keeps it centred so this never fires in steady state.
@@ -338,7 +355,7 @@ class AAFPacketizer(LiteXModule):
         self.comb += [
             self.usb_pop.eq(do_pop),                # always drain the bridge FIFO
             do_write.eq(en & samp_vld & (started | first) & have_space),
-            wp.adr.eq(wr[0:log2depth]),
+            wp.adr.eq(wr_addr[0:log2depth]),
             # Spread 32 data bits around the parity positions (8,17,26,35).
             wp.dat_w.eq(Cat(samp32[0:8],  Constant(0, 1),
                             samp32[8:16], Constant(0, 1),
@@ -346,14 +363,16 @@ class AAFPacketizer(LiteXModule):
                             samp32[24:32],Constant(0, 1))),
             wp.we.eq(do_write),
         ]
+        # wr (for level/servo) = frame_base: every sample below it is in a COMPLETE
+        # media-frame. Advance one frame per `first` REGARDLESS of have_space, so even
+        # a dropped ch0 keeps the frame grid intact (ch1..N-1 still land in the new
+        # frame; only ch0 is stale that frame).
+        self.comb += wr.eq(frame_base)
         self.sync += [
             If(~en, started.eq(0)).Elif(samp_vld & first, started.eq(1)),
-            If(do_write,
-                wr.eq(wr + 1),
-            ),
-            # Capture the read anchor at the FIRST block-ch0 after enable (the wr
-            # address where that ch0 is being written). Set once per enable.
-            If(en & ~started & samp_vld & first & have_space, rd_anchor.eq(wr)),
+            If(samp_vld & first & (started | first), frame_base.eq(new_base)),
+            # Capture the read anchor at the FIRST block-ch0 after enable.
+            If(en & ~started & samp_vld & first, rd_anchor.eq(new_base)),
         ]
 
         # =========================================================

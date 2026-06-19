@@ -468,13 +468,15 @@ class AAFPacketizer(LiteXModule):
         # otherwise the loop locks one packet-period ahead (eff_offset = +2.12ms not
         # +2ms). With the prediction it settles at exactly pres_offset (sim-verified
         # sims/sim_pll_pres.py: mean 1.9995ms, stdev 104ns, no drift, glitch-immune).
-        # PIPELINE: the *1e9 anchor tree + the err/corr were all in ONE combinational
-        # pres_acc feedback loop -> 18ns routing -> Fmax dropped to ~48MHz. The pres
-        # only updates every 125us, so registering the anchor and the correction is
-        # invisible (1-2 cycle stale = ~tens of ns of gPTP) but breaks the loop into
-        # short register-to-register hops.
+        # PIPELINE the SLOW part only: register anchor_ns to take the *1e9 shift-add
+        # tree OUT of the pres_acc feedback loop (that tree spread across the die was
+        # the 18ns route -> 48MHz). The correction stays COMBINATIONAL at do_emit so
+        # it's sampled at the right phase (registering it sampled the wrong phase ->
+        # corr~0 -> PLL stopped correcting -> drift). The 1-cycle-stale anchor is
+        # ~20ns of gPTP = invisible. Loop is now pres_acc->err->corr->new_acc (no
+        # *1e9 tree) -> short.
         anchor_ns_r = Signal(32)
-        self.sync += anchor_ns_r.eq(anchor_ns)              # register the *1e9 tree output
+        self.sync += anchor_ns_r.eq(anchor_ns)              # register the *1e9 tree output ONLY
         self.comb += pres_err.eq(anchor_ns_r - pres_ns - _P0_ns)
         pres_corr = Signal((32, True))
         self.comb += If((pres_err < 1000000) & (pres_err > -1000000),   # |err|<1ms: track
@@ -482,13 +484,11 @@ class AAFPacketizer(LiteXModule):
         ).Else(
             pres_corr.eq(0),                                # |err|>=1ms (1s TSU wrap): hold ramp
         )
-        pres_corr_r = Signal((32, True))
-        self.sync += pres_corr_r.eq(pres_corr)              # register correction -> breaks the loop
         new_acc = Signal(32 + _PRES_F)
         self.comb += If(~anchored,
             new_acc.eq(Cat(Constant(0, _PRES_F), anchor_ns_r)),                   # seed: lock to gPTP+offset
         ).Else(
-            new_acc.eq(pres_acc + (_P0_ns << _PRES_F) + (pres_corr_r << _PRES_F)),# smooth ramp + gentle pull
+            new_acc.eq(pres_acc + (_P0_ns << _PRES_F) + (pres_corr << _PRES_F)),  # smooth ramp + gentle pull
         )
         _ = step_scaled  # (dilation retained for diagnostics; PLL replaces it)
 

@@ -736,7 +736,7 @@ def main():
     parser.add_argument("--build",        action="store_true", help="Build bitstream.")
     parser.add_argument("--soft-only",    action="store_true", help="Generate software headers only (no P&R).")
     parser.add_argument("--load",         action="store_true", help="Load bitstream.")
-    parser.add_argument("--seed", default=3, type=int, help="nextpnr P&R seed. "
+    parser.add_argument("--seed", default=1, type=int, help="nextpnr P&R seed. "
         "PINNED to 3: with PYTHONHASHSEED=0 (forced at the top of this file so the "
         "build is REPRODUCIBLE) seed 3 places the 48ch/6-ring SoC at 57.57 MHz, "
         "clear of the ~57 MHz USB-feedback floor. WITHOUT the fixed hash seed the "

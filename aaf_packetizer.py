@@ -396,7 +396,17 @@ class AAFPacketizer(LiteXModule):
         # the builder emits silence so the listener (AxC) can still lock.
         primed  = Signal()
         _center = SRING_DEPTH // 2                    # half the ring, in samples
-        self.sync += [If(~en, primed.eq(0)).Elif(level >= _center, primed.eq(1))]
+        # HYSTERESIS: prime at half-full, but UN-PRIME on underrun (level < one
+        # packet of samples). Without the un-prime, when the ring drains (USB
+        # stopped / host not feeding), the reader kept advancing and WRAPPED through
+        # stale ring data forever -> continuous noise on the live channels even with
+        # NO USB input (the smoking-gun symptom). Un-priming makes the builder emit
+        # silence (samp_hold=0, rd holds) until the ring refills past center.
+        self.sync += [
+            If(~en, primed.eq(0)
+            ).Elif(level >= _center, primed.eq(1)
+            ).Elif(level < FRAME_SAMPLES, primed.eq(0)),
+        ]
         strobe = Signal()
         self.comb += strobe.eq(mcr.sample_strobe & en)
         underruns = Signal(32)

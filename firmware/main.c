@@ -1345,8 +1345,18 @@ int main(void)
         // anchor, breaking the stream. Re-arm only on a full unlock (rare; gPTP
         // lock has hysteresis). See [[gptp-step-invalidates-time-stamps]].
         {
-            static uint8_t reanchored = 0;
-            static uint8_t talker_on  = 0;
+            static uint8_t  reanchored = 0;   // 0=off 1=edge-anchored 2=settle-reanchored
+            static uint8_t  talker_on  = 0;
+            static uint32_t anchor_ms  = 0;
+            // gPTP servo_locked fires the instant the offset crosses the lock
+            // threshold, but the offset is STILL creeping to its steady state for
+            // a few more seconds. Anchoring the pres at that edge stamps a drifting
+            // presentation time; the listener (AxC) latches that drift and never
+            // recovers without a stream restart. So: anchor on the edge (stream is
+            // present), THEN re-anchor once gPTP has held lock for GM_SETTLE_MS so
+            // the listener locks to a SETTLED pres. This is exactly what a manual
+            // reconnect-after-GM-settle does by hand. (HW-found 2026-06-20.)
+            #define GM_SETTLE_MS 5000
             // GATE the gateware AAF talker on gPTP lock. Streaming before the
             // media clock is gPTP-disciplined stamps wrong presentation times →
             // the listener can't media-lock → broadband noise on the audio.
@@ -1359,11 +1369,22 @@ int main(void)
             // at cs=1 the CRF rate is carried by the pres-ramp dilation).
             uint8_t media_clock_ok = (mcr.cs == 1) ? mcr.servo_locked : gptp.servo_locked;
             if (aaf_gw_enabled && gptp.servo_locked && media_clock_ok) {
-                if (!reanchored) {
+                if (reanchored == 0) {
                     aaf_pkt_enable_write(0);   // reset gateware `anchored`
                     aaf_pkt_enable_write(1);   // enable + anchor to locked TSU
                     reanchored = 1; talker_on = 1;
+                    anchor_ms = gptp_uptime_ms();
                     printf("[main] gPTP locked — AAF talker ENABLED + anchored\n");
+                } else if (reanchored == 1 &&
+                           (gptp_uptime_ms() - anchor_ms) >= GM_SETTLE_MS) {
+                    // gPTP has now held lock for GM_SETTLE_MS -> offset settled.
+                    // Re-anchor so the listener latches a STABLE presentation time
+                    // (the missing "clean start" anchor). Brief stream blip -> AxC
+                    // re-locks to the settled pres = stable at any offset.
+                    aaf_pkt_enable_write(0);
+                    aaf_pkt_enable_write(1);
+                    reanchored = 2;
+                    printf("[main] gPTP settled — AAF talker RE-anchored (clean start)\n");
                 }
             } else {
                 reanchored = 0;

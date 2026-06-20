@@ -1345,9 +1345,10 @@ int main(void)
         // anchor, breaking the stream. Re-arm only on a full unlock (rare; gPTP
         // lock has hysteresis). See [[gptp-step-invalidates-time-stamps]].
         {
-            static uint8_t  reanchored = 0;   // 0=off 1=edge-anchored 2=settle-reanchored
+            static uint8_t  reanchored = 0;   // 0=off 1=edge 2=settle-nudged 3=done
             static uint8_t  talker_on  = 0;
             static uint32_t anchor_ms  = 0;
+            static uint32_t saved_off  = 0;   // configured pres_offset, restored after the nudge
             // gPTP servo_locked fires the instant the offset crosses the lock
             // threshold, but the offset is STILL creeping to its steady state for
             // a few more seconds. Anchoring the pres at that edge stamps a drifting
@@ -1377,14 +1378,30 @@ int main(void)
                     printf("[main] gPTP locked — AAF talker ENABLED + anchored\n");
                 } else if (reanchored == 1 &&
                            (gptp_uptime_ms() - anchor_ms) >= GM_SETTLE_MS) {
-                    // gPTP has now held lock for GM_SETTLE_MS -> offset settled.
-                    // Re-anchor so the listener latches a STABLE presentation time
-                    // (the missing "clean start" anchor). Brief stream blip -> AxC
-                    // re-locks to the settled pres = stable at any offset.
+                    // gPTP has now held lock for GM_SETTLE_MS -> clock SETTLED.
+                    // Reproduce the HW-proven manual recipe (offset BUMP + reconnect,
+                    // done AFTER settle). A bare re-anchor re-emits the SAME avtp_ts
+                    // numbers, so the AxC keeps its stale pre-settle launch-time model
+                    // (HW: bare reconnect WITHOUT an offset bump does NOT fix the
+                    // timestamp). So we must (a) re-anchor to the settled TSU, (b)
+                    // re-advertise SRP so the listener re-latches its transit budget,
+                    // and (c) apply a VISIBLE pres-offset shift so the AxC observes a
+                    // presentation-time change and re-derives its playout. The shift is
+                    // restored to the configured offset one step later (state 3).
                     aaf_pkt_enable_write(0);
-                    aaf_pkt_enable_write(1);
-                    reanchored = 2;
-                    printf("[main] gPTP settled — AAF talker RE-anchored (clean start)\n");
+                    aaf_pkt_enable_write(1);            // re-anchor to settled gPTP
+                    srp_talker_enable(&srp, 1);         // re-advertise (MRP NEW x2)
+                    saved_off = aaf_pkt_pres_offset_read();
+                    aaf_pkt_pres_offset_write(saved_off + 1000000);  // +1ms visible nudge
+                    reanchored = 2; anchor_ms = gptp_uptime_ms();
+                    printf("[main] gPTP settled — re-anchor + SRP re-advertise + pres nudge\n");
+                } else if (reanchored == 2 &&
+                           (gptp_uptime_ms() - anchor_ms) >= 400) {
+                    // Restore the configured offset; the AxC re-derives once more and
+                    // settles on it (net latency = configured, e.g. 2ms).
+                    aaf_pkt_pres_offset_write(saved_off);
+                    reanchored = 3;
+                    printf("[main] pres nudge restored to configured offset\n");
                 }
             } else {
                 reanchored = 0;

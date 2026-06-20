@@ -697,11 +697,19 @@ class AVBSoC(SoCCore):
         # block_level) DOUBLE-scaled it to 0..32, so err = CENTRE - level was
         # ALWAYS positive -> feedback always told the host "send MORE" -> ring
         # pinned FULL (level=127) -> have_space gated writes DROPPED samples ->
-        # not-clean audio. else-branch (gateware not draining) = fifo_depth>>3 =
-        # 64 = same mid-level so the wrapper applies no trim.
+        # not-clean audio. else-branch (gateware DISABLED, pre-gPTP-lock) MUST be the
+        # servo CENTRE so the wrapper applies NO trim while we're held off: the talker
+        # is gated off for ~6s until gPTP locks, and during that window do_pop still
+        # drains the USB FIFO but do_write is gated -> if we feed a BELOW-centre level
+        # the wrapper tells the host "send MORE" the whole time -> the host over-delivers
+        # -> when enable finally asserts the ring is slammed full -> have_space drops
+        # writes -> channel-phase corruption = the cold-start "bad audio". fifo_depth>>3
+        # = 64>>3 = 8 (NOT 64 — the old comment assumed fifo_depth=512); 8 << centre ->
+        # 6s of over-delivery. Feed the CENTRE constant (64) instead.
+        _BL_CENTRE = 64
         self.comb += usb_block_level.eq(
             Mux(aaf_pkt.enable.storage,
-                aaf_pkt.block_level, aaf_pkt.fifo_depth >> 3))
+                aaf_pkt.block_level, _BL_CENTRE))
 
         # Frame-atomic TX mux: firmware SRAM reader (priority) + gateware AAF
         # talker → MAC core sink. Claim the wishbone-TX seam (see the LiteEth

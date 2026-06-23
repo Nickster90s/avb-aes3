@@ -609,7 +609,7 @@ void gptp_servo_update(gptp_t *g)
     // (measured off reads ~0 when locked even if the actual clock is off — correlate
     // add_d/lck/stp here with the wire pres-offset capture.)
     static uint32_t dbg_count = 0;
-    if ((dbg_count++ & 0x0F) == 0) {
+    if (g_verbose && (dbg_count++ & 0x0F) == 0) {   // on-demand only (was always-on diag)
         printf("[gPTP] off=%lld add_d=%lld int=%lld lck=%d stp=%lu pd=%lld\n",
                (long long)offset,
                (long long)((int64_t)g->current_addend_full - (int64_t)g->base_addend_full),

@@ -471,75 +471,24 @@ class AAFPacketizer(LiteXModule):
         self.comb += anchor_ns.eq((_mul_1e9_lo32(tsu.seconds)
                                    + tsu.nanoseconds
                                    + self.pres_offset.storage)[0:32])
-        dinc = Signal((27, True))                         # signed (inc - pres_base)
-        # Dilate relative to the gPTP-disciplined base (CSR), NOT the build-time
-        # nominal constant. cs=0: increment == pres_base => dinc=0 => no dilation
-        # (the NCO already IS 48000 gPTP-Hz). cs=1: dinc = CRF - gptp_base tracks
-        # CRF relative to gPTP. _Kfix stays constant (ppm*ppm residual).
-        self.comb += dinc.eq(mcr.increment - self.pres_base.storage)
-        # Constant multiply dinc*_Kfix via a shift-add tree. A real multiplier
-        # infers a DSP48 whose carry-cascade nextpnr-xilinx can't route (same
-        # issue/fix as the LiteEth TSU *1e9 -> shift-add workaround).
-        _kexpr = None
-        for _b in range(_Kfix.bit_length()):
-            if (_Kfix >> _b) & 1:
-                _term = dinc << _b
-                _kexpr = _term if _kexpr is None else (_kexpr + _term)
-        dinc_K = Signal((40, True))
-        self.comb += dinc_K.eq(_kexpr)
-        step_scaled = Signal((40, True))                  # per-packet period, ns<<F
-        self.comb += step_scaled.eq((_P0_ns << _PRES_F) - dinc_K)
-        # PLL-style presentation timestamp. Pure free-running ramp DRIFTS (the old
-        # dilated ramp fell ~11ms into the past -> AxC discarded all frames = no
-        # audio). Pure per-packet re-anchor JITTERS (gPTP-sample noise + the 1-second
-        # TSU seconds/ns wrap glitch -> AxC saw Early AND Late). This does both right:
-        # a SMOOTH nominal ramp (+P0/packet) plus a GENTLE pull (err>>K) toward
-        # gPTP_now+offset, with a large-error CLAMP that rejects the 1s wrap glitch.
-        # => no drift (the pull cancels any rate error), low jitter (gPTP noise /2^K),
-        # glitch-immune.
-        _PLL_K = 6                                          # correction = err >> 6
-        pres_ns  = Signal(32)
-        self.comb += pres_ns.eq(pres_acc[_PRES_F:_PRES_F + 32])
-        pres_err = Signal((32, True))                       # signed 32-bit ns error (wraps clean)
-        # Error vs the PREDICTED next pres (pres_ns + P0), not the current one —
-        # otherwise the loop locks one packet-period ahead (eff_offset = +2.12ms not
-        # +2ms). With the prediction it settles at exactly pres_offset (sim-verified
-        # sims/sim_pll_pres.py: mean 1.9995ms, stdev 104ns, no drift, glitch-immune).
-        # PIPELINE the SLOW part only: register anchor_ns to take the *1e9 shift-add
-        # tree OUT of the pres_acc feedback loop (that tree spread across the die was
-        # the 18ns route -> 48MHz). The correction stays COMBINATIONAL at do_emit so
-        # it's sampled at the right phase (registering it sampled the wrong phase ->
-        # corr~0 -> PLL stopped correcting -> drift). The 1-cycle-stale anchor is
-        # ~20ns of gPTP = invisible. Loop is now pres_acc->err->corr->new_acc (no
-        # *1e9 tree) -> short.
+        # PURE RE-ANCHOR: pres = gPTP_now + offset EVERY packet, registered ONE cycle
+        # to keep the *1e9 shift-add tree off the critical path (anchor_ns_r ~20ns
+        # stale = negligible). Re-sampling gPTP every packet pins eff_offset =
+        # pres_offset (+2ms) by construction; do_emit is media-clock-paced so avtp_ts
+        # spacing stays smooth and the AxC recovers a clean rate.
+        #
+        # DELETED (2026-06-23): the dilated-ramp + PLL machinery (dinc = mcr.increment
+        # - pres_base, step_scaled, pres_err, pres_corr). It was already unused (Python
+        # `_ = (...)` discard), BUT it was still SYNTHESIZED, and on openXC7 the dead
+        # increment-math merged into the live pres tree -> at cold start the pres leaked
+        # ~the NCO increment (HW: eff_offset = gw_pres-gw_gptp read 4123363 = `inc`, not
+        # the 2,000,000 ns pres_offset; a manual re-anchor "trick" cleared it). Removing
+        # the dead increment-using logic removes the only path the increment could leak.
         anchor_ns_r = Signal(32)
         self.sync += anchor_ns_r.eq(anchor_ns)              # register the *1e9 tree output ONLY
-        self.comb += pres_err.eq(anchor_ns_r - pres_ns - _P0_ns)
-        # Clamp at 100ms, NOT 1ms: only the 1-second TSU seconds/ns wrap glitch
-        # (~1e9 ns) must be rejected. A 1ms clamp was a TRAP -- once a transient
-        # (overrun under an MRP burst, NCO state shift, wrap edge) pushed the pres
-        # error past 1ms the PLL could NEVER correct it back -> stuck -> timestamp
-        # "corrupt after ~30s" (the longer 6-stream build hits this; 8ch rarely did).
-        # 100ms lets the gentle pull RECOVER from any few-ms transient (err>>6 of a
-        # few ms = tens of us/pkt -> back in ~ms) while still rejecting the 1s wrap.
-        pres_corr = Signal((32, True))
-        self.comb += If((pres_err < 100000000) & (pres_err > -100000000),  # |err|<100ms: track
-            pres_corr.eq(pres_err >> _PLL_K),
-        ).Else(
-            pres_corr.eq(0),                                # |err|>=100ms = 1s TSU wrap: hold ramp
-        )
         new_acc = Signal(32 + _PRES_F)
-        # PURE RE-ANCHOR: pres = gPTP_now + offset EVERY packet. Both the dilated ramp
-        # AND the PLL DRIFTED open-loop on HW (eff_offset -> -20ms cs=0 / -33ms cs=1,
-        # ~-90us/s): any tiny step error accumulates with no correction, and the AxC
-        # then gets presentation times tens of ms in the past -> mis-timed/dropped
-        # audio (the "buzzy tone with breaks"). Re-sampling gPTP every packet pins
-        # eff_offset = pres_offset (+2ms) BY CONSTRUCTION -- no drift, ever. do_emit is
-        # media-clock-paced (regular) so avtp_ts spacing stays smooth (AxC recovers a
-        # clean rate); gPTP jitter is the servo's ~18ns, far below the AxC buffer.
-        # anchor_ns_r = registered *1e9 tree (1 cycle ~20ns stale = negligible).
         self.comb += new_acc.eq(Cat(Constant(0, _PRES_F), anchor_ns_r))
-        _ = (pres_corr, step_scaled, anchored)  # (ramp/PLL machinery retained for diagnostics)
+        _ = anchored  # (latched in the do_emit block below)
 
         def mac_byte(sig, i):   # i=0 is the wire-first (MSB) byte of a 48-bit MAC
             hi = 48 - i * 8

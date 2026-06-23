@@ -407,6 +407,23 @@ static void process_follow_up(gptp_t *g, const uint8_t *ptp, uint32_t ptp_len)
     // as a steady-state addend offset, which is the right place for it.
     int64_t raw_offset = rx_ns - orig_ns - corr_ns - g->mean_path_delay_ns;
 
+    // INSTRUMENT A (2026-06-23): cold-start offset-component trace. The wire proves
+    // the TSU is +2.12ms off the GM while raw_offset computes ~0 -> one of rx/orig is
+    // biased (corr=0, mpd<20us ruled out on the wire). Print the RAW Sync-RX stamp, the
+    // parsed originTimestamp, and the LIVE TSU for the first 40 Syncs. Compare the
+    // printed orig (sec.ns) against the originTimestamp captured on the wire: if they
+    // differ by ~2.1ms, the FPGA mis-parses orig; if equal, rx_ns / the RX-stamp path
+    // carries it. live-vs-rx shows the Sync-RX -> handler parse latency.
+    if (g->sync_count < 40) {
+        ptp_timestamp_t lv = gptp_read_time();
+        printf("[gPTP-cs] sc=%lu rx=%lu.%09lu orig=%lu.%09lu mpd=%ld raw=%ld live=%lu.%09lu corr=%ld\n",
+               (unsigned long)g->sync_count,
+               (unsigned long)g->sync_rx_ts.seconds,   (unsigned long)g->sync_rx_ts.nanoseconds,
+               (unsigned long)g->sync_origin_ts.seconds,(unsigned long)g->sync_origin_ts.nanoseconds,
+               (long)g->mean_path_delay_ns, (long)raw_offset,
+               (unsigned long)lv.seconds, (unsigned long)lv.nanoseconds, (long)corr_ns);
+    }
+
     // (4) Median-of-5 filter (mirrors AES67 ptpv2_servo_median.vhd:114).
     // A single outlier Sync — caused by a bridge buffering burst — should
     // not perturb the servo. We sort a 5-element circular buffer and feed

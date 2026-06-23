@@ -1348,7 +1348,6 @@ int main(void)
             static uint8_t  reanchored = 0;   // 0=off 1=edge 2=settle-nudged 3=done
             static uint8_t  talker_on  = 0;
             static uint32_t anchor_ms  = 0;
-            static uint32_t saved_off  = 0;   // configured pres_offset, restored after the nudge
             // gPTP servo_locked fires the instant the offset crosses the lock
             // threshold, but the offset is STILL creeping to its steady state for
             // a few more seconds. Anchoring the pres at that edge stamps a drifting
@@ -1357,7 +1356,7 @@ int main(void)
             // present), THEN re-anchor once gPTP has held lock for GM_SETTLE_MS so
             // the listener locks to a SETTLED pres. This is exactly what a manual
             // reconnect-after-GM-settle does by hand. (HW-found 2026-06-20.)
-            #define GM_SETTLE_MS 5000
+            #define GM_SETTLE_MS 8000   // >= the ~8-10s gPTP integrator settle (Ti=2.5s)
             // GATE the gateware AAF talker on gPTP lock. Streaming before the
             // media clock is gPTP-disciplined stamps wrong presentation times →
             // the listener can't media-lock → broadband noise on the audio.
@@ -1378,30 +1377,28 @@ int main(void)
                     printf("[main] gPTP locked — AAF talker ENABLED + anchored\n");
                 } else if (reanchored == 1 &&
                            (gptp_uptime_ms() - anchor_ms) >= GM_SETTLE_MS) {
-                    // gPTP has now held lock for GM_SETTLE_MS -> clock SETTLED.
-                    // Reproduce the HW-proven manual recipe (offset BUMP + reconnect,
-                    // done AFTER settle). A bare re-anchor re-emits the SAME avtp_ts
-                    // numbers, so the AxC keeps its stale pre-settle launch-time model
-                    // (HW: bare reconnect WITHOUT an offset bump does NOT fix the
-                    // timestamp). So we must (a) re-anchor to the settled TSU, (b)
-                    // re-advertise SRP so the listener re-latches its transit budget,
-                    // and (c) apply a VISIBLE pres-offset shift so the AxC observes a
-                    // presentation-time change and re-derives its playout. The shift is
-                    // restored to the configured offset one step later (state 3).
-                    aaf_pkt_enable_write(0);
-                    aaf_pkt_enable_write(1);            // re-anchor to settled gPTP
-                    srp_talker_enable(&srp, 1);         // re-advertise (MRP NEW x2)
-                    saved_off = aaf_pkt_pres_offset_read();
-                    aaf_pkt_pres_offset_write(saved_off + 1000000);  // +1ms visible nudge
+                    // gPTP has held lock for GM_SETTLE_MS -> the frequency integrator
+                    // has settled (Ti=2.5s -> ~8-10s; the lock EDGE is still slewing).
+                    // The deep-research finding: a pres NUDGE / enable-toggle is INVISIBLE
+                    // to the AxC because the gateware re-anchors pres=gPTP_now+offset every
+                    // packet (aaf_packetizer.py) -> no real stream discontinuity -> the AxC
+                    // keeps its stale pre-settle playout model. GenAVB only (re)anchors media
+                    // against a SETTLED clock. So do a REAL stream restart the AxC OBSERVES:
+                    // drop the talker long enough for the AxC to lose MEDIA_LOCKED, then
+                    // bring it back on the settled clock +
+                    // re-advertise SRP. This is the automatic equivalent of the manual ACMP
+                    // reconnect that HW-provably fixes the timestamp.
+                    aaf_pkt_enable_write(0);            // STREAM DROP (AxC observes the gap)
                     reanchored = 2; anchor_ms = gptp_uptime_ms();
-                    printf("[main] gPTP settled — re-anchor + SRP re-advertise + pres nudge\n");
+                    printf("[main] gPTP settled — AAF stream DROP (real restart for re-derive)\n");
                 } else if (reanchored == 2 &&
-                           (gptp_uptime_ms() - anchor_ms) >= 400) {
-                    // Restore the configured offset; the AxC re-derives once more and
-                    // settles on it (net latency = configured, e.g. 2ms).
-                    aaf_pkt_pres_offset_write(saved_off);
+                           (gptp_uptime_ms() - anchor_ms) >= 1200) {
+                    // ~1.2s gap (>> the AAF media-lock hysteresis) -> AxC dropped the lock.
+                    // Re-stream on the now-settled clock + re-advertise so it re-derives.
+                    aaf_pkt_enable_write(1);            // re-stream on settled gPTP
+                    srp_talker_enable(&srp, 1);         // re-advertise (MRP NEW x2)
                     reanchored = 3;
-                    printf("[main] pres nudge restored to configured offset\n");
+                    printf("[main] AAF stream UP on settled clock + SRP re-advertise\n");
                 }
             } else {
                 reanchored = 0;

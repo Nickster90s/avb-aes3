@@ -198,17 +198,12 @@ class AAFPacketizer(LiteXModule):
                              description="802.1Q TCI = (pcp<<13)|vid. Class A default pcp=3, vid=2.")
         self.pres_offset   = CSRStorage(32, reset=2_000_000,
                              description="presentation_time offset (ns) added to gPTP now. Milan AAF = 2 ms.")
-        # gPTP-disciplined media-clock base. The presentation-time ramp dilates
-        # by (mcr.increment - pres_base); firmware (mcr.c) writes here the NCO
-        # increment that equals EXACTLY 48000 gPTP-Hz (base_increment scaled by
-        # the gPTP servo's sys_clk-vs-GM ratio). So cs=0 (NCO at pres_base) =>
-        # dinc=0 => pres advances at exactly 125 us/packet; cs=1 (CRF) => dinc
-        # tracks CRF relative to gPTP. Reset = nominal base so the ramp is sane
-        # before firmware's first write. (Was a build-time constant = nominal
-        # base, which re-injected the full crystal error once the NCO got
-        # gPTP-disciplined.)
-        self.pres_base     = CSRStorage(32, reset=mcr.base_increment,
-                             description="NCO increment that equals 48000 gPTP-Hz (firmware writes the gPTP-disciplined base).")
+        # REMOVED (2026-06-23): pres_base CSR. It fed the (now-deleted) pres-ramp
+        # dilation, so it was dead; worse, on openXC7 the value mcr.c wrote into it
+        # (gbase ~= the NCO increment) was ending up in the pres in place of
+        # pres_offset -> cold-start avtp_ts = gPTP + ~increment (4123363) not +2ms.
+        # The two adjacent 32-bit CSRs (pres_offset @0x24, pres_base @0x28) aliased.
+        # Deleting pres_base removes the increment from the design entirely.
 
         # ---- CSRs: status (read-only diagnostics) ----
         self.packet_count   = CSRStatus(32, description="AAF frames transmitted.")

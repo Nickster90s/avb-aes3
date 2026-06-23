@@ -138,19 +138,13 @@ static uint32_t mcr_compute_gptp_base(const mcr_state_t *m)
 
 void mcr_watchdog_tick(mcr_state_t *m, uint32_t now_ms)
 {
-    // Keep the gPTP-locked media-clock reference current (runs every tick,
-    // bound or not). pres_base mirrors it to the AAF packetizer so the
-    // presentation-time ramp shares the SAME base: cs=0 -> dinc=0 -> pres
-    // advances at exactly 125 us/packet; cs=1 -> dinc tracks CRF *relative to
-    // gPTP*. Deadband-gated to avoid CSR thrash on servo jitter.
+    // Keep the gPTP-locked media-clock reference current (runs every tick).
+    // (REMOVED 2026-06-23: the aaf_pkt_pres_base_write mirror. The pres_base CSR
+    // is deleted — it aliased into the AAF pres on openXC7 and leaked ~the NCO
+    // increment into avtp_ts instead of pres_offset; the pres-ramp dilation that
+    // consumed it is gone. gptp_locked_base is still tracked for the NCO.)
     uint32_t gbase = mcr_compute_gptp_base(m);
     m->gptp_locked_base = gbase;
-    uint32_t pd = (gbase > m->pres_base_last) ? gbase - m->pres_base_last
-                                              : m->pres_base_last - gbase;
-    if (pd > MCR_GPTP_DEADBAND) {
-        m->pres_base_last = gbase;
-        aaf_pkt_pres_base_write(gbase);
-    }
 
     if (m->cs != 1 || !m->bound) {
         // Follow the gPTP-DISCIPLINED base (exactly 48000 gPTP-Hz), NOT the raw

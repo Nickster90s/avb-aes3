@@ -1345,58 +1345,28 @@ int main(void)
         // anchor, breaking the stream. Re-arm only on a full unlock (rare; gPTP
         // lock has hysteresis). See [[gptp-step-invalidates-time-stamps]].
         {
-            static uint8_t  reanchored = 0;   // 0=off 1=edge 2=settle-nudged 3=done
             static uint8_t  talker_on  = 0;
-            static uint32_t anchor_ms  = 0;
-            // gPTP servo_locked fires the instant the offset crosses the lock
-            // threshold, but the offset is STILL creeping to its steady state for
-            // a few more seconds. Anchoring the pres at that edge stamps a drifting
-            // presentation time; the listener (AxC) latches that drift and never
-            // recovers without a stream restart. So: anchor on the edge (stream is
-            // present), THEN re-anchor once gPTP has held lock for GM_SETTLE_MS so
-            // the listener locks to a SETTLED pres. This is exactly what a manual
-            // reconnect-after-GM-settle does by hand. (HW-found 2026-06-20.)
-            #define GM_SETTLE_MS 8000   // >= the ~8-10s gPTP integrator settle (Ti=2.5s)
-            // GATE the gateware AAF talker on gPTP lock. Streaming before the
-            // media clock is gPTP-disciplined stamps wrong presentation times →
-            // the listener can't media-lock → broadband noise on the audio.
-            // Hold the DATA off until locked; enable + anchor on the lock edge;
-            // drop back off if gPTP unlocks. The SELECTED media clock must ALSO be
-            // locked: cs=0 -> gPTP, cs=1 -> CRF (mcr.servo_locked). At cs=1 with no
-            // CRF source mcr.servo_locked=0 -> talker held OFF = no audio, per the
-            // AVDECC clock model (don't source a stream from an unlocked clock
-            // domain). gPTP must be locked regardless (the pres-time is gPTP-based;
-            // at cs=1 the CRF rate is carried by the pres-ramp dilation).
+            // CLEAN gate (2026-06-23): enable the gateware AAF talker once the
+            // SELECTED media clock is locked; disable on unlock. No settle timer,
+            // re-anchor, nudge, or ADP re-announce — those band-aids are removed
+            // while we fix the underlying gPTP convergence/stability (task A). The
+            // pres self-corrects every packet (gPTP+offset); the open issue is that
+            // gPTP itself is +2.1ms off at cold start and degrades again later, so
+            // fixing the talker layer was the wrong target.
+            // cs=0 -> gPTP is the media clock; cs=1 -> CRF (mcr.servo_locked); gPTP
+            // must be locked regardless (pres-time is gPTP-based).
             uint8_t media_clock_ok = (mcr.cs == 1) ? mcr.servo_locked : gptp.servo_locked;
             if (aaf_gw_enabled && gptp.servo_locked && media_clock_ok) {
-                if (reanchored == 0) {
-                    // First lock: START the settle timer; do NOT emit yet. The AxC
-                    // media-locks to the FIRST AAF frame it sees, so that frame must
-                    // ALREADY be on a SETTLED clock — otherwise it locks to the still-
-                    // slewing post-lock clock and never recovers without a manual
-                    // reconnect (the whole cold-start saga). "Good from the start"
-                    // (GenAVB gates media on a settled clock) makes the re-anchor /
-                    // nudge / re-announce dance unnecessary. Hold the talker OFF
-                    // (silence on the wire) until the integrator has converged.
-                    reanchored = 1; anchor_ms = gptp_uptime_ms();
-                    printf("[main] gPTP locked — settling %dms before first AAF frame\n",
-                           GM_SETTLE_MS);
-                } else if (reanchored == 1 &&
-                           (gptp_uptime_ms() - anchor_ms) >= GM_SETTLE_MS) {
-                    // Clock SETTLED (frequency integrator converged, Ti=2.5s -> ~8s).
-                    // Enable the talker NOW, on a stable clock -> the AxC media-locks
-                    // correctly from packet one. No re-anchor / nudge / re-announce.
+                if (!talker_on) {
                     aaf_pkt_enable_write(1);
-                    srp_talker_enable(&srp, 1);
-                    reanchored = 2; talker_on = 1;
-                    printf("[main] gPTP SETTLED — AAF talker enabled on stable clock (good from start)\n");
+                    talker_on = 1;
+                    printf("[main] gPTP locked — AAF talker enabled\n");
                 }
             } else {
-                reanchored = 0;
                 if (talker_on) {
-                    aaf_pkt_enable_write(0);   // hold OFF until the media clock (re)locks
+                    aaf_pkt_enable_write(0);
                     talker_on = 0;
-                    printf("[main] AAF talker held OFF — %s not locked\n",
+                    printf("[main] AAF talker OFF — %s not locked\n",
                            (mcr.cs == 1 && !mcr.servo_locked) ? "CRF media clock" : "gPTP");
                 }
             }

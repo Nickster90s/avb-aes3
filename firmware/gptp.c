@@ -566,7 +566,10 @@ void gptp_servo_update(gptp_t *g)
     // entry). Freezes 8 samples after the servo locks so a later `G` dump still
     // shows the whole boot->lock curve (the console drops on reboot, so live
     // capture is impossible). Pure observation — does not touch any control path.
-    if (g->conv_postlock < 8) {
+    // INSTRUMENT (2026-06-23): log CONTINUOUSLY, every 8th Sync (~1s), into the
+    // 400-entry ring = the last ~6.7 min. Was "freeze 8 samples post-lock" (boot
+    // curve only); now we need to catch the long-term "gets stuck" drift too.
+    if ((g->sync_count & 0x07) == 0) {
         int64_t od = offset;
         int64_t ad = (int64_t)g->current_addend_full - (int64_t)g->base_addend_full;
         if (od >  2000000000LL) od =  2000000000LL;
@@ -584,15 +587,18 @@ void gptp_servo_update(gptp_t *g)
     // Show offset+addend in hex every 2048th servo call (~4 min). Was 256
     // — but the ~80-char print blocks the main loop for ~7 ms and stacks
     // up with the dump print one line above. Available on demand via 's'.
+    // INSTRUMENT (2026-06-23): live 1-liner every 16 Syncs (~2s), ALWAYS on, so we
+    // can watch the gPTP internal state drift / step / flap when it "gets stuck".
+    // (measured off reads ~0 when locked even if the actual clock is off — correlate
+    // add_d/lck/stp here with the wire pres-offset capture.)
     static uint32_t dbg_count = 0;
-    if (g_verbose && (dbg_count++ & 0x7FF) == 0) {
-        printf("[gPTP] dbg off=0x%08lx_%08lx add=0x%08lx_%08lx int=0x%08lx_%08lx\n",
-               (unsigned long)((uint64_t)offset >> 32),
-               (unsigned long)((uint64_t)offset & 0xFFFFFFFF),
-               (unsigned long)(g->current_addend_full >> 32),
-               (unsigned long)(g->current_addend_full & 0xFFFFFFFF),
-               (unsigned long)((uint64_t)g->freq_integral >> 32),
-               (unsigned long)((uint64_t)g->freq_integral & 0xFFFFFFFF));
+    if ((dbg_count++ & 0x0F) == 0) {
+        printf("[gPTP] off=%lld add_d=%lld int=%lld lck=%d stp=%lu pd=%lld\n",
+               (long long)offset,
+               (long long)((int64_t)g->current_addend_full - (int64_t)g->base_addend_full),
+               (long long)g->freq_integral, g->servo_locked,
+               (unsigned long)g->servo_step_count,
+               (long long)g->mean_path_delay_ns);
     }
 
     // Coarse step on first lock or whenever offset blows past ~500 ms.

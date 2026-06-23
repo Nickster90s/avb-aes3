@@ -1379,26 +1379,18 @@ int main(void)
                            (gptp_uptime_ms() - anchor_ms) >= GM_SETTLE_MS) {
                     // gPTP has held lock for GM_SETTLE_MS -> the frequency integrator
                     // has settled (Ti=2.5s -> ~8-10s; the lock EDGE is still slewing).
-                    // The deep-research finding: a pres NUDGE / enable-toggle is INVISIBLE
-                    // to the AxC because the gateware re-anchors pres=gPTP_now+offset every
-                    // packet (aaf_packetizer.py) -> no real stream discontinuity -> the AxC
-                    // keeps its stale pre-settle playout model. GenAVB only (re)anchors media
-                    // against a SETTLED clock. So do a REAL stream restart the AxC OBSERVES:
-                    // drop the talker long enough for the AxC to lose MEDIA_LOCKED, then
-                    // bring it back on the settled clock +
-                    // re-advertise SRP. This is the automatic equivalent of the manual ACMP
-                    // reconnect that HW-provably fixes the timestamp.
-                    aaf_pkt_enable_write(0);            // STREAM DROP (AxC observes the gap)
-                    reanchored = 2; anchor_ms = gptp_uptime_ms();
-                    printf("[main] gPTP settled — AAF stream DROP (real restart for re-derive)\n");
-                } else if (reanchored == 2 &&
-                           (gptp_uptime_ms() - anchor_ms) >= 1200) {
-                    // ~1.2s gap (>> the AAF media-lock hysteresis) -> AxC dropped the lock.
-                    // Re-stream on the now-settled clock + re-advertise so it re-derives.
-                    aaf_pkt_enable_write(1);            // re-stream on settled gPTP
-                    srp_talker_enable(&srp, 1);         // re-advertise (MRP NEW x2)
-                    reanchored = 3;
-                    printf("[main] AAF stream UP on settled clock + SRP re-advertise\n");
+                    // The stream has been UP (silence/audio) the whole time so the AxC
+                    // could connect; now it's on a SETTLED clock. A media gap / pres
+                    // nudge did NOT make the AxC re-derive (not an AVDECC event). The
+                    // control-plane lever is an ADP ENTITY re-announce: Milan listeners
+                    // re-run fast-connect on an available_index change -> they re-send
+                    // CONNECT_TX and re-lock to our now-settled-clock stream. The stream
+                    // stays UP so the re-connect media-locks correctly. This is the
+                    // automatic equivalent of the manual ACMP reconnect.
+                    avdecc_reannounce(&avdecc);          // DEPARTING + AVAILABLE (idx++)
+                    srp_talker_enable(&srp, 1);          // re-advertise SRP (re-register)
+                    reanchored = 2;
+                    printf("[main] gPTP settled — ADP re-announce (AxC re-connect on settled clock)\n");
                 }
             } else {
                 reanchored = 0;

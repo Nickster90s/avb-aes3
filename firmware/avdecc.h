@@ -444,6 +444,13 @@ void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len);
 // Poll — sends periodic ADP advertisements.
 void avdecc_poll(avdecc_state_t *s);
 
+// Force an ADP entity re-announce (ENTITY_DEPARTING then ENTITY_AVAILABLE with a
+// bumped available_index). Milan listeners re-run fast-connect on an available_index
+// change -> they re-send CONNECT_TX and re-lock to our (now-settled-clock) stream.
+// Used by the cold-start gate once gPTP has settled, so the AxC re-derives its
+// presentation timing automatically (no manual reconnect).
+void avdecc_reannounce(avdecc_state_t *s);
+
 // CRF data-flow re-bootstrap watchdog. Call once per main loop with the
 // listener's running CRF rx-frame count (mcr.rx_count) and gptp_uptime_ms().
 // Re-triggers a stalled-but-connected talker (Auvitran LeaveAll expiry).

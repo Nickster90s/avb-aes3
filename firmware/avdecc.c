@@ -261,6 +261,17 @@ static void adp_send(avdecc_state_t *s, uint8_t msg_type)
     s->adp_tx_count++;
 }
 
+void avdecc_reannounce(avdecc_state_t *s)
+{
+    // DEPARTING then AVAILABLE (with a bumped available_index): a real ADP-level
+    // state change the AxC observes. Milan listeners re-run fast-connect on this ->
+    // re-send CONNECT_TX -> re-lock to our stream on the now-settled clock. A media
+    // gap alone did NOT make the AxC re-derive (not an AVDECC event); this is the
+    // standard control-plane way to force it.
+    adp_send(s, ADP_MSG_ENTITY_DEPARTING);
+    adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
+}
+
 // ---------------------------------------------------------------------------
 // ACMP — AVDECC Connection Management Protocol
 // ---------------------------------------------------------------------------

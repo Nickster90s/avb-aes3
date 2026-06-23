@@ -1370,6 +1370,32 @@ int main(void)
                            (mcr.cs == 1 && !mcr.servo_locked) ? "CRF media clock" : "gPTP");
                 }
             }
+
+            // AUTO-HEAL the cold-start AAF pres glitch (2026-06-23). The gateware
+            // sometimes latches a gPTP read ~2.12ms off, so the emitted pres is
+            // wrong (HW-proven: eff_offset = gw_pres - gw_gptp reads ~= the NCO
+            // increment instead of pres_offset). A re-anchor (the manual "trick")
+            // clears it. We have a PERFECT on-chip detector — the gateware's own
+            // debug regs — so re-anchor automatically, ONLY when the pres is
+            // actually wrong (not a blind band-aid; it self-corrects if it recurs).
+            if (talker_on) {
+                static uint32_t heal_ms = 0;
+                int32_t eff  = (int32_t)(aaf_pkt_dbg_last_pres_read()
+                                       - aaf_pkt_dbg_emit_gptp_read());
+                int32_t want = (int32_t)aaf_pkt_pres_offset_read();
+                int32_t err  = eff - want; if (err < 0) err = -err;
+                uint32_t now = gptp_uptime_ms();
+                if (err > 500000 && (uint32_t)(now - heal_ms) > 4000) {
+                    uint32_t po = aaf_pkt_pres_offset_read();
+                    aaf_pkt_enable_write(0);
+                    aaf_pkt_pres_offset_write(po + 1000000);  // visible nudge (the trick)
+                    aaf_pkt_enable_write(1);
+                    aaf_pkt_pres_offset_write(po);            // restore configured offset
+                    heal_ms = now;
+                    printf("[main] AAF pres glitch HEAL: eff=%ld want=%ld (re-anchor+nudge)\n",
+                           (long)eff, (long)want);
+                }
+            }
         }
 
         // USB→AVB rate matching: SMUNAUT-STYLE honest async feedback.

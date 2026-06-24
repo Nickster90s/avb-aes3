@@ -155,8 +155,28 @@ void gptp_set_addend_full(uint64_t addend_full)
     tsu_addend_frac_write((uint32_t)(addend_full & 0xFFFFFu));
 }
 
+// Accumulated correction that keeps gptp_uptime_ms() MONOTONIC across clock steps.
+// gptp_uptime_ms() is the interval-timing base for SRP/MCR/AVDECC (MSRP join period,
+// LeaveAll period, registrar age-outs, lock hysteresis) — but it is derived from the
+// PTP clock, which STEPS to GM wall-time at lock (~6 s into cold boot): a multi-
+// billion-ms discontinuity. Unsubtracted, that jump scrambled every subsystem's
+// *_ms timer at the worst moment — SRP's `elapsed_lva = now_ms - last_leaveall_ms`
+// went huge and fired a SPURIOUS LeaveAll, flushing the bridge's reservations just
+// as the controller fast-connected at boot = the cold-start reconnect strangeness.
+// Subtract each step's jump here so uptime is continuous; gptp_read_time() still
+// returns the real stepped PTP wall clock for actual timestamps.
+static int64_t gptp_uptime_bias_ms = 0;
+
 void gptp_step_time(ptp_timestamp_t t)
 {
+    ptp_timestamp_t before = gptp_read_time();
+    int64_t before_ms = (int64_t)before.seconds * 1000 + before.nanoseconds / 1000000;
+    int64_t target_ms = (int64_t)t.seconds      * 1000 + t.nanoseconds      / 1000000;
+    int64_t jump_ms   = target_ms - before_ms;
+    gptp_uptime_bias_ms += jump_ms;
+    if (jump_ms > 1000 || jump_ms < -1000)
+        printf("[gPTP] clock step absorbed: uptime bias += %ld ms (interval timers stay monotonic)\n",
+               (long)jump_ms);
     tsu_step_seconds_write(t.seconds);
     tsu_step_nsec_write(t.nanoseconds);
     tsu_step_apply_write(1);
@@ -177,8 +197,12 @@ void gptp_adjust_offset(int64_t offset_ns)
 
 uint32_t gptp_uptime_ms(void)
 {
+    // MONOTONIC interval time: raw PTP-clock ms minus the accumulated step jumps
+    // (see gptp_uptime_bias_ms above). Continuous across the GM-time step at lock,
+    // so SRP/MCR/AVDECC age-outs and periods don't glitch at cold boot.
     ptp_timestamp_t t = gptp_read_time();
-    return (uint32_t)(t.seconds * 1000 + t.nanoseconds / 1000000);
+    int64_t raw_ms = (int64_t)t.seconds * 1000 + t.nanoseconds / 1000000;
+    return (uint32_t)(raw_ms - gptp_uptime_bias_ms);
 }
 
 int64_t gptp_ts_diff_ns(ptp_timestamp_t a, ptp_timestamp_t b)

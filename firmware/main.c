@@ -1378,7 +1378,12 @@ int main(void)
                 if (!talker_on) {
                     aaf_pkt_enable_write(1);
                     talker_on = 1;
-                    printf("[main] gPTP locked — AAF talker enabled\n");
+                    // Talker is now ready to stream: push unsolicited STREAM_OUTPUT
+                    // info for all 6 streams so a listener stuck in AskingFailed
+                    // with a stale/zeroed binding (the MOTU stream-0 case) gets the
+                    // real stream_id+dest and re-probes instead of waiting forever.
+                    avdecc_notify_talkers_ready(&avdecc);
+                    printf("[main] gPTP locked — AAF talker enabled (pushed talker-ready unsol)\n");
                 }
             } else {
                 if (talker_on) {

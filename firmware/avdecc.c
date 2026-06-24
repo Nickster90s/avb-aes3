@@ -1809,6 +1809,11 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         aecp_set_status_cdl(tp, AECP_STATUS_SUCCESS, 12);   // header only
         avdecc_eth_send(64);                                  // 14 + 24 = 38, pad to 64
         s->aecp_tx_count++;
+        // New controller/listener registered → immediately hand it our talker
+        // streams' info, so one that registers AFTER the gPTP-lock talker-ready
+        // push still gets the stream_id/dest to resolve a stale binding + probe.
+        if (cmd_type == AEM_CMD_REGISTER_UNSOLICITED && slot < 0 && free_slot >= 0)
+            avdecc_notify_talkers_ready(s);
         break;
     }
 
@@ -2458,6 +2463,18 @@ void avdecc_listener_frame_rx(avdecc_state_t *s, uint16_t uid)
 {
     if (uid >= AVDECC_MAX_LISTENERS) return;
     s->stream_frames_rx[uid]++;
+}
+
+// Push an unsolicited STREAM_OUTPUT info for EVERY talker stream — call when the
+// talker becomes ready to stream (gPTP locked). A listener sitting in AskingFailed
+// with a stale/zeroed binding (HW-observed on the MOTU: stream_id=0, Probing
+// Passive, never sends CONNECT_TX uid=0) gets the correct stream_id + dest_mac
+// pushed at it, nudging it to re-resolve and re-probe instead of waiting forever.
+// Milan pattern: notify_stream_info_changed on a stream state transition.
+void avdecc_notify_talkers_ready(avdecc_state_t *s)
+{
+    for (uint16_t uid = 0; uid < AVDECC_MAX_TALKERS; uid++)
+        push_unsol_stream_info(s, AEM_DESC_STREAM_OUTPUT, uid);
 }
 
 // Track lock transitions for CLOCK_DOMAIN counters. Source depends on

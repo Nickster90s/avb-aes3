@@ -437,6 +437,10 @@ void avdecc_listener_lock_changed(avdecc_state_t *s, uint16_t uid, uint8_t locke
 // — increments only; no unsolicited push (Hive polls counter values).
 void avdecc_listener_frame_rx   (avdecc_state_t *s, uint16_t uid);
 
+// Push unsolicited STREAM_OUTPUT info for all talker streams (call when the
+// talker goes ready/streaming) so a listener stuck in AskingFailed re-probes.
+void avdecc_notify_talkers_ready(avdecc_state_t *s);
+
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).
 void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len);

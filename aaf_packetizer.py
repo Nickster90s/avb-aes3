@@ -302,7 +302,7 @@ class AAFPacketizer(LiteXModule):
         # loop -> the servo could only push the host FASTER, never slower -> NO
         # authority to pull a full ring back down (and no symmetric center for the
         # new integral). CENTRE=64 is now true mid; un-cap to the full 0..128.
-        _bl_max = 2 * fifo_depth                       # 128 = full ring
+        _bl_max = SRING_DEPTH >> _bl_sh                # 128 = full ring (any depth)
         self.block_level = Signal(max=_bl_max + 1)
         self.comb += If(level < 0,
             self.block_level.eq(0),

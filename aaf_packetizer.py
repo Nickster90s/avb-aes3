@@ -409,6 +409,13 @@ class AAFPacketizer(LiteXModule):
                       self.fifo_level.status.eq(level_u)]
         self.sync += [
             send_req.eq(0),
+            # underrun = media tick spent emitting silence (ring below the prime
+            # floor). This counter was DEAD — declared + read into the CSR but
+            # NEVER incremented — so every silence glitch was invisible
+            # (underrun_count stuck at 0). Counts ticks, so it is severity-weighted;
+            # a nonzero baseline at startup (initial prime) is expected, watch the
+            # DELTA after audio is flowing.
+            If(strobe & ~primed, underruns.eq(underruns + 1)),
             If(strobe,
                 If(blk_idx == (samples_per_packet - 1),
                     blk_idx.eq(0),
@@ -529,9 +536,17 @@ class AAFPacketizer(LiteXModule):
         rd_idx    = Signal(max=N_WORDS)
         pkt_count = Signal(32)
         overruns  = Signal(32)
+        # Ring-full write-drops: a USB sample arrives while ~have_space, so the
+        # channel-addressed write is SUPPRESSED (line ~358) -> ONE stale channel
+        # slot = an audible per-channel click. This was UNCOUNTED — overrun_count
+        # only caught builder-busy skips, so a ring hitting the full rail was
+        # invisible. Count it and fold into overrun_count.
+        write_drops = Signal(32)
+        self.sync += If(en & samp_vld & (started | first) & ~have_space,
+                        write_drops.eq(write_drops + 1))
         self.comb += [
             self.packet_count.status.eq(pkt_count),
-            self.overrun_count.status.eq(overruns),
+            self.overrun_count.status.eq(overruns + write_drops),
         ]
 
         # Current byte: header (idx<42), else the current sample's bytes (big-endian,

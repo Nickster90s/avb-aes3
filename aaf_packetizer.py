@@ -296,15 +296,22 @@ class AAFPacketizer(LiteXModule):
         # SRING_DEPTH >> _bl_sh == 128, so a half-full ring reads ~64. (8ch: shift
         # 5 == the old >>5; 48ch ring 32768 -> shift 8.)
         _bl_sh = log2depth - 7
-        self.block_level = Signal(max=fifo_depth + 1)
+        # Full-ring scale 0..128 (= SRING_DEPTH>>_bl_sh). This was CAPPED at
+        # fifo_depth (64) = HALF the ring, which (a) hid the upper half from the
+        # diagnostics and (b) made err=CENTRE-level ALWAYS >=0 in the .v feedback
+        # loop -> the servo could only push the host FASTER, never slower -> NO
+        # authority to pull a full ring back down (and no symmetric center for the
+        # new integral). CENTRE=64 is now true mid; un-cap to the full 0..128.
+        _bl_max = 2 * fifo_depth                       # 128 = full ring
+        self.block_level = Signal(max=_bl_max + 1)
         self.comb += If(level < 0,
             self.block_level.eq(0),
-        ).Elif((level >> _bl_sh) > fifo_depth,
-            self.block_level.eq(fifo_depth),
+        ).Elif((level >> _bl_sh) > _bl_max,
+            self.block_level.eq(_bl_max),
         ).Else(
             self.block_level.eq(level >> _bl_sh),   # ring samples -> 0..128, CENTER=mid
         )
-        level_u = Signal(max=fifo_depth + 1)
+        level_u = Signal(max=_bl_max + 1)
         self.comb += level_u.eq(self.block_level)   # fifo_level CSR = frame-equiv
         # rp.adr is driven by the byte builder's fetch pointer (rdf), below.
 

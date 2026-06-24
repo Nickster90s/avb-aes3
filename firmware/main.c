@@ -120,6 +120,7 @@ static uint8_t  aaf_gw_enabled;      // 1 = gateware aaf_pkt owns the USB→AVB 
 uint8_t         g_verbose = 0;       // 0 = quiet console (default); 1 = SRP/gPTP debug spam ('v' toggles)
 static uint32_t usb_lock_calls;      // diag: USB-FIFO servo invocations
 static uint8_t  usb_nco_freeze;      // diag: hold NCO at base (test implicit feedback)
+static uint32_t usb_fb_manual;       // 0 = auto .v loop; nonzero = held fb_ovr (FBSWEEP 'F')
 // SRC src_step PI servo gains — RUNTIME-TUNABLE over the console ('k'/'j') so
 // the loop can be tuned live with no 20-min rebuild. KI=0 -> pure proportional.
 static int32_t  g_src_kp = 16384;    // proportional: step units per frame of level error
@@ -679,12 +680,29 @@ static void check_uart_cmd(void)
             srp_talker_enable(&srp, 0);
             printf("[DIAG] AAF TX force-disabled\n");
             break;
-        case 'F':
-            // Frame-buffer dump removed with the dbg_frame_addr/data CSRs
-            // (2026-06-12, to shrink the AAF CSR bank / lift sys_clk). Use a
-            // tcpdump on the wire instead.
-            printf("[FRAME] dump removed (dbg CSRs trimmed for sys_clk); use tcpdump\n");
+        case 'F': {
+            // USB feedback SWEEP: hold a FIXED async-feedback value (overriding
+            // the .v auto loop) to characterise the host's delivery vs commanded
+            // rate. Step the table; at each value watch [AAF] rx-loc ep_out and
+            // aaf_pkt underrun. 0=auto. 0x60000=6.0 nominal=48000. The value where
+            // ep_out hits ~9,216,000 B/s tells us: if that's 0x60000 the host
+            // honors nominal -> our measured nco_rate reads LOW (measurement bug);
+            // if it needs >0x60000 the host genuinely under-delivers.
+            static const uint32_t fbtab[] = {
+                0, 0x60000, 0x60800, 0x61000, 0x61800, 0x62000, 0x63000
+            };
+            static int fbi = 0;
+            fbi = (fbi + 1) % (int)(sizeof(fbtab)/sizeof(fbtab[0]));
+            usb_fb_manual = fbtab[fbi];
+            if (usb_fb_manual == 0) {
+                printf("[FBSWEEP] fb_ovr = AUTO (measured loop)\n");
+            } else {
+                long bp = ((long)usb_fb_manual - 0x60000) * 10000 / 0x60000; // x100 %
+                printf("[FBSWEEP] fb_ovr = 0x%lx (%ld.%02ld%% vs 6.0) -- watch ep_out/underrun\n",
+                       (unsigned long)usb_fb_manual, bp/100, (bp<0?-bp:bp)%100);
+            }
             break;
+        }
         case 'b':
             // Per-second windowed rates — Stage-0 baseline for the
             // firmware-on-audio architecture. Each subsequent
@@ -1418,7 +1436,7 @@ int main(void)
                     // so it slaves its delivery to our NCO rate and the elastic
                     // ring stays balanced. Nothing chases the FIFO here, so
                     // nothing can run away. (src_step is unused in the gateware.)
-                    main_usb_fb_ovr_write(0);
+                    main_usb_fb_ovr_write(usb_fb_manual);  // 0=auto loop; FBSWEEP holds a fixed value
                     mcr.usb_last_level = (int)aaf_pkt_fifo_level_read();
                 }
             }

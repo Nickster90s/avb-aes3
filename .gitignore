@@ -10,3 +10,10 @@ __pycache__/
 csr.csv
 analyzer.csv
 stream.cfg
+
+# Build-artifact snapshots (archive.sh) — large binaries, kept locally only
+bitstreams/*.bit
+bitstreams/*.info
+# editor/backup scratch
+*.bak
+*~

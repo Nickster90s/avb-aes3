@@ -319,7 +319,6 @@ class AVBSoC(SoCCore):
                 Subsignal("cs_n", Pins("T19")),
                 Subsignal("mosi", Pins("P22")),    # D00
                 Subsignal("miso", Pins("R22")),    # D01
-                Subsignal("wp",   Pins("P21")),    # D02 / WP#
                 Subsignal("hold", Pins("R21")),    # D03 / HOLD#
                 IOStandard("LVCMOS33")),
         ])
@@ -328,10 +327,13 @@ class AVBSoC(SoCCore):
         # SPIMaster-based S7SPIFlash and fails to compile. Use cfgflash -> CSRs
         # are cfgflash_spi_*.
         _cfg_pads = self.platform.request("cfg_spiflash")
-        # CRITICAL: drive WP#/HOLD# HIGH. HOLD# low HALTS the flash (it ignores
-        # SPI -> reads return all-0xFF), WP# low blocks writes. Both float on the
-        # config pins post-config; must deassert them for any access.
-        self.comb += [_cfg_pads.wp.eq(1), _cfg_pads.hold.eq(1)]
+        # Drive HOLD#(R21/D03) HIGH only (HOLD# low halts the flash -> reads all-
+        # 0xFF). DO NOT drive WP#(P21/D02): it's only needed for WRITES, and the
+        # USB regression appeared exactly when WP#/HOLD# were first driven — if the
+        # board repurposed D02(P21) for a USB-side signal, driving it breaks USB
+        # while the flash still reads via HOLD#. ISOLATION: USB back + JEDEC still
+        # reads => P21 was the conflict (handle write-protect another way).
+        self.comb += [_cfg_pads.hold.eq(1)]
         self.cfgflash = S7SPIFlash(_cfg_pads, sys_clk_freq, spi_clk_freq=12.5e6)
 
         # Ethernet PHY (RGMII, PHY1 / U9). Cable lands on U9 on this board —

@@ -109,14 +109,18 @@ void cfgflash_erase_4k(uint32_t addr)
 
 void cfgflash_program(uint32_t addr, const uint8_t *buf, uint32_t n)
 {
-    // Page program (<=256 B, no page-boundary cross). Needs CS HELD across
-    // cmd+addr+data -> the one op using manual CS (mode=1).
-    cfg_write_enable();
-    cfgflash_spi_cs_write(0x3);                         // sel=1, mode=1 (hold CS)
-    uint64_t cmd = ((uint64_t)0x02 << 24) | (addr & 0xFFFFFF);
-    spi_xfer(cmd << (SPI_DW - 32), 32);                 // PP: cmd + 24-bit addr
-    for (uint32_t i = 0; i < n; i++)
-        spi_xfer((uint64_t)buf[i] << 32, 8);           // data byte
-    cfgflash_spi_cs_write(0);                           // release CS -> program runs
-    cfg_wait_wip();
+    // ONE byte per page-program command, each a single 40-bit AUTO-CS transfer
+    // (cmd 0x02 [39:32] + 24-bit addr [31:8] + 1 data byte [7:0]). Manual-CS
+    // (hold) multi-transfer does NOT work on this SPIMaster — erase (auto-CS)
+    // succeeds but the old held-CS program left the sector erased. Per-byte
+    // auto-CS uses only the proven path. Slow but the config blob is tiny.
+    for (uint32_t i = 0; i < n; i++) {
+        cfg_write_enable();
+        cfgflash_spi_cs_write(1);                       // auto CS
+        uint64_t m = ((uint64_t)0x02 << 32)
+                   | ((uint64_t)((addr + i) & 0xFFFFFF) << 8)
+                   |  (uint64_t)buf[i];
+        spi_xfer(m, 40);                                // PP cmd+addr+1 byte
+        cfg_wait_wip();
+    }
 }

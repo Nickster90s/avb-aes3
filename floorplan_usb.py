@@ -169,13 +169,9 @@ CFG_PREFIX = "cfgflash"
 ctx.createRectangularRegion(CFG_REGION, 50, 0, 114, 156)
 ncf = 0
 for cname, cell in ctx.cells:
-    if CFG_PREFIX in cname:
-        ncf += _pull(cell, CFG_REGION)
-for nname, net in ctx.nets:
-    if CFG_PREFIX in nname:
-        drv = getattr(net, "driver", None)
-        if drv is not None:
-            ncf += _pull(getattr(drv, "cell", None), CFG_REGION)
+    if CFG_PREFIX in cname:                  # NAMED SPIMaster cells ONLY — pulling
+        ncf += _pull(cell, CFG_REGION)       # net-DRIVERS too dragged long-net cells
+                                             # and thrashed the placer; named is local.
 print("[floorplan_usb] cfgflash: %d cells -> %s (X 50..114)" % (ncf, CFG_REGION))
 
 # ---- AAF packetizer: compact box in the clear right-center -----------------

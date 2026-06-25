@@ -16,6 +16,7 @@
 
 #include "gptp.h"
 #include "cfgflash.h"
+#include "config.h"
 #include "avtp_const.h"
 #include "srp.h"
 #include "avdecc.h"
@@ -993,6 +994,12 @@ static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
     if (uid == LISTENER_UID_CRF) {
         mcr_bind(&mcr, stream_id);
         avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, stream_id, dest_mac);
+        // Persist the CRF binding so cs=1 auto-reconnects after a power-cycle (#70).
+        int chg = !g_cfg.crf_valid;
+        for (int i = 0; i < 8; i++) { if (g_cfg.crf_stream_id[i] != stream_id[i]) chg = 1; g_cfg.crf_stream_id[i] = stream_id[i]; }
+        for (int i = 0; i < 6; i++) { if (g_cfg.crf_dmac[i] != dest_mac[i]) chg = 1; g_cfg.crf_dmac[i] = dest_mac[i]; }
+        g_cfg.crf_valid = 1;
+        if (chg) { cfg_save(); printf("[CFG] saved CRF binding to NV\n"); }
     } else if (uid == LISTENER_UID_AAF) {
         aaf_bind(&aaf, stream_id);
         // Stage 2a: gateware AVTPSampleExtractor copies audio samples
@@ -1027,7 +1034,14 @@ static void on_listener_disconnect(uint16_t uid)
 // pulled off pure gPTP and drifted.
 static void on_clock_source_change(uint16_t src_idx)
 {
-    mcr_set_clock_source(&mcr, (src_idx == 1) ? 1 : 0);
+    uint8_t cs = (src_idx == 1) ? 1 : 0;
+    mcr_set_clock_source(&mcr, cs);
+    // Persist cs= so it survives a power-cycle (#71). Write only on change.
+    if (g_cfg.cs != cs) {
+        g_cfg.cs = cs;
+        cfg_save();
+        printf("[CFG] saved cs=%u to NV\n", cs);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1172,46 +1186,16 @@ int main(void)
     }
     busy_wait(100);
 
-    // Config-flash NV (cs=/CRF persistence) — Phase 2: prove read+write+erase
-    // round-trips across a power-cycle. Reads a {magic, boot_count} blob from the
-    // top-of-flash config sector; if valid, prints the persisted count and bumps
-    // it; else initialises. A boot_count that GROWS across power-cycles proves NV
-    // works (Phase 3 swaps boot_count for the real cs=/CRF blob, written only on
-    // change rather than every boot). Sector 0xFFF000 is far above the bitstream.
+    // Config-flash NV — load the persisted AVDECC/system config (cs=, CRF binding,
+    // ...). HW-proven read/write/erase/persist. cs is restored after avdecc_init
+    // (below); CRF binding is used by the reconnect path. New params: add to cfg_t.
     {
         cfgflash_warmup();           // clock past STARTUPE2 first-edge masking
-        uint32_t j  = cfgflash_jedec();
-        uint8_t  blob[8];
-        cfgflash_read(CFG_FLASH_ADDR, blob, 8);
-        const uint8_t MAGIC[4] = {0xCF, 0x70, 0xA5, 0x01};
-        int valid = (blob[0]==MAGIC[0] && blob[1]==MAGIC[1] &&
-                     blob[2]==MAGIC[2] && blob[3]==MAGIC[3]);
-        uint32_t count = valid ? ((uint32_t)blob[4] | ((uint32_t)blob[5]<<8) |
-                                  ((uint32_t)blob[6]<<16) | ((uint32_t)blob[7]<<24)) : 0;
-        printf("[CFG] JEDEC=0x%06lx  NV %s  boot_count=%lu%s\n",
-               (unsigned long)j, valid ? "VALID (persisted!)" : "blank/new",
-               (unsigned long)count, valid ? "" : " (initialising)");
-        // Diagnose write-protect: read status (BP bits), clear it, re-read.
-        uint8_t st0 = cfgflash_status();
-        cfgflash_unprotect();
-        uint8_t st1 = cfgflash_status();
-        printf("[CFG] status=0x%02x (WEL%d BP=0x%02x) -> after unprotect=0x%02x\n",
-               st0, (st0>>1)&1, (st0>>2)&0xF, st1);
-        // bump + persist
-        count++;
-        uint8_t out[8] = { MAGIC[0],MAGIC[1],MAGIC[2],MAGIC[3],
-                           (uint8_t)count,(uint8_t)(count>>8),
-                           (uint8_t)(count>>16),(uint8_t)(count>>24) };
-        cfgflash_erase_4k(CFG_FLASH_ADDR);
-        uint8_t st2 = cfgflash_status();   // WEL should be 1 mid-write window
-        cfgflash_program(CFG_FLASH_ADDR, out, 8);
-        // verify the round-trip immediately
-        uint8_t chk[8];
-        cfgflash_read(CFG_FLASH_ADDR, chk, 8);
-        int ok = 1; for (int k=0;k<8;k++) if (chk[k]!=out[k]) ok=0;
-        printf("[CFG] wrote boot_count=%lu  readback=%s  chk=%02x %02x %02x %02x.. st_postErase=0x%02x\n",
-               (unsigned long)count, ok ? "MATCH (NV write OK)" : "MISMATCH",
-               chk[0],chk[1],chk[2],chk[3], st2);
+        uint32_t j = cfgflash_jedec();
+        int found = cfg_load();
+        printf("[CFG] JEDEC=0x%06lx  config %s  cs=%u  crf_valid=%u\n",
+               (unsigned long)j, found ? "LOADED from NV" : "defaults (new flash)",
+               g_cfg.cs, g_cfg.crf_valid);
     }
 
     // Init protocol stacks
@@ -1299,8 +1283,20 @@ int main(void)
     avdecc.on_listener_connect  = on_listener_connect;
     avdecc.on_listener_disconnect = on_listener_disconnect;
     avdecc.on_clock_source_change = on_clock_source_change;
-    // Align the MCR with the entity's initial clock source (default 0 = gPTP).
-    mcr_set_clock_source(&mcr, (avdecc.current_clock_source == 1) ? 1 : 0);
+    // Restore the PERSISTED clock source (NV) so cs= survives a power-cycle (#71).
+    avdecc.current_clock_source = g_cfg.cs ? 1 : 0;
+    mcr_set_clock_source(&mcr, g_cfg.cs ? 1 : 0);
+    if (g_cfg.cs)
+        printf("[CFG] restored cs=1 (CRF) from NV\n");
+    // Auto-reconnect the saved CRF media-clock stream (#70): re-declare ourselves
+    // as its SRP listener + bind the MCR so cs=1 comes up reconnected without a
+    // manual reconnect. The talker resumes CRF on seeing our listener declaration.
+    if (g_cfg.crf_valid) {
+        srp_listener_enable(&srp, g_cfg.crf_stream_id, 1);
+        mcr_bind(&mcr, g_cfg.crf_stream_id);
+        avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, g_cfg.crf_stream_id, g_cfg.crf_dmac);
+        printf("[CFG] CRF auto-reconnect: re-declared listener for saved stream\n");
+    }
 
     printf("[main] Press 'h' for commands.\n\n");
 

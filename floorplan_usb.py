@@ -160,12 +160,23 @@ for nname, net in ctx.nets:
     for u in getattr(net, "users", []):
         nu += _pull(getattr(u, "cell", None), USB_REGION)
 
-# NOTE: NO cfgflash floorplan. The USB regression was driving WP#(P21) onto a
-# board USB signal — NOT cfgflash logic crowding USB (the floorplanned build WITH
-# WP# still broke USB; the no-WP# build fixed it). Constraining the cfgflash
-# SPIMaster into a region also thrashed the analytic placer (>15 min, long nets
-# to STARTUPE2 X46 + config IOBs). So leave cfgflash unconstrained — it floats
-# harmlessly and the placer legalises fast.
+# ---- cfgflash SPIMaster: BIG region right of the USB box --------------------
+# Keeps the SPIMaster cells out of the marginal USB zone (X<=45) AND gives the
+# better-Fmax placements (61-64 MHz vs 54 with it floating). Big region (not the
+# tight X95-114 box that thrashed) legalises fast.
+CFG_REGION = "cfgflash_fp"
+CFG_PREFIX = "cfgflash"
+ctx.createRectangularRegion(CFG_REGION, 50, 0, 114, 156)
+ncf = 0
+for cname, cell in ctx.cells:
+    if CFG_PREFIX in cname:
+        ncf += _pull(cell, CFG_REGION)
+for nname, net in ctx.nets:
+    if CFG_PREFIX in nname:
+        drv = getattr(net, "driver", None)
+        if drv is not None:
+            ncf += _pull(getattr(drv, "cell", None), CFG_REGION)
+print("[floorplan_usb] cfgflash: %d cells -> %s (X 50..114)" % (ncf, CFG_REGION))
 
 # ---- AAF packetizer: compact box in the clear right-center -----------------
 # The sys-domain critical paths (pres-time t_next_value adder, ring rd/level,

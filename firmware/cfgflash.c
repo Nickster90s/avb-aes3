@@ -8,6 +8,9 @@
 
 #define SPI_DW   40           // SPIMaster data_width
 
+static void cfg_write_enable(void);   // fwd-decl (used by cfgflash_unprotect)
+static void cfg_wait_wip(void);
+
 // One SPI transfer of `bits` bits. `mosi` top-aligned ([39 : 40-bits]).
 static uint64_t spi_xfer(uint64_t mosi, uint32_t bits)
 {

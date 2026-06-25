@@ -334,7 +334,7 @@ class AVBSoC(SoCCore):
         # while the flash still reads via HOLD#. ISOLATION: USB back + JEDEC still
         # reads => P21 was the conflict (handle write-protect another way).
         self.comb += [_cfg_pads.hold.eq(1)]
-        self.cfgflash = S7SPIFlash(_cfg_pads, sys_clk_freq, spi_clk_freq=12.5e6)
+        self.cfgflash = S7SPIFlash(_cfg_pads, sys_clk_freq, spi_clk_freq=2.5e6)
 
         # Ethernet PHY (RGMII, PHY1 / U9). Cable lands on U9 on this board —
         # confirmed by MDIO power-down test (addr 0 = U5/PHY0 unlinked, addr 1

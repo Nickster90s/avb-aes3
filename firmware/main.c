@@ -1172,21 +1172,37 @@ int main(void)
     }
     busy_wait(100);
 
-    // Config-flash NV (cs=/CRF persistence) — Phase 1: verify the flash is
-    // reachable via STARTUPE2 (read-only; zero risk to the bitstream).
+    // Config-flash NV (cs=/CRF persistence) — Phase 2: prove read+write+erase
+    // round-trips across a power-cycle. Reads a {magic, boot_count} blob from the
+    // top-of-flash config sector; if valid, prints the persisted count and bumps
+    // it; else initialises. A boot_count that GROWS across power-cycles proves NV
+    // works (Phase 3 swaps boot_count for the real cs=/CRF blob, written only on
+    // change rather than every boot). Sector 0xFFF000 is far above the bitstream.
     {
-        int lb = cfgflash_selftest();          // driver/CSR loopback (no flash)
-        uint32_t j = cfgflash_jedec();
-        uint8_t cap = (uint8_t)(j & 0xFF);
-        uint8_t boot[8];
-        cfgflash_read(0, boot, 8);   // bitstream sync at offset 0 = read sanity
-        printf("[CFG] loopback=%s JEDEC=0x%06lx (mfg=0x%02x type=0x%02x cap=0x%02x = %u MB) "
-               "boot[0..3]=%02x %02x %02x %02x\n",
-               lb ? "OK" : "FAIL",
-               (unsigned long)j, (unsigned)((j >> 16) & 0xFF),
-               (unsigned)((j >> 8) & 0xFF), (unsigned)cap,
-               (cap >= 20 && cap <= 27) ? (unsigned)((1u << cap) >> 20) : 0,
-               boot[0], boot[1], boot[2], boot[3]);
+        uint32_t j  = cfgflash_jedec();
+        uint8_t  blob[8];
+        cfgflash_read(CFG_FLASH_ADDR, blob, 8);
+        const uint8_t MAGIC[4] = {0xCF, 0x70, 0xA5, 0x01};
+        int valid = (blob[0]==MAGIC[0] && blob[1]==MAGIC[1] &&
+                     blob[2]==MAGIC[2] && blob[3]==MAGIC[3]);
+        uint32_t count = valid ? ((uint32_t)blob[4] | ((uint32_t)blob[5]<<8) |
+                                  ((uint32_t)blob[6]<<16) | ((uint32_t)blob[7]<<24)) : 0;
+        printf("[CFG] JEDEC=0x%06lx  NV %s  boot_count=%lu%s\n",
+               (unsigned long)j, valid ? "VALID (persisted!)" : "blank/new",
+               (unsigned long)count, valid ? "" : " (initialising)");
+        // bump + persist
+        count++;
+        uint8_t out[8] = { MAGIC[0],MAGIC[1],MAGIC[2],MAGIC[3],
+                           (uint8_t)count,(uint8_t)(count>>8),
+                           (uint8_t)(count>>16),(uint8_t)(count>>24) };
+        cfgflash_erase_4k(CFG_FLASH_ADDR);
+        cfgflash_program(CFG_FLASH_ADDR, out, 8);
+        // verify the round-trip immediately
+        uint8_t chk[8];
+        cfgflash_read(CFG_FLASH_ADDR, chk, 8);
+        int ok = 1; for (int k=0;k<8;k++) if (chk[k]!=out[k]) ok=0;
+        printf("[CFG] wrote boot_count=%lu  readback=%s\n",
+               (unsigned long)count, ok ? "MATCH (NV write OK)" : "MISMATCH");
     }
 
     // Init protocol stacks

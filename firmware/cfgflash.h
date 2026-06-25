@@ -26,6 +26,12 @@ void cfgflash_erase_4k(uint32_t addr);
 // and the write must not cross a 256 B page boundary. Blocks until done.
 void cfgflash_program(uint32_t addr, const uint8_t *buf, uint32_t n);
 
+// Read the flash status register (RDSR 0x05). bit0=WIP, bit1=WEL, bits6:2=BP.
+uint8_t cfgflash_status(void);
+
+// Clear the status-register block-protect bits (WRSR 0x00) to allow writes.
+void cfgflash_unprotect(void);
+
 // Config sector: top 4 KB of the 16 MB flash, far above the ~2.2 MB bitstream.
 #define CFG_FLASH_ADDR   0xFFF000u
 

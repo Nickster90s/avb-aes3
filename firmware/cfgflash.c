@@ -62,11 +62,24 @@ void cfgflash_read(uint32_t addr, uint8_t *buf, uint32_t n)
 }
 
 // ---- write path -----------------------------------------------------------
-static uint8_t cfg_status(void)
+uint8_t cfgflash_status(void)
 {
     cfgflash_spi_cs_write(1);
     uint64_t r = spi_xfer((uint64_t)0x05 << 32, 16);   // RDSR: cmd + 8 read
     return (uint8_t)(r & 0xFF);
+}
+#define cfg_status cfgflash_status
+
+void cfgflash_unprotect(void)
+{
+    // Clear the status-register block-protect bits (WRSR 0x00) so data writes
+    // are allowed. WRSR = cmd 0x01 + one status byte (16-bit single xfer). If the
+    // flash has SRWD=1 AND WP# is low this is itself blocked — which would mean
+    // the WP#(P21)-vs-USB pin conflict is real.
+    cfg_write_enable();
+    cfgflash_spi_cs_write(1);
+    spi_xfer(((uint64_t)0x01 << 32) | ((uint64_t)0x00 << 24), 16);
+    cfg_wait_wip();
 }
 
 static void cfg_wait_wip(void)

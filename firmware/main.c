@@ -1191,19 +1191,27 @@ int main(void)
         printf("[CFG] JEDEC=0x%06lx  NV %s  boot_count=%lu%s\n",
                (unsigned long)j, valid ? "VALID (persisted!)" : "blank/new",
                (unsigned long)count, valid ? "" : " (initialising)");
+        // Diagnose write-protect: read status (BP bits), clear it, re-read.
+        uint8_t st0 = cfgflash_status();
+        cfgflash_unprotect();
+        uint8_t st1 = cfgflash_status();
+        printf("[CFG] status=0x%02x (WEL%d BP=0x%02x) -> after unprotect=0x%02x\n",
+               st0, (st0>>1)&1, (st0>>2)&0xF, st1);
         // bump + persist
         count++;
         uint8_t out[8] = { MAGIC[0],MAGIC[1],MAGIC[2],MAGIC[3],
                            (uint8_t)count,(uint8_t)(count>>8),
                            (uint8_t)(count>>16),(uint8_t)(count>>24) };
         cfgflash_erase_4k(CFG_FLASH_ADDR);
+        uint8_t st2 = cfgflash_status();   // WEL should be 1 mid-write window
         cfgflash_program(CFG_FLASH_ADDR, out, 8);
         // verify the round-trip immediately
         uint8_t chk[8];
         cfgflash_read(CFG_FLASH_ADDR, chk, 8);
         int ok = 1; for (int k=0;k<8;k++) if (chk[k]!=out[k]) ok=0;
-        printf("[CFG] wrote boot_count=%lu  readback=%s\n",
-               (unsigned long)count, ok ? "MATCH (NV write OK)" : "MISMATCH");
+        printf("[CFG] wrote boot_count=%lu  readback=%s  chk=%02x %02x %02x %02x.. st_postErase=0x%02x\n",
+               (unsigned long)count, ok ? "MATCH (NV write OK)" : "MISMATCH",
+               chk[0],chk[1],chk[2],chk[3], st2);
     }
 
     // Init protocol stacks

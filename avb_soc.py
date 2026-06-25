@@ -49,6 +49,7 @@ from litex.soc.cores.clock import *
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder import *
 from litex.soc.cores.led import LedChaser
+from litex.soc.cores.spi_flash import S7SPIFlash   # config-flash NV via STARTUPE2 (cs=/CRF persist)
 from litex.soc.interconnect.csr import CSR, CSRStatus, CSRStorage, AutoCSR
 
 from liteeth.phy.s7rgmii import LiteEthPHYRGMII
@@ -305,6 +306,27 @@ class AVBSoC(SoCCore):
             ident_version = True,
             **kwargs
         )
+
+        # ---- Config SPI flash (NV storage for cs= + CRF binding persistence) ----
+        # Runtime read/write of the boot SPI flash via STARTUPE2 (CCLK) + the
+        # XC7A50T-fgg484 config pins (FCS_B=T19, D00/MOSI=P22, D01/MISO=R22; CCLK
+        # is internal through STARTUPE2 — the USRCCLKO BEL is present in the chipdb
+        # so it places on openXC7). SPIMaster-based -> arbitrary commands (JEDEC ID,
+        # read, sector-erase, page-program) from firmware. Config is stored in a
+        # sector at the TOP of flash, far above the ~2.2 MB bitstream.
+        self.platform.add_extension([
+            ("cfg_spiflash", 0,
+                Subsignal("cs_n", Pins("T19")),
+                Subsignal("mosi", Pins("P22")),
+                Subsignal("miso", Pins("R22")),
+                IOStandard("LVCMOS33")),
+        ])
+        # NOTE: attribute name must NOT be "spiflash" or LiteX auto-adds the
+        # liblitespi (litespi/mmap) software lib, which doesn't match this
+        # SPIMaster-based S7SPIFlash and fails to compile. Use cfgflash -> CSRs
+        # are cfgflash_spi_*.
+        self.cfgflash = S7SPIFlash(self.platform.request("cfg_spiflash"),
+                                   sys_clk_freq, spi_clk_freq=12.5e6)
 
         # Ethernet PHY (RGMII, PHY1 / U9). Cable lands on U9 on this board —
         # confirmed by MDIO power-down test (addr 0 = U5/PHY0 unlinked, addr 1

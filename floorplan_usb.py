@@ -185,7 +185,7 @@ for nname, net in ctx.nets:
     if drv is not None:
         ncf += _pull(getattr(drv, "cell", None), CFG_REGION)   # drivers only (skip
                                                                # users = CSR bus)
-print("[floorplan_usb] cfgflash: %d cells -> %s (X 95..114, Y 0..60)" % (ncf, CFG_REGION))
+print("[floorplan_usb] cfgflash: %d cells -> %s (X 50..114, Y 0..156)" % (ncf, CFG_REGION))
 
 # ---- AAF packetizer: compact box in the clear right-center -----------------
 # The sys-domain critical paths (pres-time t_next_value adder, ring rd/level,

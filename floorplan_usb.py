@@ -160,6 +160,29 @@ for nname, net in ctx.nets:
     for u in getattr(net, "users", []):
         nu += _pull(getattr(u, "cell", None), USB_REGION)
 
+# ---- cfgflash SPIMaster: pin FAR from the USB region ----------------------
+# The S7SPIFlash/SPIMaster cells carry no usb_avb_subsystem name, so they were
+# left unconstrained and the analytic placer dropped them near the (left-edge)
+# config IOBs — inside/adjacent the USB box (X<=45) — perturbing the placement-
+# marginal ULPI HS-chirp logic so USB enumerated FS/error-71 ("doesn't connect").
+# The SPI link is slow (12.5 MHz) so long routes to the config IOBs are harmless;
+# box the logic into the clear far-right so it can never touch the USB region.
+CFG_REGION = "cfgflash_fp"
+CFG_PREFIX = "cfgflash"
+ctx.createRectangularRegion(CFG_REGION, 95, 0, 114, 60)
+ncf = 0
+for cname, cell in ctx.cells:
+    if CFG_PREFIX in cname:
+        ncf += _pull(cell, CFG_REGION)
+for nname, net in ctx.nets:
+    if CFG_PREFIX not in nname:
+        continue
+    drv = getattr(net, "driver", None)
+    if drv is not None:
+        ncf += _pull(getattr(drv, "cell", None), CFG_REGION)   # drivers only (skip
+                                                               # users = CSR bus)
+print("[floorplan_usb] cfgflash: %d cells -> %s (X 95..114, Y 0..60)" % (ncf, CFG_REGION))
+
 # ---- AAF packetizer: compact box in the clear right-center -----------------
 # The sys-domain critical paths (pres-time t_next_value adder, ring rd/level,
 # byte-build FSM) are ALL internal to the AAF packetizer and routing-dominated

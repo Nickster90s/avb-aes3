@@ -169,7 +169,11 @@ for nname, net in ctx.nets:
 # box the logic into the clear far-right so it can never touch the USB region.
 CFG_REGION = "cfgflash_fp"
 CFG_PREFIX = "cfgflash"
-ctx.createRectangularRegion(CFG_REGION, 95, 0, 114, 60)
+# BIG region (right of the USB box X<=45, near STARTUPE2 at X46) — a tight box
+# (X95-114) thrashed the analytic placer >20 min (long nets to STARTUPE2 + the
+# config IOBs, hard to legalise). A large region legalises instantly and still
+# keeps cfgflash entirely out of the placement-marginal USB zone.
+ctx.createRectangularRegion(CFG_REGION, 50, 0, 114, 156)
 ncf = 0
 for cname, cell in ctx.cells:
     if CFG_PREFIX in cname:

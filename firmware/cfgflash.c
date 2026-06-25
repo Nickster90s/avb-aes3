@@ -18,6 +18,18 @@ static uint64_t spi_xfer(uint64_t mosi, uint32_t bits)
     return cfgflash_spi_miso_read();
 }
 
+int cfgflash_selftest(void)
+{
+    // Internal loopback (MOSI->MISO inside the SPIMaster, before the pins).
+    // Isolates the CSR interface + bit-driver from the CCLK/flash/pin path:
+    // pass => driver good, any failure is the flash side; fail => driver bug.
+    cfgflash_spi_loopback_write(1);
+    cfgflash_spi_cs_write(1);
+    uint64_t r = spi_xfer((uint64_t)0xA5 << 32, 8);   // send 0xA5, 8 bits
+    cfgflash_spi_loopback_write(0);
+    return ((r & 0xFF) == 0xA5);
+}
+
 uint32_t cfgflash_jedec(void)
 {
     // 0x9F in [39:32], then 24 read bits -> JEDEC ID lands in miso[23:0].

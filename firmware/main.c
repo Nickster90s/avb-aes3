@@ -1175,12 +1175,14 @@ int main(void)
     // Config-flash NV (cs=/CRF persistence) — Phase 1: verify the flash is
     // reachable via STARTUPE2 (read-only; zero risk to the bitstream).
     {
+        int lb = cfgflash_selftest();          // driver/CSR loopback (no flash)
         uint32_t j = cfgflash_jedec();
         uint8_t cap = (uint8_t)(j & 0xFF);
         uint8_t boot[8];
         cfgflash_read(0, boot, 8);   // bitstream sync at offset 0 = read sanity
-        printf("[CFG] flash JEDEC=0x%06lx (mfg=0x%02x type=0x%02x cap=0x%02x = %u MB) "
+        printf("[CFG] loopback=%s JEDEC=0x%06lx (mfg=0x%02x type=0x%02x cap=0x%02x = %u MB) "
                "boot[0..3]=%02x %02x %02x %02x\n",
+               lb ? "OK" : "FAIL",
                (unsigned long)j, (unsigned)((j >> 16) & 0xFF),
                (unsigned)((j >> 8) & 0xFF), (unsigned)cap,
                (cap >= 20 && cap <= 27) ? (unsigned)((1u << cap) >> 20) : 0,

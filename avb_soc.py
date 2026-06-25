@@ -317,16 +317,22 @@ class AVBSoC(SoCCore):
         self.platform.add_extension([
             ("cfg_spiflash", 0,
                 Subsignal("cs_n", Pins("T19")),
-                Subsignal("mosi", Pins("P22")),
-                Subsignal("miso", Pins("R22")),
+                Subsignal("mosi", Pins("P22")),    # D00
+                Subsignal("miso", Pins("R22")),    # D01
+                Subsignal("wp",   Pins("P21")),    # D02 / WP#
+                Subsignal("hold", Pins("R21")),    # D03 / HOLD#
                 IOStandard("LVCMOS33")),
         ])
         # NOTE: attribute name must NOT be "spiflash" or LiteX auto-adds the
         # liblitespi (litespi/mmap) software lib, which doesn't match this
         # SPIMaster-based S7SPIFlash and fails to compile. Use cfgflash -> CSRs
         # are cfgflash_spi_*.
-        self.cfgflash = S7SPIFlash(self.platform.request("cfg_spiflash"),
-                                   sys_clk_freq, spi_clk_freq=12.5e6)
+        _cfg_pads = self.platform.request("cfg_spiflash")
+        # CRITICAL: drive WP#/HOLD# HIGH. HOLD# low HALTS the flash (it ignores
+        # SPI -> reads return all-0xFF), WP# low blocks writes. Both float on the
+        # config pins post-config; must deassert them for any access.
+        self.comb += [_cfg_pads.wp.eq(1), _cfg_pads.hold.eq(1)]
+        self.cfgflash = S7SPIFlash(_cfg_pads, sys_clk_freq, spi_clk_freq=12.5e6)
 
         # Ethernet PHY (RGMII, PHY1 / U9). Cable lands on U9 on this board —
         # confirmed by MDIO power-down test (addr 0 = U5/PHY0 unlinked, addr 1

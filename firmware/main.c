@@ -1298,25 +1298,17 @@ int main(void)
     mcr_set_clock_source(&mcr, g_cfg.cs ? 1 : 0);
     if (g_cfg.cs)
         printf("[CFG] restored cs=1 (CRF) from NV\n");
-    // Auto-reconnect the saved CRF media-clock stream (#70). RIGHT method: arm a
-    // FAST_CONNECT pending listener (same as Hive's saved-state restore) so the
-    // MOTU's next CRF TalkerAdvertise is matched by on_talker_advertise and binds
-    // through the proven fast-connect path (srp ListenerReady + mcr_bind + filter).
-    // Declaring a listener at boot directly (the old way) fired before the talker
-    // re-advertised and never stuck.
-    if (g_cfg.crf_valid) {
-        pending_bind_t *p = &pending_listeners[LISTENER_UID_CRF];
-        p->active = 1;
-        p->uid    = LISTENER_UID_CRF;
-        memcpy(p->dest_mac, g_cfg.crf_dmac, 6);
-        memcpy(p->talker_entity_id, g_cfg.crf_talker_eid, 8);
-        p->talker_uid = 0;
-        printf("[CFG] CRF auto-reconnect armed: pending listener for saved talker "
-               "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x (cs=%u)\n",
+    // Auto-reconnect the saved CRF stream (#70) is DEFERRED until gPTP locks (see
+    // the main loop). Arming the pending listener at boot let the CRF stream flood
+    // the RX during the cold gPTP Pdelay window -> Pdelay starved -> gPTP never
+    // locked. Once gPTP is locked (Pdelay established) the path tolerates the CRF
+    // flow, so we arm it there instead.
+    if (g_cfg.crf_valid)
+        printf("[CFG] CRF reconnect pending (deferred until gPTP locks): talker "
+               "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
                g_cfg.crf_talker_eid[0], g_cfg.crf_talker_eid[1], g_cfg.crf_talker_eid[2],
                g_cfg.crf_talker_eid[3], g_cfg.crf_talker_eid[4], g_cfg.crf_talker_eid[5],
-               g_cfg.crf_talker_eid[6], g_cfg.crf_talker_eid[7], g_cfg.cs);
-    }
+               g_cfg.crf_talker_eid[6], g_cfg.crf_talker_eid[7]);
 
     printf("[main] Press 'h' for commands.\n\n");
 
@@ -1422,6 +1414,23 @@ int main(void)
         // anchor, breaking the stream. Re-arm only on a full unlock (rare; gPTP
         // lock has hysteresis). See [[gptp-step-invalidates-time-stamps]].
         {
+            // CRF auto-reconnect (#70): arm the FAST_CONNECT pending listener for
+            // the saved CRF talker ONLY after gPTP has locked. Arming at boot let
+            // the CRF stream flood the RX during the cold Pdelay window and gPTP
+            // never locked; post-lock the path is stable (boot-1 behaviour). The
+            // MOTU's next CRF TalkerAdvertise then auto-binds via on_talker_advertise.
+            static uint8_t crf_armed = 0;
+            if (!crf_armed && g_cfg.crf_valid && gptp.servo_locked) {
+                pending_bind_t *pc = &pending_listeners[LISTENER_UID_CRF];
+                pc->active    = 1;
+                pc->uid       = LISTENER_UID_CRF;
+                memcpy(pc->dest_mac, g_cfg.crf_dmac, 6);
+                memcpy(pc->talker_entity_id, g_cfg.crf_talker_eid, 8);
+                pc->talker_uid = 0;
+                crf_armed = 1;
+                printf("[CFG] gPTP locked — CRF auto-reconnect armed (pending listener)\n");
+            }
+
             static uint8_t  talker_on  = 0;
             // CLEAN gate (2026-06-23): enable the gateware AAF talker once the
             // SELECTED media clock is locked; disable on unlock. No settle timer,

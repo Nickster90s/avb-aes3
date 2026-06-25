@@ -21,9 +21,11 @@ typedef struct {
     uint8_t  crf_stream_id[8]; // last bound CRF stream (auto-reconnect, #70)
     uint8_t  crf_dmac[6];      // its dest MAC (for the AVTP RX filter on reconnect)
     uint8_t  _pad2[2];
+    uint8_t  crf_talker_eid[8];// talker entity-id — matches the re-advertise so the
+                               // fast-connect path auto-binds at boot (the #70 method)
     // ---- room for future AVDECC params (entity name, talker fast-connect
     //      bindings, stream formats, pres_offset, chan_rot, ...) ----
-    uint8_t  reserved[88];
+    uint8_t  reserved[80];
     uint32_t crc;              // checksum over all bytes above
 } cfg_t;
 

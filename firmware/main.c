@@ -867,6 +867,20 @@ static int dest_or_eid_match(const pending_bind_t *p,
     return 0;
 }
 
+// Persist the CRF media-clock binding to NV (write-on-change) so cs=1 auto-
+// reconnects after a power-cycle (#70). Saves the stream_id + dest_mac + talker
+// entity-id; the EID is what the fast-connect re-arm matches against at boot.
+static void persist_crf_binding(const uint8_t *stream_id, const uint8_t *dest_mac,
+                                const uint8_t *talker_eid)
+{
+    int chg = !g_cfg.crf_valid;
+    for (int i = 0; i < 8; i++) { if (g_cfg.crf_stream_id[i]  != stream_id[i])  chg = 1; g_cfg.crf_stream_id[i]  = stream_id[i]; }
+    for (int i = 0; i < 6; i++) { if (g_cfg.crf_dmac[i]       != dest_mac[i])   chg = 1; g_cfg.crf_dmac[i]       = dest_mac[i]; }
+    for (int i = 0; i < 8; i++) { if (g_cfg.crf_talker_eid[i] != talker_eid[i]) chg = 1; g_cfg.crf_talker_eid[i] = talker_eid[i]; }
+    g_cfg.crf_valid = 1;
+    if (chg) { cfg_save(); printf("[CFG] saved CRF binding to NV\n"); }
+}
+
 static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_mac)
 {
     for (int i = 0; i < (int)(sizeof(pending_listeners)/sizeof(pending_listeners[0])); i++) {
@@ -903,6 +917,7 @@ static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_ma
         if (p->uid == LISTENER_UID_CRF) {
             mcr_bind(&mcr, stream_id);
             avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, stream_id, p->dest_mac);
+            persist_crf_binding(stream_id, p->dest_mac, p->talker_entity_id);  // #70
         } else if (p->uid == LISTENER_UID_AAF) {
             aaf_bind(&aaf, stream_id);
             // Stage 2a: gateware AVTPSampleExtractor pulls audio into
@@ -994,12 +1009,7 @@ static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
     if (uid == LISTENER_UID_CRF) {
         mcr_bind(&mcr, stream_id);
         avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, stream_id, dest_mac);
-        // Persist the CRF binding so cs=1 auto-reconnects after a power-cycle (#70).
-        int chg = !g_cfg.crf_valid;
-        for (int i = 0; i < 8; i++) { if (g_cfg.crf_stream_id[i] != stream_id[i]) chg = 1; g_cfg.crf_stream_id[i] = stream_id[i]; }
-        for (int i = 0; i < 6; i++) { if (g_cfg.crf_dmac[i] != dest_mac[i]) chg = 1; g_cfg.crf_dmac[i] = dest_mac[i]; }
-        g_cfg.crf_valid = 1;
-        if (chg) { cfg_save(); printf("[CFG] saved CRF binding to NV\n"); }
+        persist_crf_binding(stream_id, dest_mac, talker_entity_id);  // #70
     } else if (uid == LISTENER_UID_AAF) {
         aaf_bind(&aaf, stream_id);
         // Stage 2a: gateware AVTPSampleExtractor copies audio samples
@@ -1288,14 +1298,24 @@ int main(void)
     mcr_set_clock_source(&mcr, g_cfg.cs ? 1 : 0);
     if (g_cfg.cs)
         printf("[CFG] restored cs=1 (CRF) from NV\n");
-    // Auto-reconnect the saved CRF media-clock stream (#70): re-declare ourselves
-    // as its SRP listener + bind the MCR so cs=1 comes up reconnected without a
-    // manual reconnect. The talker resumes CRF on seeing our listener declaration.
+    // Auto-reconnect the saved CRF media-clock stream (#70). RIGHT method: arm a
+    // FAST_CONNECT pending listener (same as Hive's saved-state restore) so the
+    // MOTU's next CRF TalkerAdvertise is matched by on_talker_advertise and binds
+    // through the proven fast-connect path (srp ListenerReady + mcr_bind + filter).
+    // Declaring a listener at boot directly (the old way) fired before the talker
+    // re-advertised and never stuck.
     if (g_cfg.crf_valid) {
-        srp_listener_enable(&srp, g_cfg.crf_stream_id, 1);
-        mcr_bind(&mcr, g_cfg.crf_stream_id);
-        avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, g_cfg.crf_stream_id, g_cfg.crf_dmac);
-        printf("[CFG] CRF auto-reconnect: re-declared listener for saved stream\n");
+        pending_bind_t *p = &pending_listeners[LISTENER_UID_CRF];
+        p->active = 1;
+        p->uid    = LISTENER_UID_CRF;
+        memcpy(p->dest_mac, g_cfg.crf_dmac, 6);
+        memcpy(p->talker_entity_id, g_cfg.crf_talker_eid, 8);
+        p->talker_uid = 0;
+        printf("[CFG] CRF auto-reconnect armed: pending listener for saved talker "
+               "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x (cs=%u)\n",
+               g_cfg.crf_talker_eid[0], g_cfg.crf_talker_eid[1], g_cfg.crf_talker_eid[2],
+               g_cfg.crf_talker_eid[3], g_cfg.crf_talker_eid[4], g_cfg.crf_talker_eid[5],
+               g_cfg.crf_talker_eid[6], g_cfg.crf_talker_eid[7], g_cfg.cs);
     }
 
     printf("[main] Press 'h' for commands.\n\n");

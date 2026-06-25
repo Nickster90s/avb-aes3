@@ -1179,6 +1179,7 @@ int main(void)
     // works (Phase 3 swaps boot_count for the real cs=/CRF blob, written only on
     // change rather than every boot). Sector 0xFFF000 is far above the bitstream.
     {
+        cfgflash_warmup();           // clock past STARTUPE2 first-edge masking
         uint32_t j  = cfgflash_jedec();
         uint8_t  blob[8];
         cfgflash_read(CFG_FLASH_ADDR, blob, 8);

@@ -27,6 +27,18 @@ int cfgflash_selftest(void)
     return ((r & 0xFF) == 0xA5);
 }
 
+void cfgflash_warmup(void)
+{
+    // 7-series STARTUPE2 masks the first few USRCCLKO edges after configuration,
+    // so the VERY FIRST flash transaction gets swallowed (JEDEC reads 0xFFFFFF).
+    // Clock out dummy bits with CS DEASSERTED (flash ignores them) to get past
+    // the masking; subsequent real transactions then work. Must be called once
+    // before any flash op. (The old loopback selftest masked this by accident.)
+    cfgflash_spi_cs_write(0);                       // CS high (deselected)
+    for (int i = 0; i < 8; i++)
+        spi_xfer(0, 32);                            // 256 dummy CCLK edges
+}
+
 uint32_t cfgflash_jedec(void)
 {
     cfgflash_spi_cs_write(1);                       // auto CS

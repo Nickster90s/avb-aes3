@@ -23,18 +23,9 @@ typedef struct {
     uint8_t  _pad2[2];
     uint8_t  crf_talker_eid[8];// talker entity-id — matches the re-advertise so the
                                // fast-connect path auto-binds at boot (the #70 method)
-    // ---- TX/talker auto-reconnect (#69): which listener was connected to each of
-    //      our 6 talker streams, so we can PROACTIVELY re-connect it on cold boot
-    //      (send it CONNECT_RX_COMMAND) instead of waiting for it to re-initiate. ----
-    uint8_t  tx_listener_eid[8];   // the listener entity (MOTU) to reconnect to
-    uint8_t  tx_streams_mask;      // bit N set = talker stream N was connected
-    uint8_t  _pad3;
-    uint16_t tx_listener_uid[6];   // per-stream listener unique_id (usually == talker uid)
-    // ---- room for future AVDECC params ----
-    // reserved sized so sizeof(cfg_t) is UNCHANGED from v1 (carved out of the old
-    // reserved[80], which v1 wrote as zeros) -> old saved cs/CRF still validates,
-    // tx_* reads as zero (mask=0 -> no talker reconnect until populated). No ver bump.
-    uint8_t  reserved[58];
+    // ---- room for future AVDECC params (entity name, talker fast-connect
+    //      bindings, stream formats, pres_offset, chan_rot, ...) ----
+    uint8_t  reserved[80];
     uint32_t crc;              // checksum over all bytes above
 } cfg_t;
 

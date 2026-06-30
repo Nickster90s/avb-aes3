@@ -573,32 +573,6 @@ void avdecc_initiate_listener_connect(avdecc_state_t *s, uint8_t listener_uid,
     send_connect_tx_command(s, r);
 }
 
-// Proactively connect one of OUR talker streams to a listener (#69): send ACMP
-// CONNECT_RX_COMMAND to the listener (we act as the controller). The listener then
-// sends US a CONNECT_TX_COMMAND, we respond, and it's connected — the same flow as
-// a Hive matrix drag. Used at cold boot to re-establish talker streams the MOTU
-// didn't re-initiate on its own (it's a passive listener; we make it active).
-void avdecc_initiate_talker_connect(avdecc_state_t *s, uint16_t talker_uid,
-                                    const uint8_t *listener_eid, uint16_t listener_uid)
-{
-    uint8_t *frame = avdecc_tx_buf();
-    uint8_t *p = avdecc_eth_hdr(frame, s->src_mac);
-
-    memset(p, 0, ACMPDU_LEN);
-    p[0] = AVTP_SUBTYPE_ACMP;
-    p[1] = ACMP_MSG_CONNECT_RX_COMMAND;                 // 6 — controller -> listener
-    av_put_be16(p + 2, ACMP_CONTROL_DATA_LEN);
-    memcpy(p + ACMP_OFF_CONTROLLER_ID, s->entity_id, 8);
-    memcpy(p + ACMP_OFF_TALKER_ID,     s->entity_id, 8);  // WE are the talker
-    memcpy(p + ACMP_OFF_LISTENER_ID,   listener_eid, 8);  // the MOTU listener
-    av_put_be16(p + ACMP_OFF_TALKER_UID,   talker_uid);
-    av_put_be16(p + ACMP_OFF_LISTENER_UID, listener_uid);
-    av_put_be16(p + ACMP_OFF_SEQ_ID, s->next_acmp_seq++);
-
-    avdecc_eth_send(14 + ACMPDU_LEN);
-    s->acmp_tx_count++;
-}
-
 // Send an ACMP DISCONNECT_TX_COMMAND to a talker — clears its stale
 // talker/listener state before we re-bootstrap with CONNECT_TX. Used by
 // the CRF data-flow watchdog. Carries the known stream_id (unlike the

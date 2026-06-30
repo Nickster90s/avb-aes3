@@ -446,11 +446,6 @@ void avdecc_notify_talkers_ready(avdecc_state_t *s);
 void avdecc_initiate_listener_connect(avdecc_state_t *s, uint8_t listener_uid,
                                       const uint8_t *talker_eid, uint16_t talker_uid);
 
-// Proactively connect OUR talker stream to a listener (#69): send the listener a
-// CONNECT_RX_COMMAND so it (re)connects to us. Used at cold boot for talker streams.
-void avdecc_initiate_talker_connect(avdecc_state_t *s, uint16_t talker_uid,
-                                    const uint8_t *listener_eid, uint16_t listener_uid);
-
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).
 void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len);

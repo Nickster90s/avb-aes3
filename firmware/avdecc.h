@@ -441,6 +441,11 @@ void avdecc_listener_frame_rx   (avdecc_state_t *s, uint16_t uid);
 // talker goes ready/streaming) so a listener stuck in AskingFailed re-probes.
 void avdecc_notify_talkers_ready(avdecc_state_t *s);
 
+// Proactively connect a listener to a talker (slow-path, no controller). Used by
+// the CRF auto-reconnect to actively ask the talker to stream, rather than wait.
+void avdecc_initiate_listener_connect(avdecc_state_t *s, uint8_t listener_uid,
+                                      const uint8_t *talker_eid, uint16_t talker_uid);
+
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).
 void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len);

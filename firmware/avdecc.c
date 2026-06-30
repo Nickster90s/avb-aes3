@@ -550,6 +550,29 @@ static void send_connect_tx_command(avdecc_state_t *s, const avdecc_resolve_t *r
     s->acmp_tx_count++;
 }
 
+// Proactively initiate a listener connection (slow-path) WITHOUT a controller —
+// used by the CRF auto-reconnect at boot. Sends CONNECT_TX_COMMAND to the talker
+// for (listener_uid <- talker_eid[talker_uid]); the talker's CONNECT_TX_RESPONSE
+// is handled by the normal resolve path (binds + on_listener_connect). A passive
+// pending listener only binds if the talker spontaneously advertises — which it
+// won't unless asked, so we ask here. ctrl_eid is zeroed (no controller), making
+// the eventual deferred CONNECT_RX_RESPONSE a harmless no-op.
+void avdecc_initiate_listener_connect(avdecc_state_t *s, uint8_t listener_uid,
+                                      const uint8_t *talker_eid, uint16_t talker_uid)
+{
+    if (listener_uid >= AVDECC_MAX_LISTENERS) return;
+    avdecc_resolve_t *r = &s->resolves[listener_uid];
+    r->active           = 1;
+    r->listener_uid     = listener_uid;
+    r->our_seq_id       = s->next_acmp_seq++;
+    memset(r->ctrl_eid_orig, 0, 8);
+    r->ctrl_seq_id_orig = 0;
+    memcpy(r->talker_id, talker_eid, 8);
+    r->talker_uid       = talker_uid;
+    r->start_ms         = gptp_uptime_ms();
+    send_connect_tx_command(s, r);
+}
+
 // Send an ACMP DISCONNECT_TX_COMMAND to a talker — clears its stale
 // talker/listener state before we re-bootstrap with CONNECT_TX. Used by
 // the CRF data-flow watchdog. Carries the known stream_id (unlike the

@@ -1438,24 +1438,25 @@ int main(void)
             // the CRF stream flood the RX during the cold Pdelay window and gPTP
             // never locked; post-lock the path is stable (boot-1 behaviour). The
             // MOTU's next CRF TalkerAdvertise then auto-binds via on_talker_advertise.
-            static uint8_t crf_armed = 0;
-            if (!crf_armed && g_cfg.crf_valid && gptp.servo_locked) {
-                // Match ONLY the saved CRF stream's exact dest_mac (stream-specific).
-                // The talker_entity_id is left ZERO so dest_or_eid_match uses the
-                // dest-MAC path only — matching on the EID grabbed the FIRST stream
-                // the MOTU advertised (a high-rate AUDIO stream), whose flood killed
-                // gPTP. from_nv=1 so this restore-bind does not re-persist.
-                pending_bind_t *pc = &pending_listeners[LISTENER_UID_CRF];
-                pc->active     = 1;
-                pc->uid        = LISTENER_UID_CRF;
-                pc->from_nv    = 1;
-                memcpy(pc->dest_mac, g_cfg.crf_dmac, 6);
-                for (int i = 0; i < 8; i++) pc->talker_entity_id[i] = 0;
-                pc->talker_uid = 0;
-                crf_armed = 1;
-                printf("[CFG] gPTP locked — CRF auto-reconnect armed (dest %02x:%02x:%02x:%02x:%02x:%02x)\n",
-                       g_cfg.crf_dmac[0], g_cfg.crf_dmac[1], g_cfg.crf_dmac[2],
-                       g_cfg.crf_dmac[3], g_cfg.crf_dmac[4], g_cfg.crf_dmac[5]);
+            // CRF auto-reconnect (#70): once gPTP is locked, PROACTIVELY connect to
+            // the saved CRF stream by sending ACMP CONNECT_TX_COMMAND to the talker
+            // (slow-path, no controller). A passive pending listener never fired —
+            // the MOTU doesn't spontaneously advertise/stream the CRF unless asked,
+            // so we ask. Retry every 3 s until the MCR binds. The talker's
+            // CONNECT_TX_RESPONSE drives the normal resolve -> bind path, and Hive
+            // sees the listener connected. talker_uid = the CRF stream index (low 2
+            // bytes of the saved stream_id), so we target the CRF, not stream 0.
+            static uint32_t crf_try_ms = 0;
+            if (g_cfg.crf_valid && gptp.servo_locked && !mcr.bound) {
+                uint32_t now = gptp_uptime_ms();
+                if (crf_try_ms == 0 || (now - crf_try_ms) > 3000) {
+                    uint16_t tuid = ((uint16_t)g_cfg.crf_stream_id[6] << 8)
+                                  |  (uint16_t)g_cfg.crf_stream_id[7];
+                    avdecc_initiate_listener_connect(&avdecc, LISTENER_UID_CRF,
+                                                     g_cfg.crf_talker_eid, tuid);
+                    crf_try_ms = now;
+                    printf("[CFG] CRF auto-reconnect: CONNECT_TX_COMMAND to talker (stream %u)\n", tuid);
+                }
             }
 
             static uint8_t  talker_on  = 0;

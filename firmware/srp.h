@@ -179,7 +179,9 @@ typedef struct {
     // gates the gateware AAF TX on this so the talker never blasts an
     // unreserved multicast (which the bridge floods to every port → the
     // segment-congestion / "AVB stuck" we hit). Aged out by srp_poll.
-    uint8_t  talker_listener_seen;
+    uint8_t  talker_listener_seen;    // global "any stream has a listener" (watchdog/diag)
+    uint8_t  talker_listener_mask;    // per-stream: bit i set when a listener registered for
+                                      // talker stream i -> drives per-stream MRP JoinIn/JoinMt (#69)
     uint32_t talker_listener_seen_ms;
     uint8_t  talker_fail_code;        // last TalkerFailed code the bridge sent for OUR stream (0=none)
     uint32_t talker_fail_count;       // # TalkerFailed received for OUR stream

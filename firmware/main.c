@@ -100,6 +100,8 @@ static uint8_t  rx_last_src[6];
 typedef struct {
     uint8_t  active;
     uint8_t  uid;
+    uint8_t  from_nv;          // 1 = armed from the NV CRF binding (not Hive) — its
+                               // bind must NOT re-persist (would re-save on every match)
     uint8_t  dest_mac[6];
     uint8_t  talker_entity_id[8];
     uint16_t talker_uid;
@@ -777,6 +779,21 @@ static void check_uart_cmd(void)
         case 'C':
             mcr_dump_conv_log(&mcr);
             break;
+        case 'N':
+            // Reset the saved CRF binding in NV (clears a stale/wrong entry) AND
+            // drop the live CRF bind so a wrong-stream flood stops immediately.
+            // cs= is kept. Reconnect the correct CRF in Hive to re-save it.
+            g_cfg.crf_valid = 0;
+            for (int i = 0; i < 8; i++) g_cfg.crf_stream_id[i]  = 0;
+            for (int i = 0; i < 6; i++) g_cfg.crf_dmac[i]       = 0;
+            for (int i = 0; i < 8; i++) g_cfg.crf_talker_eid[i] = 0;
+            cfg_save();
+            pending_listeners[LISTENER_UID_CRF].active = 0;
+            mcr_unbind(&mcr);
+            avtp_filter_clear_slot(AVTP_FILTER_SLOT_CRF);
+            printf("[CFG] NV CRF binding cleared + MCR unbound + filter cleared. "
+                   "Reconnect the correct CRF stream in Hive to re-save it.\n");
+            break;
         case 'P': {
             // Sweep the AAF presentation-time offset (ns) to chase AxC "Late
             // Timestamp": +1 ms per press, wrap 2..10 ms. Larger offset = more
@@ -917,7 +934,8 @@ static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_ma
         if (p->uid == LISTENER_UID_CRF) {
             mcr_bind(&mcr, stream_id);
             avtp_filter_set_slot(AVTP_FILTER_SLOT_CRF, stream_id, p->dest_mac);
-            persist_crf_binding(stream_id, p->dest_mac, p->talker_entity_id);  // #70
+            if (!p->from_nv)   // a fresh Hive connect persists; an NV restore does not
+                persist_crf_binding(stream_id, p->dest_mac, p->talker_entity_id);  // #70
         } else if (p->uid == LISTENER_UID_AAF) {
             aaf_bind(&aaf, stream_id);
             // Stage 2a: gateware AVTPSampleExtractor pulls audio into
@@ -976,8 +994,9 @@ static void on_listener_connect(uint16_t uid, const uint8_t *stream_id,
 
     if (stream_id_is_zero(stream_id)) {
         pending_bind_t *p = &pending_listeners[uid];
-        p->active = 1;
-        p->uid    = (uint8_t)uid;
+        p->active  = 1;
+        p->uid     = (uint8_t)uid;
+        p->from_nv = 0;        // Hive-initiated -> its bind persists as the new default
         memcpy(p->dest_mac, dest_mac, 6);
         memcpy(p->talker_entity_id, talker_entity_id, 8);
         // talker_uid not exposed in callback signature yet; not needed
@@ -1421,14 +1440,22 @@ int main(void)
             // MOTU's next CRF TalkerAdvertise then auto-binds via on_talker_advertise.
             static uint8_t crf_armed = 0;
             if (!crf_armed && g_cfg.crf_valid && gptp.servo_locked) {
+                // Match ONLY the saved CRF stream's exact dest_mac (stream-specific).
+                // The talker_entity_id is left ZERO so dest_or_eid_match uses the
+                // dest-MAC path only — matching on the EID grabbed the FIRST stream
+                // the MOTU advertised (a high-rate AUDIO stream), whose flood killed
+                // gPTP. from_nv=1 so this restore-bind does not re-persist.
                 pending_bind_t *pc = &pending_listeners[LISTENER_UID_CRF];
-                pc->active    = 1;
-                pc->uid       = LISTENER_UID_CRF;
+                pc->active     = 1;
+                pc->uid        = LISTENER_UID_CRF;
+                pc->from_nv    = 1;
                 memcpy(pc->dest_mac, g_cfg.crf_dmac, 6);
-                memcpy(pc->talker_entity_id, g_cfg.crf_talker_eid, 8);
+                for (int i = 0; i < 8; i++) pc->talker_entity_id[i] = 0;
                 pc->talker_uid = 0;
                 crf_armed = 1;
-                printf("[CFG] gPTP locked — CRF auto-reconnect armed (pending listener)\n");
+                printf("[CFG] gPTP locked — CRF auto-reconnect armed (dest %02x:%02x:%02x:%02x:%02x:%02x)\n",
+                       g_cfg.crf_dmac[0], g_cfg.crf_dmac[1], g_cfg.crf_dmac[2],
+                       g_cfg.crf_dmac[3], g_cfg.crf_dmac[4], g_cfg.crf_dmac[5]);
             }
 
             static uint8_t  talker_on  = 0;

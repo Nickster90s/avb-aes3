@@ -952,10 +952,29 @@ static void on_talker_advertise(const uint8_t *stream_id, const uint8_t *dest_ma
 // AVDECC callbacks — wire connection management to AVTP/SRP
 // ---------------------------------------------------------------------------
 
+// Batched NV save: talker-binding persistence sets cfg_dirty; the main loop writes
+// once things settle so 6 quick connects don't stall on 6 separate flash erases.
+static uint8_t  cfg_dirty = 0;
+static uint32_t cfg_dirty_ms = 0;
+
+// Persist a talker->listener binding (#69): record which listener (MOTU) connected
+// to talker stream `uid`, so we can proactively reconnect it on cold boot.
+static void persist_tx_binding(uint16_t uid, const uint8_t *listener_eid, uint16_t listener_uid)
+{
+    if (uid >= N_AAF_STREAMS) return;
+    int chg = 0;
+    uint8_t bit = (uint8_t)(1u << uid);
+    if (!(g_cfg.tx_streams_mask & bit))        { g_cfg.tx_streams_mask |= bit; chg = 1; }
+    if (g_cfg.tx_listener_uid[uid] != listener_uid) { g_cfg.tx_listener_uid[uid] = listener_uid; chg = 1; }
+    for (int i = 0; i < 8; i++)
+        if (g_cfg.tx_listener_eid[i] != listener_eid[i]) { g_cfg.tx_listener_eid[i] = listener_eid[i]; chg = 1; }
+    if (chg) { cfg_dirty = 1; cfg_dirty_ms = gptp_uptime_ms(); }
+}
+
 static void on_talker_connect(uint16_t uid, const uint8_t *listener_entity_id)
 {
-    (void)listener_entity_id;
     if (uid >= N_AAF_STREAMS) return;   // any of the 6 time-mux talker streams
+    persist_tx_binding(uid, listener_entity_id, avdecc.talkers[uid].listener_uid);   // #69
     aaf_tx_enable(&aaf, 1);
     // Re-assert the talker advertise (idempotent; it's already enabled from
     // boot). This resets the NEW counter so the next 2 advertises emit NEW(0),
@@ -1457,6 +1476,38 @@ int main(void)
                     crf_try_ms = now;
                     printf("[CFG] CRF auto-reconnect: CONNECT_TX_COMMAND to talker (stream %u)\n", tuid);
                 }
+            }
+
+            // TX/talker auto-reconnect (#69): once gPTP is locked, proactively
+            // re-connect each saved talker stream that isn't yet connected by
+            // sending the listener (MOTU) a CONNECT_RX_COMMAND. The MOTU is a
+            // PASSIVE listener — it doesn't re-initiate promptly on cold boot — so
+            // we drive it (symmetric to the CRF/#70 proactive connect). Skips a
+            // stream once a listener is present (so it won't fight the MOTU if it
+            // does reconnect on its own). Retry every 3 s.
+            static uint32_t tx_try_ms = 0;
+            if (g_cfg.tx_streams_mask && gptp.servo_locked) {
+                uint32_t now = gptp_uptime_ms();
+                if (tx_try_ms == 0 || (now - tx_try_ms) > 3000) {
+                    for (uint16_t u = 0; u < N_AAF_STREAMS; u++) {
+                        if ((g_cfg.tx_streams_mask & (1u << u)) &&
+                            avdecc.talkers[u].n_listeners == 0) {
+                            avdecc_initiate_talker_connect(&avdecc, u, g_cfg.tx_listener_eid,
+                                                           g_cfg.tx_listener_uid[u]);
+                            printf("[CFG] TX auto-reconnect: CONNECT_RX_COMMAND -> listener (stream %u)\n", u);
+                        }
+                    }
+                    tx_try_ms = now;
+                }
+            }
+
+            // Batched NV write for talker bindings — debounced so 6 quick connects
+            // collapse into ONE flash erase/program (avoids stalling the loop, and
+            // thus gPTP, on every connect). Persist once things settle for 2 s.
+            if (cfg_dirty && (gptp_uptime_ms() - cfg_dirty_ms) > 2000) {
+                cfg_save();
+                cfg_dirty = 0;
+                printf("[CFG] saved talker bindings to NV (mask=0x%02x)\n", g_cfg.tx_streams_mask);
             }
 
             static uint8_t  talker_on  = 0;

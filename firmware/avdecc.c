@@ -887,6 +887,56 @@ static void acmp_handle_get_rx_state(avdecc_state_t *s, const uint8_t *pdu)
     acmp_send_response(s, ACMP_MSG_GET_RX_STATE_RESPONSE, ACMP_STATUS_SUCCESS, pdu);
 }
 
+// #69 stale-connection clear. We snoop a CONNECT_RX_COMMAND that names US as the
+// talker but a FOREIGN listener (the MOTU AxC). On our reboot the MOTU switch
+// auto-reconnects the AxC's saved input by sending it CONNECT_RX — but WITHOUT a
+// DISCONNECT first. The AxC still holds a stale connection to our (now gone)
+// stream, so it no-ops the CONNECT (answers SUCCESS, never re-resolves, never
+// sends us CONNECT_TX) and nothing streams. Proven on the wire: the working
+// manual repatch is identical EXCEPT it issues DISCONNECT_RX_COMMAND first.
+// So while we have no live connection for this stream (no CONNECT_TX resolved us,
+// t->connected==0) we send the AxC that missing DISCONNECT_RX_COMMAND to clear
+// its stale state; the switch's next CONNECT then resolves against us and
+// streams. Gated on t->connected + rate-limited so we never fight a live link.
+static void acmp_clear_stale_listener(avdecc_state_t *s, const uint8_t *pdu)
+{
+    uint16_t tuid = av_get_be16(pdu + ACMP_OFF_TALKER_UID);
+    if (tuid >= AVDECC_MAX_TALKERS) return;
+    if (s->talkers[tuid].connected) return;   // already streaming — don't disturb
+
+    static uint32_t last_ms[AVDECC_MAX_TALKERS];
+    uint32_t now = gptp_uptime_ms();
+    if (last_ms[tuid] && (now - last_ms[tuid]) < 3000) return;   // rate-limit per stream
+    last_ms[tuid] = now ? now : 1;
+
+    const uint8_t *listener_id = pdu + ACMP_OFF_LISTENER_ID;
+    uint16_t luid = av_get_be16(pdu + ACMP_OFF_LISTENER_UID);
+
+    uint8_t *frame = avdecc_tx_buf();
+    uint8_t *p = avdecc_eth_hdr(frame, s->src_mac);
+    memset(p, 0, ACMPDU_LEN);
+    p[0] = AVTP_SUBTYPE_ACMP;
+    p[1] = ACMP_MSG_DISCONNECT_RX_COMMAND;
+    av_put_be16(p + 2, ACMP_CONTROL_DATA_LEN);
+    memcpy(p + ACMP_OFF_STREAM_ID,      pdu + ACMP_OFF_STREAM_ID, 8);
+    memcpy(p + ACMP_OFF_CONTROLLER_ID,  s->entity_id, 8);   // we act as the controller
+    memcpy(p + ACMP_OFF_TALKER_ID,      s->entity_id, 8);   // our talker
+    memcpy(p + ACMP_OFF_LISTENER_ID,    listener_id, 8);    // the AxC (foreign listener)
+    av_put_be16(p + ACMP_OFF_TALKER_UID,   tuid);
+    av_put_be16(p + ACMP_OFF_LISTENER_UID, luid);
+    memcpy(p + ACMP_OFF_STREAM_DEST_MAC, pdu + ACMP_OFF_STREAM_DEST_MAC, 6);
+    av_put_be16(p + ACMP_OFF_SEQ_ID, s->next_acmp_seq++);
+
+    avdecc_eth_send(14 + ACMPDU_LEN);
+    s->acmp_tx_count++;
+
+    printf("[ACMP] #69 stale-clear: DISCONNECT_RX -> listener "
+           "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x[%u] for our talker uid=%u\n",
+           listener_id[0], listener_id[1], listener_id[2], listener_id[3],
+           listener_id[4], listener_id[5], listener_id[6], listener_id[7],
+           luid, tuid);
+}
+
 // ---------------------------------------------------------------------------
 // AECP — AVDECC Enumeration and Control Protocol
 // ---------------------------------------------------------------------------
@@ -2188,6 +2238,8 @@ void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len)
             case ACMP_MSG_CONNECT_RX_COMMAND:
                 if (entity_id_match(listener_id, s->entity_id))
                     acmp_handle_connect_rx(s, pdu);
+                else if (entity_id_match(talker_id, s->entity_id))
+                    acmp_clear_stale_listener(s, pdu);   // #69: foreign reconnect -> clear stale
                 break;
             case ACMP_MSG_DISCONNECT_RX_COMMAND:
                 if (entity_id_match(listener_id, s->entity_id))

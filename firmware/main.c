@@ -1470,14 +1470,10 @@ int main(void)
             // cs=0 -> gPTP is the media clock; cs=1 -> CRF (mcr.servo_locked); gPTP
             // must be locked regardless (pres-time is gPTP-based).
             uint8_t media_clock_ok = (mcr.cs == 1) ? mcr.servo_locked : gptp.servo_locked;
-            static uint32_t talker_ready_ms = 0;
-            static uint8_t  reannounced     = 0;
             if (aaf_gw_enabled && gptp.servo_locked && media_clock_ok) {
                 if (!talker_on) {
                     aaf_pkt_enable_write(1);
                     talker_on = 1;
-                    talker_ready_ms = gptp_uptime_ms();   // arm the ADP re-announce
-                    reannounced     = 0;
                     // Talker is now ready to stream: push unsolicited STREAM_OUTPUT
                     // info for all 6 streams so a listener stuck in AskingFailed
                     // with a stale/zeroed binding (the MOTU stream-0 case) gets the
@@ -1489,25 +1485,9 @@ int main(void)
                 if (talker_on) {
                     aaf_pkt_enable_write(0);
                     talker_on = 0;
-                    reannounced = 0;      // re-announce again after the next re-lock
                     printf("[main] AAF talker OFF — %s not locked\n",
                            (mcr.cs == 1 && !mcr.servo_locked) ? "CRF media clock" : "gPTP");
                 }
-            }
-
-            // ADP re-announce (#69) — the KEY fix: ~3 s after the talker is up and
-            // streaming a settled clock, send ENTITY_DEPARTING+AVAILABLE. That is
-            // the standard ADP reboot signal; a Milan listener (the MOTU AxC) that
-            // holds a saved fast-connect to us re-runs its OWN probe on it and
-            // re-establishes the connection. Without it the AxC keeps its stale
-            // "still connected" belief ("we are online → never asks to patch") and
-            // nothing re-connects until a manual re-patch. One-shot per talker-up;
-            // the 3 s delay lets pres/rate settle so it locks clean (no harsh tone).
-            if (talker_on && !reannounced &&
-                (gptp_uptime_ms() - talker_ready_ms) > 3000) {
-                avdecc_reannounce(&avdecc);
-                reannounced = 1;
-                printf("[main] ADP re-announce (DEPARTING+AVAILABLE) — AxC should re-fast-connect all streams\n");
             }
             // (REMOVED 2026-06-23: the auto-heal pres-glitch detector. Its target
             // glitch was the pres_base CSR alias, now deleted at the root, so it

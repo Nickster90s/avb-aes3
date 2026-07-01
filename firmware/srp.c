@@ -288,6 +288,48 @@ static uint8_t *msrp_emit_talker_adv(uint8_t *p, const srp_talker_attr_t *t,
     return p;
 }
 
+// Pack ALL talker streams into ONE MSRP Message (AttributeType=1) — one
+// VectorAttribute per stream, then a SINGLE EndMark — GenAVB-style. The bridge
+// then processes the LeaveAll + every stream's declaration ATOMICALLY in one
+// MRPDU. Sending them as separate back-to-back MRPDUs (our old way) made the
+// bridge's MSRP registrar keep only the LAST one ("stream 3 reconnects, 0/1/2
+// don't"). LeaveAll rides only the first VectorAttribute (applies to the type).
+static uint8_t *msrp_emit_all_talkers(uint8_t *p, srp_state_t *s,
+                                      int leaveall, uint8_t event)
+{
+    *p++ = MSRP_ATTR_TALKER_ADV;          // AttributeType
+    *p++ = 25;                            // AttributeLength
+    uint8_t *list_len_ptr = p; p += 2;    // AttributeListLength (backfilled)
+    uint8_t *vec_start = p;
+
+    for (uint8_t i = 0; i < s->n_talkers; i++) {
+        srp_talker_attr_t *t = &s->talkers[i];
+        t->priority_and_rank   = (uint8_t)((SR_CLASS_A_PRIO << 5) | (1 << 4));
+        t->vlan_id             = SR_CLASS_A_VID;
+        t->max_interval_frames = 1;
+        // VectorHeader: NumberOfValues=1; LeaveAll only on the first vector.
+        uint16_t vec_hdr = 1;
+        if (leaveall && i == 0) vec_hdr |= (1 << 13);
+        srp_put_be16(p, vec_hdr); p += 2;
+        // FirstValue (25 bytes)
+        memcpy(p, t->stream_id, 8);  p += 8;
+        memcpy(p, t->dest_addr, 6);  p += 6;
+        srp_put_be16(p, t->vlan_id); p += 2;
+        srp_put_be16(p, t->max_frame_size); p += 2;
+        srp_put_be16(p, t->max_interval_frames); p += 2;
+        *p++ = t->priority_and_rank;
+        srp_put_be32(p, t->accumulated_latency_ns); p += 4;
+        // ThreePackedEvents for this stream
+        *p++ = MRP_3PACK(event, 0, 0);
+    }
+    // ONE EndMark after all vectors (AttrListLen includes it).
+    srp_put_be16(p, 0); p += 2;
+
+    uint16_t list_len = (uint16_t)(p - vec_start);
+    srp_put_be16(list_len_ptr, list_len);
+    return p;
+}
+
 // Write a Listener message: AttributeType=3, AttributeLength=8
 static uint8_t *msrp_emit_listener(uint8_t *p, const uint8_t *stream_id,
                                     uint8_t substate, int leaveall,
@@ -435,26 +477,20 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
         srp_send_one_pdu(frame, p);   // EndMark + pad + send
     }
 
-    // ---- PDU 2: TalkerAdvertise ALONE (decoupled from the listeners above).
+    // ---- PDU 2: ALL TalkerAdvertise packed into ONE MSRP PDU (GenAVB-style,
+    // decoupled from the listeners above). MRP applicant event: NEW(0)x2, then
+    // JoinIn(1) once a listener registered / JoinMt(3) while none. Shared across
+    // the streams (they advertise together). Sending them as SEPARATE back-to-back
+    // MRPDUs made the MOTU bridge keep only the last -> 0/1/2 never reserved. One
+    // packed MRPDU = the bridge processes LeaveAll + all declarations atomically.
     if (s->talker_enabled) {
-        // MRP applicant event tracks the registrar: NEW(0)x2, then JoinMt(3) while
-        // no listener is registered for OUR stream, JoinIn(1) once one is. Shared
-        // across all 6 time-mux streams (they advertise together).
         uint8_t tk_event = (s->talker_new_count < 2) ? MRP_EVT_NEW
                          : (s->talker_listener_seen  ? MRP_EVT_JOININ
                                                      : MRP_EVT_JOINMT);
-        // Emit each stream's TalkerAdvertise as its OWN MSRP PDU (distinct
-        // stream_ids -> not a packable vector). LeaveAll rides only the first PDU.
-        for (uint8_t i = 0; i < s->n_talkers; i++) {
-            srp_talker_attr_t *tk = &s->talkers[i];
-            tk->priority_and_rank = (uint8_t)((SR_CLASS_A_PRIO << 5) | (1 << 4));
-            tk->vlan_id = SR_CLASS_A_VID;
-            tk->max_interval_frames = 1;
-            uint8_t *frame = srp_tx_buf();
-            uint8_t *p = msrp_frame_begin(frame, s->src_mac);
-            p = msrp_emit_talker_adv(p, tk, (i == 0) ? leaveall : 0, tk_event);
-            srp_send_one_pdu(frame, p);   // EndMark + pad + send
-        }
+        uint8_t *frame = srp_tx_buf();
+        uint8_t *p = msrp_frame_begin(frame, s->src_mac);
+        p = msrp_emit_all_talkers(p, s, leaveall, tk_event);
+        srp_send_one_pdu(frame, p);   // EndMark + pad + send — ONE frame, all streams
         if (s->talker_new_count < 2)
             s->talker_new_count++;
     }

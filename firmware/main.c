@@ -1489,30 +1489,6 @@ int main(void)
                            (mcr.cs == 1 && !mcr.servo_locked) ? "CRF media clock" : "gPTP");
                 }
             }
-
-            // TX/talker auto-reconnect (#69) — NO flash writes (that broke audio).
-            // Screenshots proved the MOTU boots its Milan saved-state in PASSIVE
-            // probing (stream_id=0, never resolves) so only the one stream it
-            // actively re-patched comes up. Replicate a Hive re-patch: once our
-            // talker is enabled and ANY stream has a listener (so we know the MOTU's
-            // entity_id), send a CONNECT_RX_COMMAND for each NOT-yet-connected stream
-            // to flip the MOTU to ACTIVE probing. 1:1 input<->output mapping. Retry
-            // every 3s; a stream drops out of the loop the moment it gets a listener.
-            if (talker_on && gptp.servo_locked) {
-                const uint8_t *axc = 0;
-                for (int u = 0; u < N_AAF_STREAMS; u++)
-                    if (avdecc.talkers[u].n_listeners > 0) { axc = avdecc.talkers[u].listener_id; break; }
-                static uint32_t tx_try_ms = 0;
-                uint32_t now_t = gptp_uptime_ms();
-                if (axc && (tx_try_ms == 0 || (now_t - tx_try_ms) > 3000)) {
-                    for (int u = 0; u < N_AAF_STREAMS; u++)
-                        if (avdecc.talkers[u].n_listeners == 0) {
-                            avdecc_initiate_talker_connect(&avdecc, (uint16_t)u, axc, (uint16_t)u);
-                            printf("[main] TX reconnect: CONNECT_RX_COMMAND -> MOTU stream %d (passive->active)\n", u);
-                        }
-                    tx_try_ms = now_t;
-                }
-            }
             // (REMOVED 2026-06-23: the auto-heal pres-glitch detector. Its target
             // glitch was the pres_base CSR alias, now deleted at the root, so it
             // never fired; removed so a false-fire can't toggle the talker enable

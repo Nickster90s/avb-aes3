@@ -371,16 +371,15 @@ static void srp_send_talker_leave(srp_state_t *s)
 }
 
 // Does an 8-byte stream_id match ANY of our configured talker streams?
-// Returns the index of the talker stream matching sid, or -1 if none.
 static int srp_match_any_talker(const srp_state_t *s, const uint8_t *sid)
 {
     for (uint8_t i = 0; i < s->n_talkers; i++) {
         int eq = 1;
         for (int j = 0; j < 8; j++)
             if (sid[j] != s->talkers[i].stream_id[j]) { eq = 0; break; }
-        if (eq) return (int)i;
+        if (eq) return 1;
     }
-    return -1;
+    return 0;
 }
 
 static void srp_send_listener_leave(srp_state_t *s, const srp_listener_t *l)
@@ -438,17 +437,15 @@ static void srp_send_declarations(srp_state_t *s, int leaveall)
 
     // ---- PDU 2: TalkerAdvertise ALONE (decoupled from the listeners above).
     if (s->talker_enabled) {
+        // MRP applicant event tracks the registrar: NEW(0)x2, then JoinMt(3) while
+        // no listener is registered for OUR stream, JoinIn(1) once one is. Shared
+        // across all 6 time-mux streams (they advertise together).
+        uint8_t tk_event = (s->talker_new_count < 2) ? MRP_EVT_NEW
+                         : (s->talker_listener_seen  ? MRP_EVT_JOININ
+                                                     : MRP_EVT_JOINMT);
         // Emit each stream's TalkerAdvertise as its OWN MSRP PDU (distinct
         // stream_ids -> not a packable vector). LeaveAll rides only the first PDU.
         for (uint8_t i = 0; i < s->n_talkers; i++) {
-            // PER-STREAM MRP event (#69): NEW(0)x2, then JoinIn(1) if THIS stream's
-            // listener is registered with us, else JoinMt(3) to keep prompting. A
-            // global flag flipped ALL streams to JoinIn the instant ONE got a
-            // listener -> the rest falsely claimed registered -> never reserved
-            // (stream 3 always reconnected, 0/1/2 stuck).
-            uint8_t tk_event = (s->talker_new_count < 2) ? MRP_EVT_NEW
-                             : ((s->talker_listener_mask & (1u << i)) ? MRP_EVT_JOININ
-                                                                      : MRP_EVT_JOINMT);
             srp_talker_attr_t *tk = &s->talkers[i];
             tk->priority_and_rank = (uint8_t)((SR_CLASS_A_PRIO << 5) | (1 << 4));
             tk->vlan_id = SR_CLASS_A_VID;
@@ -571,7 +568,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                     // IEEE 802.1Q Table 35-6 code (0x06=no bandwidth, 0x05=dest
                     // in use, 0x16=class/priority, ...).
                     if (s->talker_enabled) {
-                        int ours = (srp_match_any_talker(s, sid) >= 0);
+                        int ours = srp_match_any_talker(s, sid);
                         if (ours) {
                             s->talker_fail_code = code;
                             s->talker_fail_count++;
@@ -614,8 +611,7 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
 
                 // Flood guard + DIAGNOSTIC: does a remote listener want OUR
                 // talker stream? (vp[0..7] = Listener FirstValue = stream_id.)
-                int ti = srp_match_any_talker(s, vp);   // talker stream index, or -1
-                int eq = (ti >= 0);
+                int eq = srp_match_any_talker(s, vp);
 
                 // Log EVERY Listener declaration we receive (rate-limited 2s)
                 // so we can see whether AxC ever declares a listener for our
@@ -640,20 +636,12 @@ void srp_process_rx(srp_state_t *s, const uint8_t *frame, uint32_t len)
                     }
                 }
 
-                if (s->talker_enabled && ti >= 0) {
-                    uint8_t bit = (uint8_t)(1u << ti);
-                    // PER-STREAM listener tracking (#69): each talker stream's MRP
-                    // JoinIn/JoinMt event must follow ITS OWN registrar, not a global
-                    // flag. With the global flag, the first stream to get a listener
-                    // flipped ALL streams to JoinIn — so streams with no listener yet
-                    // falsely claimed "registered", and the bridge never reserved them
-                    // (stream 3 always, 0/1/2 stuck). Now bit i is set only when WE
-                    // receive a Listener declaration for talker stream i.
-                    if (!(s->talker_listener_mask & bit))
-                        printf("[SRP] talker stream %d: listener registered "
-                               "(substate=%u) -> JoinIn\n", ti, (unsigned)sub);
-                    s->talker_listener_mask   |= bit;
-                    s->talker_listener_seen    = 1;   // global "any" (watchdog/diag)
+                if (s->talker_enabled && eq) {
+                    if (!s->talker_listener_seen)
+                        SRPLOG("[SRP] *** REMOTE LISTENER declared OUR stream "
+                               "(substate=%u) — bridge should now forward AAF ***\n",
+                               (unsigned)sub);
+                    s->talker_listener_seen    = 1;
                     s->talker_listener_seen_ms = gptp_uptime_ms();
                 }
             }

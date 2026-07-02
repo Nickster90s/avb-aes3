@@ -1506,7 +1506,11 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         if (dt == AEM_DESC_STREAM_INPUT) {
             if (di == LISTENER_CRF_INDEX)      fmt = stream_fmt_crf_48k;
             else if (di == LISTENER_AAF_INDEX) fmt = stream_fmt_aaf_8ch_48k;
-        } else if (dt == AEM_DESC_STREAM_OUTPUT && di == TALKER_AAF_INDEX) {
+        } else if (dt == AEM_DESC_STREAM_OUTPUT && di < AVDECC_MAX_TALKERS) {
+            // ALL N time-mux talker outputs are the same AAF 8ch/48k format —
+            // not just index 0. Returning NO_SUCH_DESCRIPTOR for outputs 1..N-1
+            // made controllers/listeners treat those streams as broken and
+            // refuse to connect them (only output 0 was usable). (#69)
             fmt = stream_fmt_aaf_8ch_48k;
         }
         uint8_t *tf = avdecc_tx_buf();
@@ -1535,8 +1539,8 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         if (dt == AEM_DESC_STREAM_INPUT) {
             if (di == LISTENER_CRF_INDEX)      expect = stream_fmt_crf_48k;
             else if (di == LISTENER_AAF_INDEX) expect = stream_fmt_aaf_8ch_48k;
-        } else if (dt == AEM_DESC_STREAM_OUTPUT && di == TALKER_AAF_INDEX) {
-            expect = stream_fmt_aaf_8ch_48k;
+        } else if (dt == AEM_DESC_STREAM_OUTPUT && di < AVDECC_MAX_TALKERS) {
+            expect = stream_fmt_aaf_8ch_48k;   // all N talker outputs, not just 0 (#69)
         }
 
         uint8_t st;
@@ -2573,18 +2577,7 @@ void avdecc_poll(avdecc_state_t *s)
         elapsed = ADP_ADVERTISE_PERIOD_MS;
 
     if (elapsed >= ADP_ADVERTISE_PERIOD_MS) {
-        // Milan: do NOT announce ENTITY_AVAILABLE until gPTP has locked a valid
-        // grandmaster. A Milan listener's talker-discovery check requires our
-        // advertised gptp_grandmaster_id to equal its own GM (adp_milan_check_gptp,
-        // Milan 9.4.5); a GM=0 ADP is a guaranteed mismatch that a listener can
-        // latch as "wrong clock domain" and then never re-discover us even after
-        // we later advertise the real GM -> it never runs fast-connect. Holding
-        // ADP until gm_valid means the first ADP the listener ever sees from us
-        // already carries the correct GM -> clean discovery -> it probes/connects.
-        // If gPTP later drops, we correctly go quiet (we're no longer a valid talker).
-        if (g_gptp && g_gptp->gm_valid) {
-            adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
-            s->last_adp_ms = now_ms;
-        }
+        adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
+        s->last_adp_ms = now_ms;
     }
 }

@@ -2573,7 +2573,18 @@ void avdecc_poll(avdecc_state_t *s)
         elapsed = ADP_ADVERTISE_PERIOD_MS;
 
     if (elapsed >= ADP_ADVERTISE_PERIOD_MS) {
-        adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
-        s->last_adp_ms = now_ms;
+        // Milan: do NOT announce ENTITY_AVAILABLE until gPTP has locked a valid
+        // grandmaster. A Milan listener's talker-discovery check requires our
+        // advertised gptp_grandmaster_id to equal its own GM (adp_milan_check_gptp,
+        // Milan 9.4.5); a GM=0 ADP is a guaranteed mismatch that a listener can
+        // latch as "wrong clock domain" and then never re-discover us even after
+        // we later advertise the real GM -> it never runs fast-connect. Holding
+        // ADP until gm_valid means the first ADP the listener ever sees from us
+        // already carries the correct GM -> clean discovery -> it probes/connects.
+        // If gPTP later drops, we correctly go quiet (we're no longer a valid talker).
+        if (g_gptp && g_gptp->gm_valid) {
+            adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
+            s->last_adp_ms = now_ms;
+        }
     }
 }

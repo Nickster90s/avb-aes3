@@ -148,15 +148,14 @@ static uint8_t *avdecc_eth_hdr(uint8_t *frame, const uint8_t *src_mac)
 //   [36..39] available_index (4 bytes)
 //   [40..47] gptp_grandmaster_id (8 bytes)
 //   [48]     gptp_domain_number
-//   [49..51] reserved (3 bytes)
-//   [52..53] identify_control_index (2 bytes)
-//   [54..55] interface_index (2 bytes)
-//   [56..63] association_id (8 bytes)
-//   [64..67] reserved (4 bytes) — required: GenAVB and Hive treat the
-//            ADPDU body as 64 bytes (struct adp_pdu) so the AVTP frame
-//            after the 4-byte common header is 68 bytes. Without these
-//            4 trailing bytes, Hive logs "Adpdu::deserialize error:
-//            Not enough data in buffer".
+//   [49]     reserved (1 byte)   — IEEE 1722.1 §6.2.1.15 / la_avdecc. (GenAVB's
+//            struct adp_pdu carries an extra rsvd1 u16 here; do NOT copy it — the
+//            MOTU/Hive parse per la_avdecc and it shifts interface_index.)
+//   [50..51] identify_control_index (2 bytes)
+//   [52..53] interface_index (2 bytes)
+//   [54..61] association_id (8 bytes)
+//   [62..67] reserved (6 bytes) — keeps the AVTP frame body at 68 bytes so Hive
+//            doesn't log "Adpdu::deserialize error: Not enough data in buffer".
 // Total ADPDU = 68 bytes, control_data_length = 56 (per IEEE 1722.1)
 
 #define ADPDU_LEN           68
@@ -233,20 +232,26 @@ static void adp_send(avdecc_state_t *s, uint8_t msg_type)
     p[48] = 0;
 
     // reserved
-    p[49] = 0; p[50] = 0; p[51] = 0;
+    // reserved: exactly ONE octet after gptp_domain_number (IEEE 1722.1
+    // §6.2.1.15, and la_avdecc/Hive/MOTU parse it that way). The old code used
+    // THREE reserved bytes (copied from GenAVB's struct adp_pdu, which carries an
+    // extra rsvd1 u16) — that shifted identify_control_index/interface_index/
+    // association_id +2, so our 0xFFFF landed in the field the MOTU reads as
+    // interface_index (avb_session sends 0 there). A Milan listener checks
+    // interface_index (adp_milan.c:400) and refused to bind our streams -> entity
+    // visible ("green round") but no connection. Match la_avdecc / avb_session.
+    p[49] = 0;
 
-    // identify_control_index: 0xFFFF = no CONTROL descriptor implements
-    // identify. We have no CONTROL descriptors at all, so any other value
-    // is a dangling reference and Hive flags the entity as non-compliant.
-    av_put_be16(p + 52, 0xFFFF);
-    // interface_index: 0 = AVB_INTERFACE descriptor at index 0
-    av_put_be16(p + 54, 0);
+    // identify_control_index (offset 50): 0xFFFF = no CONTROL descriptor.
+    av_put_be16(p + 50, 0xFFFF);
+    // interface_index (offset 52): 0 = AVB_INTERFACE descriptor at index 0.
+    av_put_be16(p + 52, 0);
 
-    // association_id
-    memset(p + 56, 0, 8);
+    // association_id (offset 54)
+    memset(p + 54, 0, 8);
 
-    // reserved trailing 4 bytes (rsvd2 in GenAVB struct adp_pdu)
-    memset(p + 64, 0, 4);
+    // reserved trailing (offset 62..67) — keeps ADPDU length unchanged.
+    memset(p + 62, 0, 6);
 
     // Total frame
     uint32_t frame_len = 14 + ADPDU_LEN;

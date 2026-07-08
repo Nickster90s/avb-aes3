@@ -12,6 +12,7 @@
 
 #include "avdecc.h"
 #include "gptp.h"
+#include "cap.h"
 
 #include <generated/csr.h>
 #include <generated/mem.h>
@@ -111,6 +112,7 @@ static uint8_t *avdecc_tx_buf(void)
 
 static void avdecc_eth_send(uint32_t len)
 {
+    cap_record(1, avdecc_tx_buf(), len);   // record our TX (ADP/AECP/ACMP) into the boot ring
     while (!ethmac_sram_reader_ready_read())
         ;
     ethmac_sram_reader_slot_write(avdecc_txslot);
@@ -603,6 +605,112 @@ static void send_disconnect_tx_command(avdecc_state_t *s,
 
     avdecc_eth_send(14 + ACMPDU_LEN);
     s->acmp_tx_count++;
+}
+
+// Send an ACMP CONNECT_RX_COMMAND to the MOTU AxC listener — the FPGA acting as a
+// CONTROLLER that drives the listener's connection itself (talker-side analog of
+// the CRF's avdecc_initiate_listener_connect). FAST-CONNECT: we supply our real
+// stream_id + dest_mac, so the AxC needs no slow-path resolve. This is the exact
+// frame the switch fires at the AxC routinely (unlike the DISCONNECT that crashed
+// the MOTU on 2026-07-04), so the AxC handles it safely. WIRE-PROVEN root: the AxC
+// only re-establishes streams IT independently decides are disconnected and the
+// switch's boot CONNECT_RX out-races the AxC's own fast-connect; driving the
+// connection ourselves removes that race entirely.
+// Send the AxC either a DISCONNECT_RX (msg 8) or CONNECT_RX (msg 6) command as a
+// CONTROLLER, SLOW-PATH (stream_id=0, dest_mac=0) — byte-shaped exactly like the
+// MOTU controller's own re-patch (WIRE-CAPTURED 2026-07-08: DISCONNECT_RX(sid-)
+// -> CONNECT_RX(sid-) -> AxC sends us CONNECT_TX). The slow-path is essential: a
+// fast-connect CONNECT_RX carrying our real stream_id makes the AxC reply
+// "already connected, SUCCESS" and no-op; stream_id=0 forces it to RESOLVE, which
+// (after the disconnect un-sticks its stale state) makes it CONNECT_TX us.
+static void send_rx_command(avdecc_state_t *s, uint16_t uid, uint8_t msg_type)
+{
+    if (uid >= AVDECC_MAX_TALKERS || !s->axc_eid_valid) return;
+    uint8_t *frame = avdecc_tx_buf();
+    uint8_t *p = avdecc_eth_hdr(frame, s->src_mac);
+
+    memset(p, 0, ACMPDU_LEN);
+    p[0] = AVTP_SUBTYPE_ACMP;
+    p[1] = msg_type;                                        // CONNECT_RX(6) or DISCONNECT_RX(8)
+    av_put_be16(p + 2, ACMP_CONTROL_DATA_LEN);
+    // stream_id + dest_mac left 0 = SLOW-PATH (matches the working controller).
+    memcpy(p + ACMP_OFF_CONTROLLER_ID, s->entity_id, 8);    // we act as the controller
+    memcpy(p + ACMP_OFF_TALKER_ID,     s->entity_id, 8);    // WE are the talker
+    memcpy(p + ACMP_OFF_LISTENER_ID,   s->axc_eid,   8);    // the MOTU AxC
+    av_put_be16(p + ACMP_OFF_TALKER_UID,   uid);
+    av_put_be16(p + ACMP_OFF_LISTENER_UID, s->talker_patched_luid[uid]);
+    av_put_be16(p + ACMP_OFF_SEQ_ID, s->next_acmp_seq++);
+
+    avdecc_eth_send(14 + ACMPDU_LEN);
+    s->acmp_tx_count++;
+}
+
+// Snoop the switch's CONNECT_RX aimed at the MOTU AxC for OUR talker streams
+// (talker_id==us, listener_id==AxC). We're not the addressee, but this tells us
+// which of our streams are patched, plus the AxC entity id + its input index —
+// exactly what the talker-reconnect watchdog needs to drive them itself. Re-arms
+// the retry budget each time (a fresh switch attempt = a fresh chance / network
+// recovery), so it also recovers from link flaps, not just cold boot.
+static void acmp_snoop_switch_connect_rx(avdecc_state_t *s, const uint8_t *pdu)
+{
+    uint16_t tuid = av_get_be16(pdu + ACMP_OFF_TALKER_UID);
+    uint16_t luid = av_get_be16(pdu + ACMP_OFF_LISTENER_UID);
+    if (tuid >= AVDECC_MAX_TALKERS) return;
+    if (!s->axc_eid_valid) {
+        memcpy(s->axc_eid, pdu + ACMP_OFF_LISTENER_ID, 8);
+        s->axc_eid_valid = 1;
+    }
+    s->talker_patched[tuid]      = 1;
+    s->talker_patched_luid[tuid] = luid;
+    s->talker_rc_tries[tuid]     = 0;   // re-arm on every fresh switch attempt
+    s->talker_rc_ms[tuid]        = 0;
+    s->talker_rc_phase[tuid]     = 0;
+}
+
+// Talker-side proactive reconnect watchdog. For each AAF stream the switch has
+// tried to patch to the AxC (learned by snoop) that is NOT currently connected,
+// drive a CONNECT_RX_COMMAND to the AxC ourselves — every TALKER_RC_RETRY_MS,
+// capped at TALKER_RC_MAX_TRIES per switch-attempt so we don't flood if the AxC
+// ignores us (the snoop re-arms the budget on the next switch attempt / network
+// recovery). Stops for a stream the instant a listener connects. Gated on gPTP
+// lock. Call once per main-loop pass.
+#define TALKER_RC_RETRY_MS      5000   // between full disconnect+connect cycles
+#define TALKER_RC_DISC_CONN_MS  1500   // gap between our DISCONNECT_RX and CONNECT_RX
+#define TALKER_RC_MAX_TRIES     6
+void avdecc_talker_reconnect_watchdog(avdecc_state_t *s, uint8_t gptp_locked)
+{
+    if (!gptp_locked || !s->axc_eid_valid) return;
+    uint32_t now = gptp_uptime_ms();
+    for (uint16_t uid = 0; uid < AVDECC_MAX_TALKERS; uid++) {
+        if (!s->talker_patched[uid]) continue;
+        if (s->talkers[uid].n_listeners > 0) {      // connected -> done
+            s->talker_rc_tries[uid] = 0;
+            s->talker_rc_phase[uid] = 0;
+            continue;
+        }
+        if (s->talker_rc_tries[uid] >= TALKER_RC_MAX_TRIES) continue;
+
+        if (s->talker_rc_phase[uid] == 0) {
+            // Phase 0: begin a cycle -> DISCONNECT_RX (rate-limited between cycles).
+            if (s->talker_rc_ms[uid] != 0 &&
+                (now - s->talker_rc_ms[uid]) < TALKER_RC_RETRY_MS) continue;
+            s->talker_rc_ms[uid]    = now;
+            s->talker_rc_phase[uid] = 1;
+            printf("[AVDECC] talker reconnect uid=%u: DISCONNECT_RX (cycle %u)\n",
+                   uid, s->talker_rc_tries[uid] + 1);
+            send_rx_command(s, uid, ACMP_MSG_DISCONNECT_RX_COMMAND);
+        } else {
+            // Phase 1: after the gap -> CONNECT_RX (slow-path). The AxC, now
+            // un-stuck by the disconnect, resolves and CONNECT_TXes us.
+            if ((now - s->talker_rc_ms[uid]) < TALKER_RC_DISC_CONN_MS) continue;
+            s->talker_rc_ms[uid]    = now;
+            s->talker_rc_phase[uid] = 0;
+            s->talker_rc_tries[uid]++;
+            printf("[AVDECC] talker reconnect uid=%u: CONNECT_RX (cycle %u)\n",
+                   uid, s->talker_rc_tries[uid]);
+            send_rx_command(s, uid, ACMP_MSG_CONNECT_RX_COMMAND);
+        }
+    }
 }
 
 // CRF data-flow re-bootstrap watchdog (mirror of avb_session_mgr2's
@@ -2197,6 +2305,8 @@ void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len)
             case ACMP_MSG_CONNECT_RX_COMMAND:
                 if (entity_id_match(listener_id, s->entity_id))
                     acmp_handle_connect_rx(s, pdu);
+                else if (entity_id_match(talker_id, s->entity_id))
+                    acmp_snoop_switch_connect_rx(s, pdu);   // learn AxC + patched set
                 break;
             case ACMP_MSG_DISCONNECT_RX_COMMAND:
                 if (entity_id_match(listener_id, s->entity_id))
@@ -2580,6 +2690,29 @@ void avdecc_poll(avdecc_state_t *s)
     uint32_t elapsed = now_ms - s->last_adp_ms;
     if (elapsed > 2000000000)
         elapsed = ADP_ADVERTISE_PERIOD_MS;
+
+    // Announce IMMEDIATELY at boot — do NOT wait a full 10s period for the first
+    // ADP. WIRE-PROVEN reconnect race (cap.c 'R', 2026-07-07): the MOTU AxC begins
+    // its per-stream fast-connect ~400ms after seeing our ADP and walks the saved
+    // streams 3->2->1->0 ~600ms apart; the MOTU switch's boot CONNECT_RX (~10-12s,
+    // on its OWN timer, independent of our ADP) marks streams "connected" and
+    // PREEMPTS every stream the AxC hasn't reached yet. First ADP at 10s = the two
+    // collide = only the first stream (3) survives. First ADP at boot (~1s) gives
+    // the AxC's fast-connect an ~8s head start → it CONNECT_TXes ALL patched
+    // streams before the switch can poison them. available_index=0 here (post-boot
+    // reset) also signals a restart so the AxC re-runs fast-connect. See
+    // [[feedback_tx_reconnect_stale_axc_disconnect_first]].
+    // Gate on gm_valid so the early ADP carries the correct grandmaster identity
+    // (else the AxC may treat us as a different gPTP domain and ignore us). gm_valid
+    // goes 1 on the first Announce (~1-2s) — still ~8s ahead of the switch's ~10s
+    // CONNECT_RX. If no GM ever appears, this branch never fires and the normal 10s
+    // periodic below still runs (unchanged fallback).
+    if (!s->boot_announce_done && g_gptp && g_gptp->gm_valid) {
+        adp_send(s, ADP_MSG_ENTITY_AVAILABLE);
+        s->last_adp_ms = now_ms;
+        s->boot_announce_done = 1;
+        return;
+    }
 
     if (elapsed >= ADP_ADVERTISE_PERIOD_MS) {
         adp_send(s, ADP_MSG_ENTITY_AVAILABLE);

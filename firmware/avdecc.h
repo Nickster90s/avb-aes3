@@ -377,6 +377,18 @@ typedef struct {
     uint8_t  crf_wd_recovery;       // 1 = in re-bootstrap (DISCONNECT sent)
     uint8_t  crf_wd_init;           // baseline captured since connect
 
+    // Talker-side proactive reconnect. The FPGA acts as CONTROLLER toward the
+    // MOTU AxC listener — mirror of the CRF watchdog but the other direction.
+    // Learned by snooping the switch's CONNECT_RX (talker_id==us, listener_id==
+    // AxC). See avdecc_talker_reconnect_watchdog + send_connect_rx_command.
+    uint8_t  axc_eid[8];                          // AAF listener (MOTU AxC) entity id
+    uint8_t  axc_eid_valid;
+    uint8_t  talker_patched[AVDECC_MAX_TALKERS];  // 1 = switch tried to connect this stream to AxC
+    uint16_t talker_patched_luid[AVDECC_MAX_TALKERS]; // AxC input index for this stream
+    uint32_t talker_rc_ms[AVDECC_MAX_TALKERS];    // last reconnect-drive time
+    uint8_t  talker_rc_tries[AVDECC_MAX_TALKERS]; // full disconnect+connect cycles (flood cap)
+    uint8_t  talker_rc_phase[AVDECC_MAX_TALKERS]; // 0=send DISCONNECT next, 1=send CONNECT next
+
     // Registered unsolicited-notification controllers (IEEE 1722.1-2013
     // §7.4.37). REGISTER_UNSOLICITED_NOTIFICATION adds a (controller_eid,
     // src_mac) tuple; on state changes (clock lock flip, listener
@@ -465,6 +477,11 @@ void avdecc_reannounce(avdecc_state_t *s);
 // Re-triggers a stalled-but-connected talker (Auvitran LeaveAll expiry).
 void avdecc_crf_flow_watchdog(avdecc_state_t *s, uint16_t luid,
                               uint32_t rx_count, uint32_t now_ms);
+
+// Talker-side proactive reconnect: FPGA drives the AxC's listener connection for
+// any patched-but-unconnected AAF stream. Call once per main-loop pass with the
+// gPTP-lock state. Self-healing analog of the CRF watchdog.
+void avdecc_talker_reconnect_watchdog(avdecc_state_t *s, uint8_t gptp_locked);
 
 // Send ADP departing message (call before shutdown).
 void avdecc_depart(avdecc_state_t *s);

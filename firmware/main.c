@@ -17,6 +17,7 @@
 #include "gptp.h"
 #include "cfgflash.h"
 #include "config.h"
+#include "cap.h"
 #include "avtp_const.h"
 #include "srp.h"
 #include "avdecc.h"
@@ -199,6 +200,10 @@ static void dispatch_rx(void)
     uint32_t slot = ethmac_sram_writer_slot_read();
     uint8_t *slot_ptr = (uint8_t *)(ETHMAC_BASE + ETHMAC_SLOT_SIZE * slot);
     uint32_t len = ethmac_sram_writer_length_read();
+
+    // Record every RX control frame (AVDECC/MSRP) into the boot capture ring
+    // (RAM only, no printf — must NOT slow this drain path). See 'R' command.
+    cap_record(0, slot_ptr, len);
 
     // Advance the RX-timestamp ring in lock-step with slot consumption.
     main_rx_ts_pop_write(1);
@@ -457,6 +462,19 @@ static void check_uart_cmd(void)
                    avdecc.current_clock_source);
             break;
         }
+        case 'R':
+            // Dump the on-FPGA control-plane capture ring: every AVDECC/MSRP
+            // frame RX'd + TX'd since boot, decoded (ACMP msg + tuid/luid/status).
+            // This is the point-to-point view ens5 cannot see.
+            cap_dump();
+            break;
+        case 'z':
+            // Clear + re-arm the capture ring. Press 'z', then do a MANUAL
+            // re-patch on the MOTU, then 'R' — captures the post-boot re-patch
+            // (the ring otherwise fills at boot and stops).
+            cap_reset();
+            printf("\n[CAP] cleared + re-armed. Do the manual re-patch now, then press R.\n\n");
+            break;
         case 'u': {
             // Step the ULPI input IDELAY tap (0..31, wraps) and load it.
             // Sweep to centre 60 MHz ULPI sampling in the data eye: press
@@ -1302,6 +1320,7 @@ int main(void)
     // Init AVDECC (discovery + connection management) using the AAF talker
     // stream identity as the advertised one.
     avdecc_init(&avdecc, mac_addr);
+    cap_set_eid(avdecc.entity_id);   // filter the capture ring to OUR ACMP streams
     avdecc_set_gptp(&gptp);   // surface GM identity in ADP/AVB_INTERFACE
     avdecc_set_mcr(&mcr);     // CLOCK_DOMAIN lock follows MCR when source=1
     avdecc_set_srp(&srp);     // GET_AVB_INFO emits matching msrp_mapping
@@ -1548,6 +1567,14 @@ int main(void)
         // mcr.rx_count as the flow indicator.
         avdecc_crf_flow_watchdog(&avdecc, LISTENER_UID_CRF,
                                  mcr.rx_count, gptp_uptime_ms());
+
+        // Talker side: drive the AxC's listener connection ourselves for any
+        // patched-but-unconnected AAF stream (learned by snooping the switch's
+        // CONNECT_RX). Replicates the wire-captured working manual re-patch:
+        // DISCONNECT_RX (slow-path) -> gap -> CONNECT_RX (slow-path) -> the AxC
+        // resolves and CONNECT_TXes us. Self-heals from any drop; the switch's
+        // CONNECT_RX snoop re-arms it on link-flap/network recovery too.
+        avdecc_talker_reconnect_watchdog(&avdecc, gptp.servo_locked);
 
         if (!aaf_gw_enabled) {
             // Firmware path (gateware aaf_pkt disabled): drain USB → software

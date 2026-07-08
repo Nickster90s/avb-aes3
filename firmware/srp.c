@@ -12,6 +12,7 @@
 // switches which will accept our declarations and maintain reservations.
 
 #include "srp.h"
+#include "cap.h"
 
 extern uint8_t g_verbose;   /* console verbose toggle (main.c); 0 = quiet */
 
@@ -398,6 +399,7 @@ static void srp_send_one_pdu(uint8_t *frame, uint8_t *p)
     p += 2;
     uint32_t len = (uint32_t)(p - frame);
     if (len < 64) { memset(p, 0, 64 - len); len = 64; }
+    cap_record(1, frame, len);   // record our MSRP TX into the boot ring
     srp_eth_send(len);
 }
 

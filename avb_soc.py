@@ -282,6 +282,17 @@ def ulpi_io():
 # AVB SoC ----------------------------------------------------------------------------------------------
 
 class AVBSoC(SoCCore):
+    def add_csr_bridge(self, name="csr", origin=None, register=False):
+        # PHASE-1 TIMING FIX (2026-07-08): force the Wishbone->CSR bridge to be
+        # REGISTERED. LiteX only pipelines the CSR bus when SDRAM is present
+        # (soc.py finalize: register=hasattr(self,'sdram')); this SoC is SRAM-only
+        # so it was left combinational. The un-registered CSR read/write decode
+        # fanning across all 13 banks into the TSU (csrbank11 seconds_hi) is THE
+        # sys_clk critical path (13.7ns routing / 1.3ns logic). A registered bridge
+        # turns it into flop->route->flop; cost is +1 CSR access wait-state, which
+        # is invisible to firmware. See the timing deep-dive.
+        return super().add_csr_bridge(name=name, origin=origin, register=True)
+
     def __init__(self, sys_clk_freq=int(50e6), **kwargs):
         platform = colorlight_i9plus.Platform(toolchain="openxc7")
 

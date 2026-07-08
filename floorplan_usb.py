@@ -210,6 +210,46 @@ if _a != "":
     print("[floorplan_usb] AAF: %d cells -> %s (X %d..%d, Y %d..%d)"
           % (na, AAF_REGION, AX0, AX1, AY0, AY1))
 
+# ---- VexRiscv CPU: compact box (Phase-1 timing, 2026-07-08) -----------------
+# After registering the CSR bridge (avb_soc.py add_csr_bridge override), the
+# sys_clk critical path moved OFF the CSR decode ONTO the VexRiscv CPU's own
+# datapath: dBus_cmd -> maccmap multiplier -> ALU -> IBusSimplePlugin_pending,
+# ROUTING-dominated (12.2ns route / 2.8ns logic), sprawling X56-67 Y12-51. The
+# CPU is the only big sys-domain block with no region, so it scatters and its
+# internal nets run 1.5-1.8ns each. Box it compact to shorten them. The path's
+# nets ALL carry the 'VexRiscv' hierarchy, so named-cell + net-DRIVER capture
+# (drivers only — pulling users would drag every peripheral the CPU talks to)
+# catches the anonymous $abc/maccmap/alumacc soup on the path. Plain LUT/FF/
+# CARRY (no LUTRAM) so it won't hit the eth-box legalisation hang. Clear of USB
+# (X<=45). Tunable/disable via NEXTPNR_CPU_REGION="" ; default ON.
+CPU_REGION = "cpu_fp"
+CPU_PREFIX = "VexRiscv"
+CX0, CY0, CX1, CY1 = 46, 6, 78, 104
+# DEFAULT OFF (2026-07-08): this box THRASHED the analytical placer (>160s, no
+# routing). Root: the CPU dBus/iBus tie to the SRAM+ROM BRAMs (16+43 blocks) in
+# fixed device columns; constraining the CPU LUT/FF/CARRY to X46-78 while its
+# BRAMs sit elsewhere makes legalisation fight. FOLLOW-UP to make it work: size
+# the region to span the BRAM columns the CPU uses (or leave BRAMs out and widen
+# Y so the CPU logic hugs its own BRAM rows). Enable to experiment:
+# NEXTPNR_CPU_REGION="46,6,78,104" (or tuned coords).
+_cpu = os.environ.get("NEXTPNR_CPU_REGION", "").strip()
+ncpu = 0
+if _cpu != "":
+    if "," in _cpu:
+        CX0, CY0, CX1, CY1 = (int(v) for v in _cpu.split(","))
+    ctx.createRectangularRegion(CPU_REGION, CX0, CY0, CX1, CY1)
+    for cname, cell in ctx.cells:
+        if CPU_PREFIX in cname:
+            ncpu += _pull(cell, CPU_REGION)
+    for nname, net in ctx.nets:
+        if CPU_PREFIX not in nname:
+            continue
+        drv = getattr(net, "driver", None)
+        if drv is not None:
+            ncpu += _pull(getattr(drv, "cell", None), CPU_REGION)
+    print("[floorplan_usb] CPU: %d cells -> %s (X %d..%d, Y %d..%d)"
+          % (ncpu, CPU_REGION, CX0, CX1, CY0, CY1))
+
 print("[floorplan_usb] USB: %d cells (via %d nets + name match) -> %s (X %d..%d, Y %d..%d)"
       % (nu, nnets, USB_REGION, UX0, UX1, UY0, UY1))
 if _eth_on:

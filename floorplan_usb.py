@@ -54,6 +54,19 @@ _u = os.environ.get("NEXTPNR_USB_REGION", "").strip()
 if _u:
     UX0, UY0, UX1, UY1 = (int(v) for v in _u.split(","))
 
+# PHASE-2 dual-USB: if a 2nd subsystem (usb_avb_subsystem2) is present in the
+# netlist, split the left edge — USB1 lower half, USB2 upper half — so each
+# ULPI's cells cluster near their (bank-34, left-edge) pins and the placer
+# doesn't scatter 2x USB logic across the die (which stalls the analytic placer).
+# NOTE 'usb_avb_subsystem' is a substring of 'usb_avb_subsystem2', so USB1's
+# matches below must EXCLUDE USB2_PREFIX.
+USB2_REGION = "usb2_fp"
+USB2_PREFIX = "usb_avb_subsystem2"
+_HAS_USB2 = any(USB2_PREFIX in c for c, _ in ctx.cells)
+if _HAS_USB2 and not _u:
+    UY1 = 76                                  # USB1 -> lower half
+U2X0, U2Y0, U2X1, U2Y1 = 0, 80, 45, 156       # USB2 -> upper half
+
 # ---- eth TX datapath: compact box near the TX pins (X1,Y51) ----------------
 # Matches the cells seen on the critical path. storage_2 is the TX CDC FIFO
 # RAM (anchored forms 'storage_2.' / 'storage_2$' / 'storage_2/' avoid
@@ -79,6 +92,8 @@ def _matches_eth(name):
 
 
 ctx.createRectangularRegion(USB_REGION, UX0, UY0, UX1, UY1)
+if _HAS_USB2:
+    ctx.createRectangularRegion(USB2_REGION, U2X0, U2Y0, U2X1, U2Y1)
 if _eth_on:
     ctx.createRectangularRegion(ETH_REGION, EX0, EY0, EX1, EY1)
 
@@ -136,7 +151,7 @@ nu = ne = 0
 # Pass 1 — direct name match (fast path for the cells that DO carry the
 # prefix: named FFs, ROM-derived ABC luts).
 for cname, cell in ctx.cells:
-    if USB_PREFIX in cname:
+    if USB_PREFIX in cname and USB2_PREFIX not in cname:   # USB1 only (excl USB2)
         nu += _pull(cell, USB_REGION)
     elif _eth_on and _matches_eth(cname):
         if cname not in _constrained:
@@ -151,7 +166,7 @@ for cname, cell in ctx.cells:
 # This is what catches the anonymous combinational soup.
 nnets = 0
 for nname, net in ctx.nets:
-    if USB_PREFIX not in nname:
+    if USB_PREFIX not in nname or USB2_PREFIX in nname:    # USB1 only (excl USB2)
         continue
     nnets += 1
     drv = getattr(net, "driver", None)
@@ -159,6 +174,23 @@ for nname, net in ctx.nets:
         nu += _pull(getattr(drv, "cell", None), USB_REGION)
     for u in getattr(net, "users", []):
         nu += _pull(getattr(u, "cell", None), USB_REGION)
+
+# ---- Pass 1+2 for USB2 (Backup), pulled into its own upper-half region --------
+nu2 = 0
+if _HAS_USB2:
+    for cname, cell in ctx.cells:
+        if USB2_PREFIX in cname:
+            nu2 += _pull(cell, USB2_REGION)
+    for nname, net in ctx.nets:
+        if USB2_PREFIX not in nname:
+            continue
+        drv = getattr(net, "driver", None)
+        if drv is not None:
+            nu2 += _pull(getattr(drv, "cell", None), USB2_REGION)
+        for u in getattr(net, "users", []):
+            nu2 += _pull(getattr(u, "cell", None), USB2_REGION)
+    print("[floorplan] USB2 region %d,%d..%d,%d  cells=%d"
+          % (U2X0, U2Y0, U2X1, U2Y1, nu2))
 
 # ---- cfgflash SPIMaster: BIG region right of the USB box --------------------
 # Keeps the SPIMaster cells out of the marginal USB zone (X<=45) AND gives the

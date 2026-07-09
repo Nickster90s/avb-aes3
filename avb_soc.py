@@ -1001,6 +1001,16 @@ def main():
                               "floorplan_usb.py")
             soc.platform.toolchain._pnr_opts += " --pre-place {} ".format(fp)
 
+        # Escape hatch: PLACER=sa forces nextpnr's simulated-annealing placer
+        # instead of the default HeAP. HeAP's conjugate-gradient QP solve does
+        # not converge on the dual-USB (USB2=1) netlist -- it spins the first
+        # main-placer iteration indefinitely. SA always terminates (lower Fmax
+        # but the design only needs ~50 MHz sys), so it's the reliable path to a
+        # flashable dual-USB bitstream for hardware bring-up.
+        _placer = os.environ.get("PLACER", "").strip()
+        if _placer:
+            soc.platform.toolchain._pnr_opts += " --placer {} ".format(_placer)
+
         # CLOCK CONSTRAINTS — the openxc7/yosys_nextpnr toolchain does NOT emit
         # usable create_clock for the PLL-derived clocks (it uses get_ports,
         # which matches only I/O pins) and emits NO clock groups. So nextpnr
@@ -1011,7 +1021,22 @@ def main():
         # on the PLL output NETS + declare the async domains as a clock group so
         # the (properly synchronised) CDC crossings are NOT timed. See memory
         # openxc7-missing-pll-clock-constraints.
-        soc.platform.toolchain.additional_xdc_commands += [
+        # PHASE-2 dual-USB: the Backup ULPI runs on a 3rd PLL (cd_usb2 =
+        # crg_s7pll2_clkout_buf, 60 MHz). WITHOUT a create_clock + a group
+        # entry for it, nextpnr timed usb2 at the 125 MHz default AND timed every
+        # usb2<->sys CDC (block_level MultiReg, A/B sample mux, pop routing) as a
+        # REAL single-cycle path -> huge phantom negative slack -> the timing-
+        # driven HeAP analytic placer spun forever without a single iteration
+        # (the "stuck placer" was THIS, not cell density). Only inject it when the
+        # 2nd ULPI is actually built, else get_nets matches nothing and naming an
+        # undefined usb2_clk in set_clock_groups would abort the whole block.
+        _usb2_xdc = getattr(soc.platform, "_has_ulpi2", False)
+        _usb2_create = (
+            ["create_clock -name usb2_clk   -period 16.667 "
+             "[get_nets crg_s7pll2_clkout_buf]"]        # 60 MHz Backup ULPI
+            if _usb2_xdc else [])
+        _usb2_group = " -group {usb2_clk}" if _usb2_xdc else ""
+        soc.platform.toolchain.additional_xdc_commands += _usb2_create + [
             # NOTE: the PLL output nets carry the CRG submodule prefix
             # `avbsoc_crg_…`. Without it get_nets matched NOTHING, so BOTH the
             # create_clock and the set_clock_groups below were silently dropped —
@@ -1028,11 +1053,11 @@ def main():
             # this only changes nextpnr's optimization pressure. Read the reported
             # Fmax number (the "FAIL at 125" is expected/ignored). This reproduces
             # the lean shift-fix build's 52.74 MHz, which had sys timed at 125.
-            "create_clock -name sys_clk    -period  8.000 [get_nets avbsoc_crg_s7pll0_clkout_buf0]",  # target 125 MHz (real 50)
-            "create_clock -name usb_clk    -period 16.667 [get_nets avbsoc_crg_s7pll1_clkout_buf]",   # 60 MHz
-            "create_clock -name idelay_clk -period  5.000 [get_nets avbsoc_crg_s7pll0_clkout_buf1]",  # 200 MHz
+            "create_clock -name sys_clk    -period  8.000 [get_nets crg_s7pll0_clkout_buf0]",  # target 125 MHz (real 50)
+            "create_clock -name usb_clk    -period 16.667 [get_nets crg_s7pll1_clkout_buf]",   # 60 MHz
+            "create_clock -name idelay_clk -period  5.000 [get_nets crg_s7pll0_clkout_buf1]",  # 200 MHz
             "set_clock_groups -asynchronous "
-            "-group {sys_clk} -group {usb_clk} -group {idelay_clk}",
+            "-group {sys_clk} -group {usb_clk} -group {idelay_clk}" + _usb2_group,
         ]
         builder.build(seed=args.seed)
 

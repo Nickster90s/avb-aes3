@@ -112,6 +112,18 @@ class _CRG(LiteXModule):
         usb_pll.create_clkout(self.cd_usb, 60e6, phase=0)
         platform.add_false_path_constraints(self.cd_sys.clk, self.cd_usb.clk)
 
+        # PHASE-2: 2nd USB clock domain (Backup ULPI) — 60 MHz from ulpi2_clock
+        # (V4, a bank-34 MRCC pin). 3rd S7PLL; async to clk25/sys/cd_usb. Only
+        # instantiated when the platform has the ulpi2 extension (add_ulpi2).
+        if hasattr(platform, "_has_ulpi2") and platform._has_ulpi2:
+            self.cd_usb2 = ClockDomain()
+            ulpi2_clk = platform.request("ulpi2_clock")
+            self.usb2_pll = usb2_pll = S7PLL(speedgrade=-1)
+            self.comb += usb2_pll.reset.eq(self.rst)
+            usb2_pll.register_clkin(ulpi2_clk, 60e6)
+            usb2_pll.create_clkout(self.cd_usb2, 60e6, phase=0)
+            platform.add_false_path_constraints(self.cd_sys.clk, self.cd_usb2.clk)
+
 # TSU CSR Wrapper --------------------------------------------------------------------------------------
 
 class TSUWithCSRs(LiteXModule):
@@ -279,6 +291,24 @@ def ulpi_io():
         ),
     ]
 
+
+def ulpi2_io():
+    # PHASE-2: 2nd USB3300 ULPI breakout (the "Backup" A/B source). ALL bank 34
+    # (single-bank like Main, for 60 MHz HS timing), HDMI-safe (avoids bank-34
+    # T3-group pins used by the Ext-Board HDMI). CLK=V4 (MRCC). Pinout resolved
+    # 2026-07-08 vs the fgg484 package + build XDC; see project_second_usb_timing.
+    return [
+        ("ulpi2_clock", 0, Pins("V4"), IOStandard("LVCMOS33")),   # MRCC
+        ("ulpi2", 0,
+            Subsignal("dir",  Pins("R4"), IOStandard("LVCMOS33")),
+            Subsignal("nxt",  Pins("W4"), IOStandard("LVCMOS33")),
+            Subsignal("stp",  Pins("T5"), IOStandard("LVCMOS33")),
+            Subsignal("rst",  Pins("Y4"), IOStandard("LVCMOS33")),
+            Subsignal("data", Pins("Y9 V8 W9 V9 W6 V7 Y3 Y6"),
+                      IOStandard("LVCMOS33")),
+        ),
+    ]
+
 # AVB SoC ----------------------------------------------------------------------------------------------
 
 class AVBSoC(SoCCore):
@@ -307,6 +337,14 @@ class AVBSoC(SoCCore):
         # USB UAC2 ULPI (P2 header) — must be added before the CRG, which
         # requests ulpi_clock for the cd_usb PLL.
         platform.add_extension(ulpi_io())
+
+        # PHASE-2 opt-in 2nd USB (Backup A/B source): env USB2=1. Adds the
+        # bank-34 Backup ULPI extension so the CRG builds cd_usb2 and the SoC
+        # instantiates the 2nd usb_avb_subsystem2 + A/B mux. Default OFF keeps
+        # the proven single-USB build unchanged.
+        platform._has_ulpi2 = os.environ.get("USB2", "") == "1"
+        if platform._has_ulpi2:
+            platform.add_extension(ulpi2_io())
 
         # CRG.
         self.crg = _CRG(platform, sys_clk_freq)
@@ -695,6 +733,85 @@ class AVBSoC(SoCCore):
         # driven from the MCR rate + a FIFO-level trim below, after aaf_pkt
         # exists.
 
+        # ---- PHASE-2: 2nd USB (Backup) + A/B source mux ----------------------
+        # AVDECC CONTROL (firmware writes usb_source_select on SET_CONTROL):
+        # 0=Main(USB1), 1=Backup(USB2). Both hosts slave to the same gPTP/CRF
+        # media clock via their own feedback loops, so switching is a clean
+        # stream-select: the (single, shared) AAF packetizer reads whichever USB
+        # is selected; the other is drained-and-discarded so its FIFO can't
+        # overflow while hot-standby. No SRC — both are already at the gPTP rate.
+        self.usb_source_select = CSRStorage(1,
+            description="USB A/B source: 0=Main(USB1) 1=Backup(USB2). Set by AVDECC CONTROL.")
+        sample_lo_mux  = Signal(32)
+        sample_hi_mux  = Signal(32)
+        sample_rdy_mux = Signal()
+        self._usb2_enabled = platform._has_ulpi2
+        if self._usb2_enabled:
+            platform.add_source(os.path.join(_rtl, "usb_avb_subsystem2.v"))
+            ulpi2 = platform.request("ulpi2")
+            ulpi2_data_ts = TSTriple(8)
+            self.specials += ulpi2_data_ts.get_tristate(ulpi2.data)
+            self.ulpi2_idelay_tap  = CSRStorage(5, reset=8,
+                description="Backup ULPI input IDELAY tap 0-31.")
+            self.ulpi2_idelay_load = CSRStorage(1,
+                description="Write 1 to load ulpi2_idelay_tap.")
+            _u2_ld = self.ulpi2_idelay_load.re
+            def _u2_idelay(sig_in):
+                out = Signal()
+                self.specials += Instance("IDELAYE2",
+                    p_IDELAY_TYPE="VAR_LOAD", p_DELAY_SRC="IDATAIN",
+                    p_HIGH_PERFORMANCE_MODE="TRUE", p_SIGNAL_PATTERN="DATA",
+                    p_REFCLK_FREQUENCY=200.0, p_CINVCTRL_SEL="FALSE",
+                    p_PIPE_SEL="FALSE", p_IDELAY_VALUE=0,
+                    i_C=ClockSignal("sys"), i_LD=_u2_ld,
+                    i_CNTVALUEIN=self.ulpi2_idelay_tap.storage,
+                    i_CE=0, i_INC=0, i_LDPIPEEN=0, i_REGRST=0,
+                    i_IDATAIN=sig_in, o_DATAOUT=out)
+                return out
+            ulpi2_dir_d  = _u2_idelay(ulpi2.dir)
+            ulpi2_nxt_d  = _u2_idelay(ulpi2.nxt)
+            ulpi2_data_d = Signal(8)
+            for _i in range(8):
+                self.comb += ulpi2_data_d[_i].eq(_u2_idelay(ulpi2_data_ts.i[_i]))
+            sample_lo2_w  = Signal(32); sample_hi2_w  = Signal(32)
+            sample_rdy2_w = Signal();   sample_pop2_w = Signal()
+            sample_ovf2_w = Signal(32); dbg2_a = Signal(32); dbg2_b = Signal(32)
+            self.usb2_fb_ovr = CSRStorage(32, description="Backup USB async-feedback override (0=auto).")
+            usb2_block_level_usb2 = Signal(8)
+            self.specials += _MultiReg(usb_block_level, usb2_block_level_usb2, odomain="usb2")
+            self.specials += Instance("usb_avb_subsystem2",
+                i_clk=ClockSignal("sys"), i_rst=ResetSignal("sys"),
+                i_usb_clk=ClockSignal("usb2"),
+                i_ulpi_dir_i=ulpi2_dir_d, i_ulpi_nxt_i=ulpi2_nxt_d, i_ulpi_data_i=ulpi2_data_d,
+                o_ulpi_data_o=ulpi2_data_ts.o, o_ulpi_data_oe=ulpi2_data_ts.oe,
+                o_ulpi_stp_o=ulpi2.stp, o_ulpi_rst_o=ulpi2.rst,
+                o_sample_lo=sample_lo2_w, o_sample_hi=sample_hi2_w,
+                o_sample_readable=sample_rdy2_w, i_sample_pop=sample_pop2_w,
+                o_sample_overflow_count=sample_ovf2_w,
+                o_dbg_rx_beats=dbg2_a, o_dbg_ep_out=dbg2_b,
+                i_sample_strobe=self.mcr.sample_strobe,
+                i_block_level=usb2_block_level_usb2, i_fb_ovr=self.usb2_fb_ovr.storage)
+            self.usb2_sample_overflow = CSRStatus(32, description="Backup USB samples dropped.")
+            self.comb += self.usb2_sample_overflow.status.eq(sample_ovf2_w)
+            _sel = self.usb_source_select.storage
+            self._usb2_pop = sample_pop2_w
+            self._usb2_rdy = sample_rdy2_w
+            self._sel = _sel
+            self.comb += [
+                If(_sel,
+                   sample_lo_mux.eq(sample_lo2_w), sample_hi_mux.eq(sample_hi2_w),
+                   sample_rdy_mux.eq(sample_rdy2_w),
+                ).Else(
+                   sample_lo_mux.eq(sample_lo_w), sample_hi_mux.eq(sample_hi_w),
+                   sample_rdy_mux.eq(sample_rdy_w),
+                ),
+            ]
+        else:
+            self.comb += [
+                sample_lo_mux.eq(sample_lo_w), sample_hi_mux.eq(sample_hi_w),
+                sample_rdy_mux.eq(sample_rdy_w),
+            ]
+
         # Gateware AAF TX packetizer (task #67 / D2-in-gateware). Drains the
         # SAME USB sample handshake firmware uses, assembles AVTP-AAF frames,
         # stamps presentation_time from the TSU, and emits on its own MAC TX
@@ -704,9 +821,9 @@ class AVBSoC(SoCCore):
         self.submodules.aaf_pkt = aaf_pkt = AAFPacketizer(
             mcr               = self.mcr,
             tsu               = self.tsu.tsu,
-            usb_sample_lo     = sample_lo_w,
-            usb_sample_hi     = sample_hi_w,
-            usb_readable      = sample_rdy_w,
+            usb_sample_lo     = sample_lo_mux,   # A/B-muxed (Main/Backup)
+            usb_sample_hi     = sample_hi_mux,
+            usb_readable      = sample_rdy_mux,
             channels          = 8,     # per AAF stream
             streams           = 6,     # 6x8ch time-muxed = 48ch host -> 6 AAF talkers
             fifo_depth        = 256,   # per-ring SRING_DEPTH = next_pow2(256*8) = 2048
@@ -726,7 +843,21 @@ class AVBSoC(SoCCore):
         # fallback couldn't keep up with 384 ksample/s and left the block_fifo
         # pinned full at stream start (zero jitter headroom). usb_sample_pop CSR
         # is retained for diagnostics but no longer the drain path.
-        self.comb += sample_pop_w.eq(aaf_pkt.usb_pop)
+        if self._usb2_enabled:
+            # Selected USB feeds the AAF (pop = aaf_pkt.usb_pop); the other is
+            # drained-and-discarded (pop = its own readable) so its cd_usb FIFO
+            # can't overflow while it is the hot standby.
+            self.comb += [
+                If(self._sel,          # Backup selected -> USB2 feeds, USB1 discards
+                   self._usb2_pop.eq(aaf_pkt.usb_pop),
+                   sample_pop_w.eq(sample_rdy_w),
+                ).Else(                # Main selected -> USB1 feeds, USB2 discards
+                   sample_pop_w.eq(aaf_pkt.usb_pop),
+                   self._usb2_pop.eq(self._usb2_rdy),
+                ),
+            ]
+        else:
+            self.comb += sample_pop_w.eq(aaf_pkt.usb_pop)
 
         # ---- USB async feedback (P3.4) ----
         # The rate measurement + FIFO-centering loop now lives INSIDE the

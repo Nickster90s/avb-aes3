@@ -87,7 +87,14 @@ static inline uint32_t av_get_be32(const uint8_t *p)
 #define N_STREAM_INPUTS   2     // [0]=CRF Media Clock, [1]=AAF Audio Input
 #define N_STREAM_OUTPUTS  6     // 6x8ch AAF Audio Output (time-mux talker)
 #define N_CLOCK_SOURCES   2     // [0]=Internal osc, [1]=CRF stream
+#define N_CONTROLS        1     // [0]=USB A/B source select (Main/Backup)
 #define N_AUDIO_CHANNELS  8     // 8ch AAF I/O
+
+// USB A/B source select, driven by the AVDECC CONTROL descriptor (0=Main,
+// 1=Backup). Phase-2: the 2nd USB's A/B mux will read this (via a CSR). For
+// now it is the CONTROL's current value so the choice is pickable in Hive
+// before the 2nd-oscillator hardware exists.
+uint8_t g_usb_source = 0;
 #define LISTENER_CRF_INDEX 0
 #define LISTENER_AAF_INDEX 1
 #define TALKER_AAF_INDEX   0
@@ -1104,12 +1111,12 @@ static uint32_t build_desc_configuration(uint8_t *d, uint16_t idx)
     // (of AUDIO_UNIT, STREAM_PORT, STREAM_PORT, and LOCALE respectively)
     // and must NOT appear here — Hive rejects the model otherwise.
     // 7 top-level types × 4 bytes = 28; 74 + 28 = 102 bytes.
-    memset(d, 0, 102);
+    memset(d, 0, 106);
     av_put_be16(d, AEM_DESC_CONFIGURATION);
     av_put_be16(d + 2, 0);
     write_name64(d + 4, "Default");
     av_put_be16(d + 68, 0xFFFF);   // localized_description (none)
-    av_put_be16(d + 70, 7);        // descriptor_counts_count
+    av_put_be16(d + 70, 8);        // descriptor_counts_count (7 + CONTROL)
     av_put_be16(d + 72, 74);       // descriptor_counts_offset
 
     uint8_t *c = d + 74;
@@ -1120,7 +1127,41 @@ static uint32_t build_desc_configuration(uint8_t *d, uint16_t idx)
     av_put_be16(c + 16, AEM_DESC_CLOCK_SOURCE);   av_put_be16(c + 18, N_CLOCK_SOURCES);
     av_put_be16(c + 20, AEM_DESC_LOCALE);         av_put_be16(c + 22, 1);
     av_put_be16(c + 24, AEM_DESC_CLOCK_DOMAIN);   av_put_be16(c + 26, 1);
-    return 102;
+    av_put_be16(c + 28, AEM_DESC_CONTROL);        av_put_be16(c + 30, N_CONTROLS);
+    return 106;
+}
+
+// AVDECC CONTROL descriptor (IEEE 1722.1 §7.2.22) — a single ENABLE control,
+// LINEAR_UINT8 0..1, exposing the USB A/B source select to a controller (Hive):
+// 0 = Main, 1 = Backup. Current value tracks g_usb_source. 104-byte fixed part
+// + a 9-byte LINEAR_UINT8 value block = 113 bytes.
+static uint32_t build_desc_control(uint8_t *d, uint16_t idx)
+{
+    if (idx >= N_CONTROLS) return 0;
+    memset(d, 0, 113);
+    av_put_be16(d,       AEM_DESC_CONTROL);
+    av_put_be16(d + 2,   idx);
+    write_name64(d + 4,  "USB Source (off=Main, on=Backup)");
+    av_put_be16(d + 68,  0xFFFF);                 // localized_description (none)
+    // block_latency(70)=0, control_latency(74)=0, control_domain(78)=0 (memset)
+    av_put_be16(d + 80,  AEM_CONTROL_LINEAR_UINT8);   // control_value_type (r=0,u=0,type=1)
+    av_put_be32(d + 82,  0x90e0f000u);            // control_type = ENABLE (0x90e0f000_00000000)
+    av_put_be32(d + 86,  0x00000000u);
+    // reset_time(90)=0
+    av_put_be16(d + 94,  104);                    // values_offset
+    av_put_be16(d + 96,  1);                      // number_of_values
+    av_put_be16(d + 98,  0xFFFF);                 // signal_type = INVALID (config-level control)
+    av_put_be16(d + 100, 0);                      // signal_index
+    av_put_be16(d + 102, 0);                      // signal_output
+    // value_details (LINEAR_UINT8): minimum,maximum,step,default,current, unit(2), string(2)
+    d[104] = 0;                                   // minimum = Main
+    d[105] = 1;                                   // maximum = Backup
+    d[106] = 1;                                   // step
+    d[107] = 0;                                   // default = Main
+    d[108] = g_usb_source ? 1 : 0;                // current
+    av_put_be16(d + 109, 0);                      // unit (none)
+    av_put_be16(d + 111, 0xFFFF);                 // localized_string (none)
+    return 113;
 }
 
 static uint32_t build_desc_audio_unit(uint8_t *d, uint16_t idx)
@@ -1550,6 +1591,8 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
                 desc_len = build_desc_clock_source(desc, desc_index, s); break;
             case AEM_DESC_CLOCK_DOMAIN:
                 desc_len = build_desc_clock_domain(desc, desc_index, s); break;
+            case AEM_DESC_CONTROL:
+                desc_len = build_desc_control(desc, desc_index); break;
             case AEM_DESC_LOCALE:
                 desc_len = build_desc_locale(desc, desc_index); break;
             case AEM_DESC_STRINGS:
@@ -1708,6 +1751,58 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         aecp_set_status_cdl(tp, st, 20);
         avdecc_eth_send(64);
         s->aecp_tx_count++;
+        break;
+    }
+
+    case AEM_CMD_GET_CONTROL: {
+        // Response command_specific: descriptor_type(2) descriptor_index(2)
+        // control_value (LINEAR_UINT8 = 1 byte). cdl = command_specific + 12.
+        if (pdu_len < 28) return;
+        uint16_t dt = av_get_be16(pdu + 24);
+        uint16_t di = av_get_be16(pdu + 26);
+        uint8_t *tf = avdecc_tx_buf();
+        uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+        memcpy(tp + 24, pdu + 24, 4);                 // echo desc_type + index
+        uint8_t st;
+        if (dt == AEM_DESC_CONTROL && di < N_CONTROLS) {
+            tp[28] = g_usb_source ? 1 : 0;            // current value
+            st = AECP_STATUS_SUCCESS;
+        } else {
+            tp[28] = 0;
+            st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+        }
+        aecp_set_status_cdl(tp, st, 12 + 5);
+        avdecc_eth_send(64);
+        s->aecp_tx_count++;
+        break;
+    }
+
+    case AEM_CMD_SET_CONTROL: {
+        // Command command_specific: descriptor_type(2) descriptor_index(2)
+        // new_value (LINEAR_UINT8 = 1 byte). Updates g_usb_source (0=Main,
+        // 1=Backup). Phase-2: also drive the A/B mux CSR here.
+        if (pdu_len < 29) return;
+        uint16_t dt = av_get_be16(pdu + 24);
+        uint16_t di = av_get_be16(pdu + 26);
+        uint8_t  nv = pdu[28];
+        uint8_t st;
+        if (dt != AEM_DESC_CONTROL || di >= N_CONTROLS)
+            st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+        else if (nv > 1)
+            st = AECP_STATUS_BAD_ARGUMENTS;
+        else {
+            g_usb_source = nv;
+            st = AECP_STATUS_SUCCESS;
+        }
+        uint8_t *tf = avdecc_tx_buf();
+        uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+        memcpy(tp + 24, pdu + 24, 4);                 // echo desc_type + index
+        tp[28] = g_usb_source ? 1 : 0;                // echo the (clamped) value
+        aecp_set_status_cdl(tp, st, 12 + 5);
+        avdecc_eth_send(64);
+        s->aecp_tx_count++;
+        printf("[AVDECC] SET_CONTROL USB source -> %s (status=%u)\n",
+               g_usb_source ? "Backup" : "Main", st);
         break;
     }
 

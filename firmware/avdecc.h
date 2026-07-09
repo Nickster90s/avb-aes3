@@ -149,9 +149,11 @@
 #define AEM_CMD_SET_STREAM_FORMAT               0x0008
 #define AEM_CMD_GET_STREAM_FORMAT               0x0009
 #define AEM_CMD_GET_STREAM_INFO                 0x000F
-#define AEM_CMD_GET_NAME                        0x0019
+#define AEM_CMD_GET_NAME                        0x0011  /* was mislabeled 0x0019 (=GET_CONTROL); 0x0011 is the real GET_NAME */
 #define AEM_CMD_SET_CLOCK_SOURCE                0x0016
 #define AEM_CMD_GET_CLOCK_SOURCE                0x0017
+#define AEM_CMD_SET_CONTROL                     0x0018
+#define AEM_CMD_GET_CONTROL                     0x0019
 #define AEM_CMD_REGISTER_UNSOLICITED            0x0024
 #define AEM_CMD_DEREGISTER_UNSOLICITED          0x0025
 #define AEM_CMD_GET_AVB_INFO                    0x0027
@@ -197,6 +199,8 @@
 #define AEM_DESC_CLOCK_SOURCE                   0x000A
 #define AEM_DESC_LOCALE                         0x000C
 #define AEM_DESC_STRINGS                        0x000D
+#define AEM_DESC_CONTROL                        0x001A
+#define AEM_CONTROL_LINEAR_UINT8                1       /* control_value_type (IEEE 1722.1 7.3.5) */
 #define AEM_DESC_STREAM_PORT_INPUT              0x000E
 #define AEM_DESC_STREAM_PORT_OUTPUT             0x000F
 #define AEM_DESC_AUDIO_CLUSTER                  0x0014

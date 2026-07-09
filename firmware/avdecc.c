@@ -1792,6 +1792,9 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
             st = AECP_STATUS_BAD_ARGUMENTS;
         else {
             g_usb_source = nv;
+#ifdef CSR_MAIN_USB_SOURCE_SELECT_ADDR
+            main_usb_source_select_write(g_usb_source);  // drive A/B mux
+#endif
             st = AECP_STATUS_SUCCESS;
         }
         uint8_t *tf = avdecc_tx_buf();

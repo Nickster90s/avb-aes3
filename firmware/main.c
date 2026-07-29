@@ -1070,6 +1070,19 @@ static void on_listener_disconnect(uint16_t uid)
         if (mcr.bound) srp_listener_enable(&srp, mcr.stream_id, 0);
         mcr_unbind(&mcr);
         avtp_filter_clear_slot(AVTP_FILTER_SLOT_CRF);
+        // USER UNPATCH (this callback is only reached via Hive DISCONNECT_RX):
+        // release the stream for good — clear the persisted CRF binding so the
+        // #70 auto-reconnect does NOT immediately re-CONNECT_TX and fight the
+        // unpatch. "No CRF = no audio": stays disconnected until the user re-patches
+        // (a Hive CONNECT re-persists crf_valid). Also survives reboot.
+        if (g_cfg.crf_valid) {
+            g_cfg.crf_valid = 0;
+            for (int i = 0; i < 8; i++) g_cfg.crf_stream_id[i]  = 0;
+            for (int i = 0; i < 6; i++) g_cfg.crf_dmac[i]       = 0;
+            for (int i = 0; i < 8; i++) g_cfg.crf_talker_eid[i] = 0;
+            cfg_save();
+            printf("[CFG] CRF unpatched by controller — auto-reconnect disabled\n");
+        }
     } else if (uid == LISTENER_UID_AAF) {
         if (aaf.bound) srp_listener_enable(&srp, aaf.stream_id, 0);
         aaf_unbind(&aaf);

@@ -201,6 +201,7 @@
 #define AEM_DESC_STRINGS                        0x000D
 #define AEM_DESC_CONTROL                        0x001A
 #define AEM_CONTROL_LINEAR_UINT8                1       /* control_value_type (IEEE 1722.1 7.3.5) */
+#define AEM_CONTROL_UTF8                        0x001f  /* jdksavdecc VALUES_TYPE_CONTROL_UTF8 */
 #define AEM_DESC_STREAM_PORT_INPUT              0x000E
 #define AEM_DESC_STREAM_PORT_OUTPUT             0x000F
 #define AEM_DESC_AUDIO_CLUSTER                  0x0014
@@ -465,6 +466,10 @@ void avdecc_initiate_listener_connect(avdecc_state_t *s, uint8_t listener_uid,
 // Process received AVDECC frame (called from RX dispatch for EtherType 0x22F0
 // with subtypes 0x7A-0x7C).
 void avdecc_process_rx(avdecc_state_t *s, const uint8_t *frame, uint32_t len);
+
+// Apply the USB A/B source select (0=Main, 1=Backup). Shared by the AVDECC
+// SET_CONTROL handler and the OSC /switchover/* dispatcher.
+void avdecc_apply_usb_source(uint8_t v);
 
 // Poll — sends periodic ADP advertisements.
 void avdecc_poll(avdecc_state_t *s);

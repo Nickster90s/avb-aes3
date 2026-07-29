@@ -22,15 +22,27 @@ static void cfg_defaults(void)
     g_cfg.version = CFG_VERSION;
     g_cfg.size    = sizeof(cfg_t);
     g_cfg.cs      = 0;          // default gPTP
+    g_cfg.osc_ip[0] = 169; g_cfg.osc_ip[1] = 254;      // default OSC IP 169.254.9.200/16
+    g_cfg.osc_ip[2] = 9;   g_cfg.osc_ip[3] = 200;
+    g_cfg.osc_prefix = 16;
 }
 
 int cfg_load(void)
 {
     cfg_t t;
     cfgflash_read(CFG_FLASH_ADDR, (uint8_t *)&t, sizeof(t));
-    if (t.magic == CFG_MAGIC && t.version == CFG_VERSION &&
+    // Accept v1 AND v2 (same struct size — v2 only reinterprets 8 bytes that
+    // were `reserved`==0 in v1). This keeps a v1 cs=/crf binding across the
+    // upgrade instead of resetting it.
+    if (t.magic == CFG_MAGIC && t.version >= 1 && t.version <= CFG_VERSION &&
         t.size == sizeof(cfg_t) && t.crc == cfg_crc(&t)) {
         g_cfg = t;
+        // v1 blob (or any invalid osc field) -> default the OSC IP.
+        if (g_cfg.osc_prefix != 16 && g_cfg.osc_prefix != 24) {
+            g_cfg.osc_ip[0] = 169; g_cfg.osc_ip[1] = 254;
+            g_cfg.osc_ip[2] = 9;   g_cfg.osc_ip[3] = 200;
+            g_cfg.osc_prefix = 16;
+        }
         return 1;
     }
     cfg_defaults();

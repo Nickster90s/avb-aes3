@@ -7,7 +7,7 @@ include $(BUILD_DIR)/software/include/generated/variables.mak
 include $(SOC_DIRECTORY)/software/common.mak
 
 # Our firmware sources
-OBJECTS = crt0.o main.o gptp.o srp.o avdecc.o mcr.o aaf.o cfgflash.o config.o cap.o
+OBJECTS = crt0.o main.o gptp.o srp.o avdecc.o mcr.o aaf.o cfgflash.o config.o cap.o osc.o
 
 # Add our source directory to includes
 CFLAGS += -I.

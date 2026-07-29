@@ -13,6 +13,8 @@
 #include "avdecc.h"
 #include "gptp.h"
 #include "cap.h"
+#include "osc.h"
+#include "config.h"
 
 #include <generated/csr.h>
 #include <generated/mem.h>
@@ -87,7 +89,7 @@ static inline uint32_t av_get_be32(const uint8_t *p)
 #define N_STREAM_INPUTS   2     // [0]=CRF Media Clock, [1]=AAF Audio Input
 #define N_STREAM_OUTPUTS  6     // 6x8ch AAF Audio Output (time-mux talker)
 #define N_CLOCK_SOURCES   2     // [0]=Internal osc, [1]=CRF stream
-#define N_CONTROLS        1     // [0]=USB A/B source select (Main/Backup)
+#define N_CONTROLS        2     // [0]=USB A/B source (uint8), [1]=OSC IP/Subnet (UTF8 text)
 #define N_AUDIO_CHANNELS  8     // 8ch AAF I/O
 
 // USB A/B source select, driven by the AVDECC CONTROL descriptor (0=Main,
@@ -1074,9 +1076,9 @@ static uint32_t build_desc_entity(uint8_t *d, uint16_t idx, avdecc_state_t *s)
                         ADP_LISTENER_CAP_AUDIO_SINK);
     av_put_be32(d + 36, s->adp_available_index); // available_index
     // association_id (offset 40, 8 bytes) — left as 0 (memset)
-    write_name64(d + 48, "AVB-AES3 Endpoint");   // entity_name (inline)
+    write_name64(d + 48, "N-Series AVB Switchover"); // entity_name (inline)
     // Localized name refs: STRINGS desc 0 slot N = (0<<3)|N. We populate
-    // slot 0="N-Series" (vendor), slot 1="AVB-AES3 Endpoint" (model).
+    // slot 0="N-Series" (vendor), slot 1="AVB Switchover" (model).
     av_put_be16(d + 112, 0x0000);                // vendor_name_string → "N-Series"
     av_put_be16(d + 114, 0x0001);                // model_name_string → "AVB-AES3 Endpoint"
     write_name64(d + 116, "1.0.0");              // firmware_version (inline)
@@ -1131,36 +1133,62 @@ static uint32_t build_desc_configuration(uint8_t *d, uint16_t idx)
     return 106;
 }
 
-// AVDECC CONTROL descriptor (IEEE 1722.1 §7.2.22) — a single ENABLE control,
-// LINEAR_UINT8 0..1, exposing the USB A/B source select to a controller (Hive):
-// 0 = Main, 1 = Backup. Current value tracks g_usb_source. 104-byte fixed part
-// + a 9-byte LINEAR_UINT8 value block = 113 bytes.
+static avdecc_state_t *g_self;                        // set in avdecc_init
+static void push_unsol_control(avdecc_state_t *s, uint16_t idx);  // fwd (defined late)
+
+// Apply the USB A/B source (shared by SET_CONTROL and OSC /switchover/*).
+// Logs to UART and pushes an unsolicited AVDECC notification so Hive updates
+// its control value live even when the change came from OSC (not SET_CONTROL).
+void avdecc_apply_usb_source(uint8_t v)
+{
+    g_usb_source = v ? 1 : 0;
+#ifdef CSR_MAIN_USB_SOURCE_SELECT_ADDR
+    main_usb_source_select_write(g_usb_source);   // drive A/B mux
+#endif
+    printf("[SWITCH] USB source -> %s\n", g_usb_source ? "Backup" : "Main");
+    if (g_self) push_unsol_control(g_self, 0);    // live-update Hive control[0]
+}
+
+// ---- control [0] = USB A/B source (LINEAR_UINT8, 0=Main, 1=Backup) ----------
+static void ctrl_meta(uint16_t idx, const char **name, uint8_t *mn, uint8_t *mx,
+                      uint8_t *stp, uint8_t *def, uint8_t *cur)
+{
+    (void)idx;
+    *name="USB Source (off=Main, on=Backup)"; *mn=0; *mx=1; *stp=1; *def=0;
+    *cur = g_usb_source ? 1 : 0;
+}
+
+// AVDECC CONTROL descriptor (IEEE 1722.1 §7.2.22).
+//   idx 0 = LINEAR_UINT8  (USB source)        -> 104 fixed + 9-byte value = 113
+//   idx 1 = UTF8 text     (OSC "a.b.c.d/pfx") -> 104 fixed + string+NUL
 static uint32_t build_desc_control(uint8_t *d, uint16_t idx)
 {
     if (idx >= N_CONTROLS) return 0;
-    memset(d, 0, 113);
+    memset(d, 0, 160);
     av_put_be16(d,       AEM_DESC_CONTROL);
     av_put_be16(d + 2,   idx);
-    write_name64(d + 4,  "USB Source (off=Main, on=Backup)");
     av_put_be16(d + 68,  0xFFFF);                 // localized_description (none)
-    // block_latency(70)=0, control_latency(74)=0, control_domain(78)=0 (memset)
-    av_put_be16(d + 80,  AEM_CONTROL_LINEAR_UINT8);   // control_value_type (r=0,u=0,type=1)
-    av_put_be32(d + 82,  0x90e0f000u);            // control_type = ENABLE (0x90e0f000_00000000)
-    av_put_be32(d + 86,  0x00000000u);
-    // reset_time(90)=0
+    av_put_be32(d + 82,  0x90e0f000u);            // control_type = ENABLE (generic)
     av_put_be16(d + 94,  104);                    // values_offset
     av_put_be16(d + 96,  1);                      // number_of_values
-    av_put_be16(d + 98,  0xFFFF);                 // signal_type = INVALID (config-level control)
-    av_put_be16(d + 100, 0);                      // signal_index
-    av_put_be16(d + 102, 0);                      // signal_output
-    // value_details (LINEAR_UINT8): minimum,maximum,step,default,current, unit(2), string(2)
-    d[104] = 0;                                   // minimum = Main
-    d[105] = 1;                                   // maximum = Backup
-    d[106] = 1;                                   // step
-    d[107] = 0;                                   // default = Main
-    d[108] = g_usb_source ? 1 : 0;                // current
-    av_put_be16(d + 109, 0);                      // unit (none)
-    av_put_be16(d + 111, 0xFFFF);                 // localized_string (none)
+    av_put_be16(d + 98,  0xFFFF);                 // signal_type = INVALID (config-level)
+
+    if (idx == 1) {                               // OSC IP/Subnet — UTF8 text
+        write_name64(d + 4, "OSC IP/Subnet (a.b.c.d/16 or /24)");
+        av_put_be16(d + 80, AEM_CONTROL_UTF8);
+        char ip[24];
+        int n = osc_ip_str(ip, sizeof(ip));
+        memcpy(d + 104, ip, n + 1);               // string incl. NUL
+        return 104 + n + 1;
+    }
+
+    const char *nm; uint8_t mn, mx, stp, def, cur;
+    ctrl_meta(idx, &nm, &mn, &mx, &stp, &def, &cur);
+    write_name64(d + 4, nm);
+    av_put_be16(d + 80, AEM_CONTROL_LINEAR_UINT8);
+    d[104] = mn; d[105] = mx; d[106] = stp; d[107] = def; d[108] = cur;
+    av_put_be16(d + 109, 0);                       // unit (none)
+    av_put_be16(d + 111, 0xFFFF);                  // localized_string (none)
     return 113;
 }
 
@@ -1370,7 +1398,7 @@ static uint32_t build_desc_strings(uint8_t *d, uint16_t idx)
     av_put_be16(d + 2, 0);
     static const char *const strs[7] = {
         "N-Series",          // 0 — vendor_name_string in ENTITY
-        "AVB-AES3 Endpoint", // 1 — model_name_string in ENTITY
+        "AVB Switchover",    // 1 — model_name_string in ENTITY
         "Audio Unit",        // 2
         "Media Clock Input", // 3
         "Audio Input",       // 4
@@ -1755,21 +1783,30 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
     }
 
     case AEM_CMD_GET_CONTROL: {
-        // Response command_specific: descriptor_type(2) descriptor_index(2)
-        // control_value (LINEAR_UINT8 = 1 byte). cdl = command_specific + 12.
+        // control[0] LINEAR_UINT8 -> 1-byte value; control[1] UTF8 -> string.
         if (pdu_len < 28) return;
         uint16_t dt = av_get_be16(pdu + 24);
         uint16_t di = av_get_be16(pdu + 26);
         uint8_t *tf = avdecc_tx_buf();
         uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
         memcpy(tp + 24, pdu + 24, 4);                 // echo desc_type + index
+
+        if (dt == AEM_DESC_CONTROL && di == 1) {      // OSC IP/Subnet — UTF8
+            char ip[24]; int n = osc_ip_str(ip, sizeof(ip));
+            memcpy(tp + 28, ip, n + 1);
+            aecp_set_status_cdl(tp, AECP_STATUS_SUCCESS, 12 + 4 + n + 1);
+            uint32_t flen = 14 + 28 + (uint32_t)n + 1; if (flen < 64) flen = 64;
+            avdecc_eth_send(flen);
+            s->aecp_tx_count++;
+            break;
+        }
         uint8_t st;
         if (dt == AEM_DESC_CONTROL && di < N_CONTROLS) {
-            tp[28] = g_usb_source ? 1 : 0;            // current value
-            st = AECP_STATUS_SUCCESS;
+            const char *nm; uint8_t mn, mx, stp, def, cur;
+            ctrl_meta(di, &nm, &mn, &mx, &stp, &def, &cur);
+            tp[28] = cur; st = AECP_STATUS_SUCCESS;
         } else {
-            tp[28] = 0;
-            st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+            tp[28] = 0;   st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
         }
         aecp_set_status_cdl(tp, st, 12 + 5);
         avdecc_eth_send(64);
@@ -1778,34 +1815,52 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
     }
 
     case AEM_CMD_SET_CONTROL: {
-        // Command command_specific: descriptor_type(2) descriptor_index(2)
-        // new_value (LINEAR_UINT8 = 1 byte). Updates g_usb_source (0=Main,
-        // 1=Backup). Phase-2: also drive the A/B mux CSR here.
-        if (pdu_len < 29) return;
+        if (pdu_len < 28) return;
         uint16_t dt = av_get_be16(pdu + 24);
         uint16_t di = av_get_be16(pdu + 26);
-        uint8_t  nv = pdu[28];
-        uint8_t st;
-        if (dt != AEM_DESC_CONTROL || di >= N_CONTROLS)
-            st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
-        else if (nv > 1)
-            st = AECP_STATUS_BAD_ARGUMENTS;
-        else {
-            g_usb_source = nv;
-#ifdef CSR_MAIN_USB_SOURCE_SELECT_ADDR
-            main_usb_source_select_write(g_usb_source);  // drive A/B mux
-#endif
-            st = AECP_STATUS_SUCCESS;
+
+        if (dt == AEM_DESC_CONTROL && di == 1) {      // OSC IP/Subnet — UTF8 text
+            char buf[40]; uint32_t k = 0;
+            while (k < sizeof(buf) - 1 && (28u + k) < pdu_len && pdu[28 + k]) {
+                buf[k] = (char)pdu[28 + k]; k++;
+            }
+            buf[k] = 0;
+            uint8_t st;
+            if (osc_parse_ipstr(buf)) {
+                st = AECP_STATUS_SUCCESS;
+                for (int j = 0; j < 4; j++) g_cfg.osc_ip[j] = g_osc_ip[j];
+                g_cfg.osc_prefix = g_osc_prefix;
+                cfg_save();                                    // persist to NV flash
+            } else {
+                st = AECP_STATUS_BAD_ARGUMENTS;
+            }
+            char ip[24]; int n = osc_ip_str(ip, sizeof(ip));   // echo current
+            uint8_t *tf = avdecc_tx_buf();
+            uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
+            memcpy(tp + 24, pdu + 24, 4);
+            memcpy(tp + 28, ip, n + 1);
+            aecp_set_status_cdl(tp, st, 12 + 4 + n + 1);
+            uint32_t flen = 14 + 28 + (uint32_t)n + 1; if (flen < 64) flen = 64;
+            avdecc_eth_send(flen);
+            s->aecp_tx_count++;
+            printf("[AVDECC] SET_CONTROL OSC IP -> %s (status=%u)\n", ip, st);
+            break;
         }
+
+        // control[0] = USB source (LINEAR_UINT8, 0=Main/1=Backup)
+        uint8_t st = AECP_STATUS_SUCCESS;
+        if (dt != AEM_DESC_CONTROL || di != 0)
+            st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
+        else if (pdu_len >= 29)
+            avdecc_apply_usb_source(pdu[28] ? 1 : 0);
+        uint8_t cur = g_usb_source ? 1 : 0;
         uint8_t *tf = avdecc_tx_buf();
         uint8_t *tp = aecp_begin_response(tf, s->src_mac, frame, pdu);
-        memcpy(tp + 24, pdu + 24, 4);                 // echo desc_type + index
-        tp[28] = g_usb_source ? 1 : 0;                // echo the (clamped) value
+        memcpy(tp + 24, pdu + 24, 4);
+        tp[28] = cur;
         aecp_set_status_cdl(tp, st, 12 + 5);
         avdecc_eth_send(64);
         s->aecp_tx_count++;
-        printf("[AVDECC] SET_CONTROL USB source -> %s (status=%u)\n",
-               g_usb_source ? "Backup" : "Main", st);
         break;
     }
 
@@ -2271,7 +2326,7 @@ static void aecp_handle(avdecc_state_t *s, const uint8_t *frame,
         uint8_t st = AECP_STATUS_SUCCESS;
         switch (dt) {
             case AEM_DESC_ENTITY:
-                if (di == 0 && ni == 0)      name = "AVB-AES3 Endpoint";
+                if (di == 0 && ni == 0)      name = "N-Series AVB Switchover";
                 else if (di == 0 && ni == 1) name = "";   // group_name
                 else                          st = AECP_STATUS_NO_SUCH_DESCRIPTOR;
                 break;
@@ -2437,6 +2492,7 @@ void avdecc_init(avdecc_state_t *s, const uint8_t *mac_addr)
     // would bump on the gPTP→locked transition (acceptable) but also
     // bump on a SET_CLOCK_SOURCE flip where new source hasn't locked.
     s->clock_last_locked = 0xFF;
+    g_self = s;                     // for unsolicited control-change notifications
 
     memcpy(s->src_mac, mac_addr, 6);
 
@@ -2659,6 +2715,38 @@ static void push_unsol_stream_info(avdecc_state_t *s, uint16_t dt, uint16_t di)
         aecp_set_status_cdl(p, AECP_STATUS_SUCCESS, 68);   // 12 (hdr) + 56 (payload)
 
         avdecc_eth_send(14 + 24 + 56);
+        s->aecp_tx_count++;
+    }
+}
+
+// Emit an unsolicited SET_CONTROL_RESPONSE for CONTROL[idx] to every
+// registered controller, so Hive refreshes the control value live (e.g. when
+// OSC drives the A/B source select instead of a Hive SET_CONTROL).
+static void push_unsol_control(avdecc_state_t *s, uint16_t idx)
+{
+    const char *nm; uint8_t mn, mx, stp, def, cur;
+    ctrl_meta(idx, &nm, &mn, &mx, &stp, &def, &cur);
+    for (int i = 0; i < AVDECC_MAX_UNSOL_CTRL; i++) {
+        if (!s->unsol_ctrl[i].active) continue;
+
+        uint8_t *frame = avdecc_tx_buf();
+        memcpy(frame, s->unsol_ctrl[i].mac, 6);
+        memcpy(frame + 6, s->src_mac, 6);
+        av_put_be16(frame + 12, AVDECC_ETHERTYPE);
+
+        uint8_t *p = frame + 14;
+        p[0] = AVTP_SUBTYPE_AECP;
+        p[1] = AECP_MSG_AEM_RESPONSE;
+        memcpy(p + AECP_OFF_TARGET_ID,     s->entity_id, 8);
+        memcpy(p + AECP_OFF_CONTROLLER_ID, s->unsol_ctrl[i].controller_eid, 8);
+        av_put_be16(p + AECP_OFF_SEQ_ID,   s->unsol_ctrl[i].unsol_seq_id++);
+        av_put_be16(p + AECP_OFF_CMD_TYPE, 0x8000 | AEM_CMD_SET_CONTROL);
+        av_put_be16(p + 24, AEM_DESC_CONTROL);
+        av_put_be16(p + 26, idx);
+        p[28] = cur;
+        aecp_set_status_cdl(p, AECP_STATUS_SUCCESS, 12 + 5);
+
+        avdecc_eth_send(64);
         s->aecp_tx_count++;
     }
 }

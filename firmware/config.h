@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #define CFG_MAGIC    0xCFA50701u
-#define CFG_VERSION  1
+#define CFG_VERSION  2          // v2 adds osc_ip/osc_prefix; v1 blobs still load (cs/crf kept)
 
 typedef struct {
     uint32_t magic;
@@ -23,9 +23,13 @@ typedef struct {
     uint8_t  _pad2[2];
     uint8_t  crf_talker_eid[8];// talker entity-id — matches the re-advertise so the
                                // fast-connect path auto-binds at boot (the #70 method)
+    // ---- OSC static IP (read-OSC feature; set via AVDECC UTF8 control) ----
+    uint8_t  osc_ip[4];        // static IP (default 169.254.9.200)
+    uint8_t  osc_prefix;       // subnet prefix: 16 or 24
+    uint8_t  _pad3[3];
     // ---- room for future AVDECC params (entity name, talker fast-connect
     //      bindings, stream formats, pres_offset, chan_rot, ...) ----
-    uint8_t  reserved[80];
+    uint8_t  reserved[72];
     uint32_t crc;              // checksum over all bytes above
 } cfg_t;
 

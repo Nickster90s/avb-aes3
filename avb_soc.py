@@ -279,6 +279,25 @@ def ulpi_io():
     # by the gateware to release. Data is a bidirectional bus (TSTriple in
     # the SoC). Verified free vs eth/eth_clocks/sdram on this platform.
     # See avb-usb-host docs/phase3-bridge.md + memory ulpi-twisted-pair-wiring.
+    #
+    # USB_BACKUP=1: put the SINGLE (proven) USB subsystem on the BACKUP ULPI
+    # pin locations (V4/R4/... — the 2nd physical connector) instead of Main.
+    # This builds the small ~14k-cell netlist HeAP places in ~3 min, so it's the
+    # fast way to validate the just-soldered Backup ULPI hardware WITHOUT the
+    # dual-USB A/B netlist that jams the placer. Same resource names ("ulpi"/
+    # "ulpi_clock"), so nothing downstream changes -- only the pin map.
+    if os.environ.get("USB_BACKUP", "") == "1":
+        return [
+            ("ulpi_clock", 0, Pins("V4"), IOStandard("LVCMOS33")),   # MRCC (Backup)
+            ("ulpi", 0,
+                Subsignal("dir",  Pins("R4"), IOStandard("LVCMOS33")),
+                Subsignal("nxt",  Pins("W4"), IOStandard("LVCMOS33")),
+                Subsignal("stp",  Pins("T5"), IOStandard("LVCMOS33")),
+                Subsignal("rst",  Pins("Y4"), IOStandard("LVCMOS33")),
+                Subsignal("data", Pins("Y9 V8 W9 V9 W6 V7 Y3 Y6"),
+                          IOStandard("LVCMOS33")),
+            ),
+        ]
     return [
         ("ulpi_clock", 0, Pins("T4"), IOStandard("LVCMOS33")),
         ("ulpi", 0,
@@ -1033,7 +1052,7 @@ def main():
         _usb2_xdc = getattr(soc.platform, "_has_ulpi2", False)
         _usb2_create = (
             ["create_clock -name usb2_clk   -period 16.667 "
-             "[get_nets crg_s7pll2_clkout_buf]"]        # 60 MHz Backup ULPI
+             "[get_nets avbsoc_crg_s7pll2_clkout_buf]"]        # 60 MHz Backup ULPI
             if _usb2_xdc else [])
         _usb2_group = " -group {usb2_clk}" if _usb2_xdc else ""
         soc.platform.toolchain.additional_xdc_commands += _usb2_create + [
@@ -1053,9 +1072,9 @@ def main():
             # this only changes nextpnr's optimization pressure. Read the reported
             # Fmax number (the "FAIL at 125" is expected/ignored). This reproduces
             # the lean shift-fix build's 52.74 MHz, which had sys timed at 125.
-            "create_clock -name sys_clk    -period  8.000 [get_nets crg_s7pll0_clkout_buf0]",  # target 125 MHz (real 50)
-            "create_clock -name usb_clk    -period 16.667 [get_nets crg_s7pll1_clkout_buf]",   # 60 MHz
-            "create_clock -name idelay_clk -period  5.000 [get_nets crg_s7pll0_clkout_buf1]",  # 200 MHz
+            "create_clock -name sys_clk    -period  8.000 [get_nets avbsoc_crg_s7pll0_clkout_buf0]",  # target 125 MHz (real 50)
+            "create_clock -name usb_clk    -period 16.667 [get_nets avbsoc_crg_s7pll1_clkout_buf]",   # 60 MHz
+            "create_clock -name idelay_clk -period  5.000 [get_nets avbsoc_crg_s7pll0_clkout_buf1]",  # 200 MHz
             "set_clock_groups -asynchronous "
             "-group {sys_clk} -group {usb_clk} -group {idelay_clk}" + _usb2_group,
         ]

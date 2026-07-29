@@ -23,6 +23,7 @@
 #include "avdecc.h"
 #include "mcr.h"
 #include "aaf.h"
+#include "osc.h"
 
 // MAC address — locally administered, unique per device.
 // TODO: read from SPI flash or EEPROM in production.
@@ -321,6 +322,10 @@ static void dispatch_rx(void)
             case MSRP_ETHERTYPE:
                 rx_msrp++;
                 srp_process_rx(&srp, frame, len);
+                break;
+            case ARP_ETHERTYPE:      // 0x0806 — ARP responder (for OSC unicast)
+            case IPV4_ETHERTYPE:     // 0x0800 — IPv4/UDP → OSC parser
+                osc_rx_frame(frame, len);
                 break;
             default:
                 rx_other++;
@@ -1248,6 +1253,13 @@ int main(void)
     // Init protocol stacks
     gptp_init(&gptp, mac_addr);
     srp_init(&srp, mac_addr);
+    osc_set_mac(mac_addr);           // read-OSC: our MAC for ARP replies
+    if ((g_cfg.osc_prefix == 16 || g_cfg.osc_prefix == 24) && g_cfg.osc_ip[0]) {
+        for (int i = 0; i < 4; i++) g_osc_ip[i] = g_cfg.osc_ip[i];   // restore persisted OSC IP
+        g_osc_prefix = g_cfg.osc_prefix;
+        printf("[CFG] OSC IP restored: %u.%u.%u.%u/%u\n",
+               g_osc_ip[0], g_osc_ip[1], g_osc_ip[2], g_osc_ip[3], g_osc_prefix);
+    }
     mcr_init(&mcr, CONFIG_CLOCK_FREQUENCY, 48000);
     // Give MCR the gPTP handle so the free-running (cs=0) NCO is disciplined to
     // the network media rate (exactly 48000 gPTP-Hz) instead of the raw crystal.

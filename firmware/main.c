@@ -1513,7 +1513,16 @@ int main(void)
             // fixing the talker layer was the wrong target.
             // cs=0 -> gPTP is the media clock; cs=1 -> CRF (mcr.servo_locked); gPTP
             // must be locked regardless (pres-time is gPTP-based).
-            uint8_t media_clock_ok = (mcr.cs == 1) ? mcr.servo_locked : gptp.servo_locked;
+            // cs=1: stream while the CRF is PATCHED (bound), not only while the
+            // CRF servo is instantaneously locked. On a TRANSIENT CRF stall the
+            // stale watchdog snaps the NCO to gptp_locked_base — which IS the
+            // network/GM 48 kHz (the CRF talker is our gPTP grandmaster) — so
+            // audio stays at the correct rate and does NOT drop for the ~1-3 s
+            // the self-heal takes to restore CRF. An explicit unpatch unbinds
+            // (mcr.bound=0) -> mutes, so "no CRF (unpatched) = no audio" holds.
+            // No harsh tone: the NCO is never at an unverified CRF rate — it's
+            // held at the gPTP base until the CRF rate is verified + servo-locked.
+            uint8_t media_clock_ok = (mcr.cs == 1) ? mcr.bound : gptp.servo_locked;
             if (aaf_gw_enabled && gptp.servo_locked && media_clock_ok) {
                 if (!talker_on) {
                     aaf_pkt_enable_write(1);
@@ -1529,8 +1538,8 @@ int main(void)
                 if (talker_on) {
                     aaf_pkt_enable_write(0);
                     talker_on = 0;
-                    printf("[main] AAF talker OFF — %s not locked\n",
-                           (mcr.cs == 1 && !mcr.servo_locked) ? "CRF media clock" : "gPTP");
+                    printf("[main] AAF talker OFF — %s\n",
+                           (mcr.cs == 1 && !mcr.bound) ? "CRF unpatched (unbound)" : "gPTP not locked");
                 }
             }
             // (REMOVED 2026-06-23: the auto-heal pres-glitch detector. Its target

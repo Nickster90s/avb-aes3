@@ -1014,6 +1014,15 @@ void srp_poll(srp_state_t *s)
         for (int li = 0; li < SRP_MAX_LISTENER_STREAMS; li++)
             s->listeners[li].new_count = 0;
         s->last_join_ms       = now_ms - MRP_JOIN_PERIOD_MS;  // re-declare now
+        // MRP LeaveAll SM (802.1Q Table 10-5 / GenAVB mrp.c:1234-1237): on a
+        // RECEIVED LeaveAll (RLA) we RESTART our own LeaveAll timer instead of
+        // also originating one. Only one participant per segment should source
+        // LeaveAlls; double-originating doubles the segment-wide re-declaration
+        // churn, and every LeaveAll forces the MOTU talker to re-declare — a slow
+        // re-declare is a window where the CRF can briefly gap. Deferring ours
+        // cuts that churn in half.
+        s->last_leaveall_ms   = now_ms;
+        s->leaveall_period_ms = srp_next_lva_period();
     }
 
     uint32_t elapsed_join = now_ms - s->last_join_ms;

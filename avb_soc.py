@@ -931,13 +931,16 @@ def main():
     parser.add_argument("--build",        action="store_true", help="Build bitstream.")
     parser.add_argument("--soft-only",    action="store_true", help="Generate software headers only (no P&R).")
     parser.add_argument("--load",         action="store_true", help="Load bitstream.")
-    parser.add_argument("--seed", default=1, type=int, help="nextpnr P&R seed. "
-        "PINNED to 3: with PYTHONHASHSEED=0 (forced at the top of this file so the "
-        "build is REPRODUCIBLE) seed 3 places the 48ch/6-ring SoC at 57.57 MHz, "
-        "clear of the ~57 MHz USB-feedback floor. WITHOUT the fixed hash seed the "
-        "same seed scattered 52-65 MHz run-to-run (migen/floorplan dict/set ordering "
-        "depends on PYTHONHASHSEED) -- that was the seed-roulette. If a future change "
-        "drops Fmax <~57, sweep seeds (now reproducible) for one >=57 and re-pin here.")
+    parser.add_argument("--seed", default=7, type=int, help="nextpnr P&R seed. "
+        "PINNED to 7 (2026-07-30): with PYTHONHASHSEED=0 (forced at the top of this "
+        "file so the build is REPRODUCIBLE) seed 7 both PLACES (HeAP doesn't stall) "
+        "and gives a clean USB datapath for the current firmware. NOTE: a FIRMWARE "
+        "change (ROM contents) re-rolls placement, so a pinned seed is only good for "
+        "the current firmware — after a firmware change, sweep seeds for one that "
+        "(a) places without a HeAP stall AND (b) gives good USB (global sys Fmax does "
+        "NOT predict USB quality — the seed shuffles the intra-region USB placement, "
+        "so it must be tested on HW), then re-pin here. History: seed 3 (57.57MHz) and "
+        "seed 6 (57.27MHz) placed but seed 6's USB was marginal; seed 7 is verified good.")
     parser.add_argument("--no-floorplan", action="store_true",
         help="Disable the USB-near-ULPI proximity floorplan (floorplan_usb.py "
              "constrains USB cells to X<=30, Y=10-70 — close to the ULPI pins "

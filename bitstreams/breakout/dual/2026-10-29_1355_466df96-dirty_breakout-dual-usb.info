@@ -1,0 +1,125 @@
+# breakout / dual / 2026-10-29_1355_466df96-dirty_breakout-dual-usb
+# archived:  2026-10-29T13:55:16+01:00
+# source:    /home/lisp/FPGA/avb-aes3/build/colorlight_i9plus/gateware/colorlight_i9plus.bit (2026-10-29 13:55:14)
+# size:      2192127 bytes
+# sha256:    18a8afa407646e0b0ff765224a693b3fd5d616b2be95df0682a4fbdafcbc5136
+
+## REBUILD RECIPE
+cd /home/lisp/FPGA/avb-aes3
+(cd firmware && make)
+BOARD=breakout USB2=1 ./build.sh
+
+## ENV AT ARCHIVE TIME
+#   BOARD=breakout
+#   USB2=1
+#   USB_BACKUP=<unset>
+#   USB_PHASE=<unset>
+#   SAMPLE_EDGE=<unset>
+#   CHIPDB=/home/lisp/FPGA/demo-projects/chipdb
+#   PRJXRAY_DB_DIR=/home/lisp/openxc7/openxc7/opt/nextpnr-xilinx/external/prjxray-db
+#   PYTHONHASHSEED=0
+
+commit 466df9624669ba9cf5e7182c5fa90a61d8b23774
+Author: Nick <nick.eventslight@gmail.com>
+Date:   Thu Jul 30 11:47:32 2026 +0200
+
+    CRF: less MSRP churn + seamless transient recovery; pin seed 7 (good USB)
+    
+    Two CRF robustness fixes (researched against GenAVB_TSN MRP/MSRP, the authoritative
+    NXP reference; avdecc/jdksavdecc are AVDECC-only, no MSRP):
+    
+    1) srp.c — on a RECEIVED LeaveAll (RLA), restart our own LeaveAll timer instead of
+       also originating one. 802.1Q Table 10-5 / GenAVB mrp.c:1234-1237: only one
+       participant per segment should source LeaveAlls. We were double-originating,
+       doubling segment-wide re-declaration churn; every LeaveAll forces the MOTU
+       talker to re-declare, and a slow re-declare is a window where the CRF can gap.
+    
+    2) main.c — AAF talker gate for cs=1 now keys on mcr.bound (CRF still PATCHED),
+       not the instantaneous mcr.servo_locked. On a transient CRF stall the stale
+       watchdog holds the NCO at gptp_locked_base (= the GM/MOTU 48 kHz), so audio
+       keeps flowing at the correct rate through the ~1-3s self-heal instead of muting.
+       Explicit unpatch unbinds -> mutes, so "no CRF = no audio" holds. No harsh tone:
+       the NCO is never at an unverified CRF rate.
+    
+    Diagnosis (from the on-HW log): SRP was healthy (talker_reg=1, our_fail=0) at the
+    CRF stale, and the stale watchdog reads on-wire frames via the HW CRF extractor,
+    so the ~1s gap was frames physically stopping (external MacBook-wake/MOTU
+    transient), not our reservation aging out. Our MSRP is already more-than-compliant
+    (LeaveAll handling + 1s periodic Join). Fix 1 reduces churn; Fix 2 makes any
+    residual transient inaudible.
+    
+    avb_soc.py — pin --seed default 7. The firmware change re-rolled placement; seeds
+    4/5 stalled HeAP, seed 6 placed but its intra-region USB placement was marginal
+    (bad USB FIFO) despite fine global Fmax. Seed 7 places AND has HW-verified good
+    USB. Global sys Fmax does NOT predict USB — re-sweep + HW-test after firmware
+    changes.
+    
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+## uncommitted diff vs HEAD:  38 files changed, 633 insertions(+), 451 deletions(-)
+ avb_soc.py                                         | 227 +++++++---
+ ...d8-dirty_2026-06-01_2211_srp-multi-listener.bit |   3 -
+ ...8-dirty_2026-06-01_2211_srp-multi-listener.info |   3 -
+ ...07f70d8_2026-06-01_1923_crf_stable_leaveall.bit |   3 -
+ ...7f70d8_2026-06-01_1923_crf_stable_leaveall.info |   3 -
+ ...rty_2026-05-30_1024_gateware-aaf-packetizer.bit |   3 -
+ ...ty_2026-05-30_1024_gateware-aaf-packetizer.info |   3 -
+ ..._1906_usb-idelay-tap8-crf-fixed-all-working.bit |   3 -
+ ...1906_usb-idelay-tap8-crf-fixed-all-working.info |   3 -
+ .../618bf3d_2026-06-01_1736_usb_avb_centered.bit   |   3 -
+ .../618bf3d_2026-06-01_1736_usb_avb_centered.info  |   3 -
+ ...026-05-28_1001_usb-avb-working-no-floorplan.bit |   3 -
+ ...26-05-28_1001_usb-avb-working-no-floorplan.info |   3 -
+ ...-near-ulpi-floorplan-crf-mcri2s-all-working.bit |   3 -
+ ...near-ulpi-floorplan-crf-mcri2s-all-working.info |   3 -
+ .../7199108_2026-05-28_1357_mcr-locked-i2s-tx.bit  |   3 -
+ .../7199108_2026-05-28_1357_mcr-locked-i2s-tx.info |   3 -
+ ...26-05-30_0930_usb-aaf-bridge-2op-functional.bit |   3 -
+ ...6-05-30_0930_usb-aaf-bridge-2op-functional.info |   3 -
+ ...05-29_1423_usb-aaf-fifo-bridge-netfloorplan.bit |   3 -
+ ...5-29_1423_usb-aaf-fifo-bridge-netfloorplan.info |   3 -
+ ...a493962_2026-05-28_1132_crf-gateware-locked.bit |   3 -
+ ...493962_2026-05-28_1132_crf-gateware-locked.info |   3 -
+ bitstreams/archive.sh                              | 136 +++++-
+ ...732_crf-stable-decouple-plus-rebootstrap-wd.bit |   3 -
+ ...32_crf-stable-decouple-plus-rebootstrap-wd.info |   3 -
+ ...ty_2026-05-30_1444_usb-feedback-mcr-flowctl.bit |   3 -
+ ...y_2026-05-30_1444_usb-feedback-mcr-flowctl.info |   3 -
+ ...304_auvitran-connects-maxframesize-accumlat.bit |   3 -
+ ...04_auvitran-connects-maxframesize-accumlat.info |   3 -
+ ...2026-05-28_1201_crf-no-flicker-stale-1000ms.bit |   3 -
+ ...026-05-28_1201_crf-no-flicker-stale-1000ms.info |   3 -
+ ...9_2026-05-30_0035_usb-8ch-descriptors-clean.bit |   3 -
+ ..._2026-05-30_0035_usb-8ch-descriptors-clean.info |   3 -
+ build.sh                                           |  30 +-
+ firmware/main.c                                    |  48 +-
+ floorplan_usb.py                                   |  47 +-
+ rtl/usb_avb_subsystem2.v                           | 500 ++++++++++-----------
+ 38 files changed, 633 insertions(+), 451 deletions(-)
+
+## build log highlights (/home/lisp/FPGA/avb-aes3/build/last-build.log)
+Info: Max frequency for clock       'crg_s7pll1_clkin': 1351.35 MHz (PASS at 125.00 MHz)
+Info: Max frequency for clock       'crg_s7pll2_clkin': 1438.85 MHz (PASS at 125.00 MHz)
+Info: Max frequency for clock  'crg_s7pll1_clkout_buf': 73.81 MHz (PASS at 60.00 MHz)
+Info: Max frequency for clock  'crg_s7pll2_clkout_buf': 76.34 MHz (PASS at 60.00 MHz)
+Info: Max frequency for clock             'eth_rx_clk': 127.19 MHz (PASS at 125.00 MHz)
+Info: Max frequency for clock 'crg_s7pll0_clkout_buf0': 52.08 MHz (FAIL at 60.00 MHz)
+Info: Max frequency for clock             'eth_tx_clk': 136.61 MHz (PASS at 125.00 MHz)
+Info: Checksum: 0x88b2658c
+Info:     iter=1 wires=553534 overused=22733 overuse=23814 archfail=NA
+Info:     iter=2 wires=572125 overused=731 overuse=731 archfail=NA
+Info:     iter=3 wires=572946 overused=47 overuse=47 archfail=NA
+Info:     iter=4 wires=573067 overused=8 overuse=8 archfail=NA
+Info:     iter=5 wires=573065 overused=7 overuse=7 archfail=NA
+Info:     iter=6 wires=573063 overused=3 overuse=3 archfail=NA
+Info:     iter=7 wires=573072 overused=1 overuse=1 archfail=NA
+Info:     iter=8 wires=573074 overused=0 overuse=0 archfail=0
+Info: Checksum: 0x2f33b757
+Info: Max frequency for clock       'crg_s7pll0_clkin': 1025.64 MHz (PASS at 125.00 MHz)
+Info: Max frequency for clock       'crg_s7pll1_clkin': 1019.37 MHz (PASS at 125.00 MHz)
+Info: Max frequency for clock       'crg_s7pll2_clkin': 1085.78 MHz (PASS at 125.00 MHz)
+Info: Max frequency for clock  'crg_s7pll1_clkout_buf': 95.71 MHz (PASS at 60.00 MHz)
+Info: Max frequency for clock  'crg_s7pll2_clkout_buf': 91.71 MHz (PASS at 60.00 MHz)
+Info: Max frequency for clock             'eth_rx_clk': 152.07 MHz (PASS at 125.00 MHz)
+Info: Max frequency for clock 'crg_s7pll0_clkout_buf0': 68.62 MHz (PASS at 60.00 MHz)
+Info: Max frequency for clock             'eth_tx_clk': 133.42 MHz (PASS at 125.00 MHz)

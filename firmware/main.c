@@ -495,6 +495,26 @@ static void check_uart_cmd(void)
                    (unsigned)utap);
             break;
         }
+#ifdef CSR_MAIN_ULPI2_IDELAY_TAP_ADDR
+        case 'U': {
+            // Same, for the BACKUP ULPI (USB2). The two PHYs need SEPARATE
+            // taps: a tap that is right for one is wrong for the other (proven
+            // on the dual-PHY build in avb-usb-host, Main=6 / Backup=8). The
+            // two failure modes bracket the eye and are OPPOSITE:
+            //   RX decodes but the device never presents a pull-up -> tap too
+            //     LARGE (reads tolerate delay; the register-write handshake,
+            //     which times our driven data against the PHY's NXT, does not)
+            //   pull-up fine but it falls back to full speed -> tap too SMALL
+            //     (the HS chirp is lost)
+            static uint8_t u2tap = 8;
+            u2tap = (u2tap + 1) & 0x1F;
+            main_ulpi2_idelay_tap_write(u2tap);
+            main_ulpi2_idelay_load_write(1);
+            printf("\n[ULPI2] IDELAY tap = %u — re-plug USB2 + check lsusb\n",
+                   (unsigned)u2tap);
+            break;
+        }
+#endif
         case 'r':
             printf("\nRebooting...\n");
             ctrl_reset_write(1);
@@ -842,6 +862,10 @@ static void check_uart_cmd(void)
                      "  v   toggle verbose debug prints (SRP-RX / gPTP dump) — default OFF\n"
                      "  G   dump gPTP convergence ring-log (boot->lock curve)\n"
                      "  C   dump CRF media-clock convergence ring-log (when bound)\n"
+                     "  u   step Main ULPI IDELAY tap (eye-centre USB1)\n"
+#ifdef CSR_MAIN_ULPI2_IDELAY_TAP_ADDR
+                     "  U   step Backup ULPI IDELAY tap (eye-centre USB2)\n"
+#endif
                      "  r   reboot\n"
                      "  h   help\n");
             break;
@@ -1513,16 +1537,16 @@ int main(void)
             // fixing the talker layer was the wrong target.
             // cs=0 -> gPTP is the media clock; cs=1 -> CRF (mcr.servo_locked); gPTP
             // must be locked regardless (pres-time is gPTP-based).
-            // cs=1: stream while the CRF is PATCHED (bound), not only while the
-            // CRF servo is instantaneously locked. On a TRANSIENT CRF stall the
-            // stale watchdog snaps the NCO to gptp_locked_base — which IS the
-            // network/GM 48 kHz (the CRF talker is our gPTP grandmaster) — so
-            // audio stays at the correct rate and does NOT drop for the ~1-3 s
-            // the self-heal takes to restore CRF. An explicit unpatch unbinds
-            // (mcr.bound=0) -> mutes, so "no CRF (unpatched) = no audio" holds.
-            // No harsh tone: the NCO is never at an unverified CRF rate — it's
-            // held at the gPTP base until the CRF rate is verified + servo-locked.
-            uint8_t media_clock_ok = (mcr.cs == 1) ? mcr.bound : gptp.servo_locked;
+            // cs=1 REQUIRES the CRF servo to be locked (not just bound). This is
+            // deliberate and load-bearing for the USB->AVB rate match: when CRF
+            // unlocks, the talker turns OFF, and during that OFF period the USB
+            // FIFO REFILLS (host keeps writing, nothing drains) — which is what
+            // keeps the elastic FIFO centred. (The earlier "stream on gpttp base
+            // while bound" removed those refill windows -> the FIFO drifted
+            // monotonically to 0 over a long run -> underrun -> silence.)
+            // Seamless transient recovery needs a real SRC (host-rate -> CRF-rate
+            // resampler) — see project_src_vs_feedback_fifo_todo — not this gate.
+            uint8_t media_clock_ok = (mcr.cs == 1) ? mcr.servo_locked : gptp.servo_locked;
             if (aaf_gw_enabled && gptp.servo_locked && media_clock_ok) {
                 if (!talker_on) {
                     aaf_pkt_enable_write(1);
@@ -1538,8 +1562,8 @@ int main(void)
                 if (talker_on) {
                     aaf_pkt_enable_write(0);
                     talker_on = 0;
-                    printf("[main] AAF talker OFF — %s\n",
-                           (mcr.cs == 1 && !mcr.bound) ? "CRF unpatched (unbound)" : "gPTP not locked");
+                    printf("[main] AAF talker OFF — %s not locked\n",
+                           (mcr.cs == 1 && !mcr.servo_locked) ? "CRF media clock" : "gPTP");
                 }
             }
             // (REMOVED 2026-06-23: the auto-heal pres-glitch detector. Its target

@@ -273,60 +273,111 @@ class MCRNco(LiteXModule):
         ]
 
 
+# ---- Board revision ---------------------------------------------------------
+# BOARD=ext      (default) Colorlight i9plus ext-board + jumpered ULPI breakouts.
+# BOARD=breakout Custom SODIMM baseboard: 2 magjacks, 2x USB3300, 1 JTAG/UART USB.
+#
+# On the custom board BOTH ULPI buses live in BANK 34, entirely on ODD SODIMM
+# pins (the even row carries only slow I/O), and SODIMM 88 (V4) / 90 (R4) are
+# left NC as the differential partners of the two clocks W4 / T4 -- a switching
+# signal on either couples straight into a 60 MHz ULPI clock.
+# See memory project-custom-sodimm-breakout-pinout.
+BOARD = os.environ.get("BOARD", "ext").strip().lower()
+
+_ULPI_PINS = {
+    # ---- Main ("USB1") ------------------------------------------------------
+    # Same FPGA pins on both boards, but the custom board wires D[7:0] in
+    # ascending SODIMM order, which ROTATES four bits:
+    #   ext       SODIMM 61..75 -> D0 D1 D2 D4 D5 D6 D3 D7   (D3 sits on 73)
+    #   breakout  SODIMM 61..75 -> D0 D1 D2 D3 D4 D5 D6 D7
+    # Flashing the wrong one is SILENT: the bus still toggles and the PHY still
+    # clocks, you just get garbage. Read the ULPI vendor ID (regs 0x00/0x01,
+    # 0x0424 on SMSC parts) before suspecting anything else.
+    ("ext", "main"): dict(
+        clk="T4", dir="T3", nxt="U2", stp="U3", rst="R2",
+        data="V2 V3 W1 W2 Y1 AA1 AB1 Y2"),
+    ("breakout", "main"): dict(
+        clk="T4", dir="T3", nxt="U2", stp="U3", rst="R2",
+        data="V2 V3 W1 Y1 AA1 AB1 W2 Y2"),
+
+    # ---- Backup ("USB2") ----------------------------------------------------
+    # ext: the bank-14 P3 map. KNOWN BAD, kept only so old ext-board builds
+    # still reproduce -- do NOT debug against it. D6=AA19 (DQS_RDWR_B) and
+    # D7=AB20 (DQS_DOUT_CSO_B) are config CONTROL pins that never release to
+    # GPIO (they read a constant 0xC0 = D7|D6 stuck high), and NXT=Y19 reads
+    # stuck high on this module. See memory feedback-bank14-ulpi-poisoned-pins.
+    ("ext", "backup"): dict(
+        clk="W19", dir="Y18", nxt="Y19", stp="V18", rst="V19",
+        data="AA20 AA21 W17 AB18 P14 R14 AA19 AB20"),
+    # breakout: bank 34, all-odd SODIMM, CLK=W4 (85, MRCC L12N_T1_34).
+    #   dir AB6(97)  rst AA6(99)  stp Y7(101)  nxt AB7(103)
+    #   D0-D7 = AA8(109) AB8(111) Y8(113) W7(115) Y9(117) V8(119) W9(121) V9(123)
+    # The 8 data pins are consecutive odd contacts with SODIMM 105/107 (GND)
+    # immediately before them.
+    # 2026-10-28: clock moved SODIMM 85 (W4/MRCC) -> 87 (AA4, L11N_T1_SRCC_34).
+    # Its differential partner Y4 (SODIMM 89) must now stay UNUSED.
+    # *** 2026-10-28/29: DIR AND NXT ARE PHYSICALLY SWAPPED AT POSITION B ***
+    # J5's pin order differs from J4's, so the two hand-soldered leads got
+    # transposed: J5.2=USB2_DIR, J5.5=USB2_NXT.  The gateware swaps them back,
+    # so dir=AB7(103) and nxt=AB6(97) -- the OPPOSITE of the SODIMM comment
+    # above, which describes the connector, not the wiring.
+    # This single transposition is why the 2026-07-09 dual-USB bring-up saw
+    # error-71 on the Backup PHY at every clock phase and every clocking mode:
+    # `oe = ~dir_i` was driven from the NXT pin, so we never released the bus
+    # during the PHY's turnaround and read back our own TXCMD bytes.  A
+    # phase-INVARIANT failure is a wiring permutation, never a timing problem.
+    # Proven in avb-usb-host (USB_SWAP_DIRNXT=1): both PHYs then enumerate at
+    # High Speed.  Set it back to dir=AB6/nxt=AB7 only after physically
+    # exchanging the two leads at J5.
+    ("breakout", "backup"): dict(
+        clk="AA4", dir="AB7", nxt="AB6", stp="Y7", rst="AA6",
+        data="AA8 AB8 Y8 W7 Y9 V8 W9 V9"),
+}
+
+
+def _ulpi_resources(which, prefix):
+    """Build the ("<prefix>_clock", "<prefix>") resource pair for this BOARD.
+
+    RST is active-HIGH (USB3300 pin 9) so it stays plain Pins, driven low by
+    the gateware to release. Data is a bidirectional bus (TSTriple in the SoC).
+    """
+    try:
+        p = _ULPI_PINS[(BOARD, which)]
+    except KeyError:
+        raise ValueError(
+            "BOARD=%r has no %s ULPI pin map; expected one of %s"
+            % (BOARD, which, sorted({b for b, _ in _ULPI_PINS})))
+    return [
+        (prefix + "_clock", 0, Pins(p["clk"]), IOStandard("LVCMOS33")),
+        (prefix, 0,
+            Subsignal("dir",  Pins(p["dir"]), IOStandard("LVCMOS33")),
+            Subsignal("nxt",  Pins(p["nxt"]), IOStandard("LVCMOS33")),
+            Subsignal("stp",  Pins(p["stp"]), IOStandard("LVCMOS33")),
+            Subsignal("rst",  Pins(p["rst"]), IOStandard("LVCMOS33")),
+            Subsignal("data", Pins(p["data"]), IOStandard("LVCMOS33")),
+        ),
+    ]
+
+
 def ulpi_io():
-    # USB3300 ULPI breakout on the P2 header. CLK=T4 (MRCC, clock-capable);
-    # RST active-HIGH (USB3300 pin 9) so handled as plain Pins, driven low
-    # by the gateware to release. Data is a bidirectional bus (TSTriple in
-    # the SoC). Verified free vs eth/eth_clocks/sdram on this platform.
+    # The Main USB3300. Verified free vs eth/eth_clocks/sdram on this platform.
     # See avb-usb-host docs/phase3-bridge.md + memory ulpi-twisted-pair-wiring.
     #
     # USB_BACKUP=1: put the SINGLE (proven) USB subsystem on the BACKUP ULPI
-    # pin locations (V4/R4/... — the 2nd physical connector) instead of Main.
-    # This builds the small ~14k-cell netlist HeAP places in ~3 min, so it's the
-    # fast way to validate the just-soldered Backup ULPI hardware WITHOUT the
-    # dual-USB A/B netlist that jams the placer. Same resource names ("ulpi"/
-    # "ulpi_clock"), so nothing downstream changes -- only the pin map.
-    if os.environ.get("USB_BACKUP", "") == "1":
-        return [
-            ("ulpi_clock", 0, Pins("V4"), IOStandard("LVCMOS33")),   # MRCC (Backup)
-            ("ulpi", 0,
-                Subsignal("dir",  Pins("R4"), IOStandard("LVCMOS33")),
-                Subsignal("nxt",  Pins("W4"), IOStandard("LVCMOS33")),
-                Subsignal("stp",  Pins("T5"), IOStandard("LVCMOS33")),
-                Subsignal("rst",  Pins("Y4"), IOStandard("LVCMOS33")),
-                Subsignal("data", Pins("Y9 V8 W9 V9 W6 V7 Y3 Y6"),
-                          IOStandard("LVCMOS33")),
-            ),
-        ]
-    return [
-        ("ulpi_clock", 0, Pins("T4"), IOStandard("LVCMOS33")),
-        ("ulpi", 0,
-            Subsignal("dir",  Pins("T3"),  IOStandard("LVCMOS33")),
-            Subsignal("nxt",  Pins("U2"),  IOStandard("LVCMOS33")),
-            Subsignal("stp",  Pins("U3"),  IOStandard("LVCMOS33")),
-            Subsignal("rst",  Pins("R2"),  IOStandard("LVCMOS33")),
-            Subsignal("data", Pins("V2 V3 W1 W2 Y1 AA1 AB1 Y2"),
-                      IOStandard("LVCMOS33")),
-        ),
-    ]
+    # pin locations instead of Main. This builds the small ~14k-cell netlist
+    # HeAP places in ~3 min, so it's the fast way to validate just-soldered
+    # Backup ULPI hardware WITHOUT the dual-USB A/B netlist that jams the
+    # placer. Same resource names ("ulpi"/"ulpi_clock"), so nothing downstream
+    # changes -- only the pin map.
+    which = "backup" if os.environ.get("USB_BACKUP", "") == "1" else "main"
+    return _ulpi_resources(which, "ulpi")
 
 
 def ulpi2_io():
-    # PHASE-2: 2nd USB3300 ULPI breakout (the "Backup" A/B source). ALL bank 34
-    # (single-bank like Main, for 60 MHz HS timing), HDMI-safe (avoids bank-34
-    # T3-group pins used by the Ext-Board HDMI). CLK=V4 (MRCC). Pinout resolved
-    # 2026-07-08 vs the fgg484 package + build XDC; see project_second_usb_timing.
-    return [
-        ("ulpi2_clock", 0, Pins("V4"), IOStandard("LVCMOS33")),   # MRCC
-        ("ulpi2", 0,
-            Subsignal("dir",  Pins("R4"), IOStandard("LVCMOS33")),
-            Subsignal("nxt",  Pins("W4"), IOStandard("LVCMOS33")),
-            Subsignal("stp",  Pins("T5"), IOStandard("LVCMOS33")),
-            Subsignal("rst",  Pins("Y4"), IOStandard("LVCMOS33")),
-            Subsignal("data", Pins("Y9 V8 W9 V9 W6 V7 Y3 Y6"),
-                      IOStandard("LVCMOS33")),
-        ),
-    ]
+    # PHASE-2: 2nd USB3300 (the "Backup" A/B source), as its own resource so
+    # the CRG can build cd_usb2 alongside cd_usb.
+    return _ulpi_resources("backup", "ulpi2")
+
 
 # AVB SoC ----------------------------------------------------------------------------------------------
 
@@ -345,11 +396,19 @@ class AVBSoC(SoCCore):
     def __init__(self, sys_clk_freq=int(50e6), **kwargs):
         platform = colorlight_i9plus.Platform(toolchain="openxc7")
 
-        # UART via CH347 on Ext-Board (TXD1/RXD1 routed to FPGA).
+        # UART to the USB-serial bridge. Direction rule: the pin that reaches
+        # the BRIDGE's RXD input is our tx; the pin carrying the bridge's TXD
+        # output is our rx.
+        #   ext       tx=R3  rx=M3
+        #   breakout  tx=R3 (SODIMM 84 -> bridge RXD)
+        #             rx=L4 (SODIMM 82 <- bridge TXD)
+        # M3 is SODIMM 86, the even contact directly opposite the W4 ULPI clock
+        # on the custom board -- hence the move to L4.
+        _uart_rx = "L4" if BOARD == "breakout" else "M3"
         platform.add_extension([
             ("serial", 0,
-                Subsignal("tx", Pins("R3")),   # FPGA TX → CH347 RXD1
-                Subsignal("rx", Pins("M3")),   # FPGA RX ← CH347 TXD1
+                Subsignal("tx", Pins("R3")),        # FPGA TX -> bridge RXD
+                Subsignal("rx", Pins(_uart_rx)),    # FPGA RX <- bridge TXD
                 IOStandard("LVCMOS33"))
         ])
 
@@ -638,6 +697,14 @@ class AVBSoC(SoCCore):
         # NOT add a second IDELAYCTRL (errors "more than one IDELAYCTRL for
         # the default IODELAY_GROUP"). Firmware sweeps ulpi_idelay_tap
         # (0..31, ~78 ps/tap) to centre the eye; the 'u' command steps it.
+        # NOTE IDELAY_VALUE below must match this reset value. In VAR_LOAD mode
+        # the delay line POWERS UP at IDELAY_VALUE and only takes CNTVALUEIN on
+        # an LD pulse -- and the firmware pulses LD only inside the 'u' command,
+        # so with IDELAY_VALUE=0 every build ran at tap 0 and this reset=8 was
+        # decorative (confirmed in the FASM: IDELAY_VALUE[4:0] = 5'b00000).
+        # Setting IDELAY_VALUE is the zero-logic fix: adding a boot-time LD
+        # pulse instead STALLED nextpnr's HeAP placer (41 s -> 15+ min, because
+        # the pulse fans out to 10 IO-site-locked IDELAYE2s). Do not do that.
         self.ulpi_idelay_tap  = CSRStorage(5, reset=8,
             description="ULPI input IDELAY tap 0-31 (~78 ps each).")
         self.ulpi_idelay_load = CSRStorage(1,
@@ -649,7 +716,7 @@ class AVBSoC(SoCCore):
                 p_IDELAY_TYPE="VAR_LOAD", p_DELAY_SRC="IDATAIN",
                 p_HIGH_PERFORMANCE_MODE="TRUE", p_SIGNAL_PATTERN="DATA",
                 p_REFCLK_FREQUENCY=200.0, p_CINVCTRL_SEL="FALSE",
-                p_PIPE_SEL="FALSE", p_IDELAY_VALUE=0,
+                p_PIPE_SEL="FALSE", p_IDELAY_VALUE=8,   # = CSR reset; see note above
                 i_C=ClockSignal("sys"), i_LD=_ulpi_ld,
                 i_CNTVALUEIN=self.ulpi_idelay_tap.storage,
                 i_CE=0, i_INC=0, i_LDPIPEEN=0, i_REGRST=0,
@@ -781,7 +848,7 @@ class AVBSoC(SoCCore):
                     p_IDELAY_TYPE="VAR_LOAD", p_DELAY_SRC="IDATAIN",
                     p_HIGH_PERFORMANCE_MODE="TRUE", p_SIGNAL_PATTERN="DATA",
                     p_REFCLK_FREQUENCY=200.0, p_CINVCTRL_SEL="FALSE",
-                    p_PIPE_SEL="FALSE", p_IDELAY_VALUE=0,
+                    p_PIPE_SEL="FALSE", p_IDELAY_VALUE=8,   # = CSR reset; see note above
                     i_C=ClockSignal("sys"), i_LD=_u2_ld,
                     i_CNTVALUEIN=self.ulpi2_idelay_tap.storage,
                     i_CE=0, i_INC=0, i_LDPIPEEN=0, i_REGRST=0,
@@ -1055,29 +1122,51 @@ def main():
         _usb2_xdc = getattr(soc.platform, "_has_ulpi2", False)
         _usb2_create = (
             ["create_clock -name usb2_clk   -period 16.667 "
-             "[get_nets avbsoc_crg_s7pll2_clkout_buf]"]        # 60 MHz Backup ULPI
+             "[get_nets crg_s7pll2_clkout_buf]"]        # 60 MHz Backup ULPI
             if _usb2_xdc else [])
         _usb2_group = " -group {usb2_clk}" if _usb2_xdc else ""
         soc.platform.toolchain.additional_xdc_commands += _usb2_create + [
-            # NOTE: the PLL output nets carry the CRG submodule prefix
-            # `avbsoc_crg_…`. Without it get_nets matched NOTHING, so BOTH the
-            # create_clock and the set_clock_groups below were silently dropped —
-            # nextpnr then timed sys at the default 125 MHz (and timed every async
-            # CDC crossing as a real path) → the placement-fragile 39-57 MHz Fmax.
+            # NOTE: the PLL output nets are named `crg_s7pll<N>_clkout…` —
+            # the CRG submodule prefix is `crg_`, with NO `avbsoc_` in front.
+            # An `avbsoc_crg_…` prefix was added here after e0d5c9d (which had
+            # it right) and regressed the whole block: get_nets matched NOTHING,
+            # so every create_clock AND the set_clock_groups were silently
+            # dropped, nextpnr timed sys/usb at the default 125 MHz and timed
+            # every async CDC crossing as a real path → the placement-fragile
+            # 39-57 MHz Fmax that seed-pinning has been papering over since.
+            # VERIFY AFTER EVERY REBUILD -- check the TARGET, not the name.
+            # nextpnr-xilinx always reports a clock by its NET name, never by the
+            # create_clock -name, so seeing `crg_s7pll0_clkout_buf0` proves
+            # nothing either way. What proves binding is the period in the
+            # parentheses:
+            #   bound:   'crg_s7pll0_clkout_buf0': 63.89 MHz (PASS at  60.00 MHz)
+            #   NOT bound: ...                   : 53.70 MHz (FAIL at 125.00 MHz)
+            # 125.00 MHz is nextpnr's default for an unconstrained clock net. Any
+            # PLL clock still showing "at 125.00 MHz" is being timed blind.
             # audio_clk dropped from the group: the AAF bridge has no separate
             # audio clock domain (audio is the sys-domain MCR strobe), so naming
             # an undefined clock would make the now-live set_clock_groups fail.
-            # sys is OVER-CONSTRAINED to 8 ns (125 MHz target), NOT its real
-            # 20 ns / 50 MHz: binding sys at its true 50 MHz made nextpnr ease off
-            # the moment it got "close" (~35-45 MHz); an aggressive target makes
-            # the placer grind sys far harder, landing ~52 MHz — comfortably past
-            # the real 50 MHz the audio path needs. The PLL still clocks sys at 50;
-            # this only changes nextpnr's optimization pressure. Read the reported
-            # Fmax number (the "FAIL at 125" is expected/ignored). This reproduces
-            # the lean shift-fix build's 52.74 MHz, which had sys timed at 125.
-            "create_clock -name sys_clk    -period  8.000 [get_nets avbsoc_crg_s7pll0_clkout_buf0]",  # target 125 MHz (real 50)
-            "create_clock -name usb_clk    -period 16.667 [get_nets avbsoc_crg_s7pll1_clkout_buf]",   # 60 MHz
-            "create_clock -name idelay_clk -period  5.000 [get_nets avbsoc_crg_s7pll0_clkout_buf1]",  # 200 MHz
+            # sys_clk PERIOD — 2026-10-29, THE 8 ns TARGET IS A PLACER KILLER.
+            # This line used to read 8.000 ns (a 125 MHz target on a design that
+            # measures 53-66 MHz), justified by a comment claiming an aggressive
+            # target "makes the placer grind sys far harder, landing ~52 MHz".
+            # That evidence was worthless: it was gathered while the net name was
+            # wrong, so the constraint was a NO-OP and nextpnr was applying its own
+            # per-net default. The moment the name was fixed and 8 ns actually
+            # bound, HeAP's analytic solve went hopeless-negative-slack and HUNG
+            # at "Running main analytical placer" with ZERO iterations -- 35 min
+            # on a build that normally takes 8-9 (single-USB, BOARD=breakout).
+            # Same signature the floorplan header blames on the dual-USB netlist.
+            # So: constrain sys to something ACHIEVABLE. 16.667 ns = 60 MHz is a
+            # 20% stretch over the 50 MHz the audio path actually needs and sits
+            # inside the measured 53-66 MHz range, so the placer keeps optimizing
+            # instead of giving up. SYS_PERIOD_NS overrides it for a sweep.
+            # RULE: a timing constraint far outside what the design can reach does
+            # not "push harder", it removes the gradient the analytic placer needs.
+            "create_clock -name sys_clk    -period %6.3f [get_nets crg_s7pll0_clkout_buf0]"
+            % float(os.environ.get("SYS_PERIOD_NS", "16.667")),
+            "create_clock -name usb_clk    -period 16.667 [get_nets crg_s7pll1_clkout_buf]",   # 60 MHz
+            "create_clock -name idelay_clk -period  5.000 [get_nets crg_s7pll0_clkout_buf1]",  # 200 MHz
             "set_clock_groups -asynchronous "
             "-group {sys_clk} -group {usb_clk} -group {idelay_clk}" + _usb2_group,
         ]

@@ -287,6 +287,8 @@ sudo chgrp dialout /dev/ttyACM0 && sudo chmod 660 /dev/ttyACM0
 | `T` | Force a fresh AVDECC TalkerAdvertise burst                              |
 | `b` | Benchmark — 1-second main-loop iteration and event-rate window          |
 | `D` | DAC diagnostics — I2S sample count, underruns                           |
+| `u` | Step the **Main** ULPI input IDELAY tap (eye-centre USB1), 0..31 wrap    |
+| `U` | Step the **Backup** ULPI input IDELAY tap (eye-centre USB2) — `USB2=1`   |
 | `r` | Reboot CPU                                                              |
 
 ---
@@ -477,6 +479,137 @@ a493962 Gateware CRF timestamp extractor — kills firmware-RX-latency jitter an
 ```
 
 All on master; five working `.bit` files archived in `bitstreams/`.
+
+### BOTH USB3300 PHYs inside the AVB SoC — **WORKING** (2026-10-29)
+
+`USB2=1` builds both ULPI stacks into the one AVB bitstream. Hardware-verified
+on the custom SODIMM breakout: two High-Speed UAC2 devices **and** a live AVB
+stack from a single configuration.
+
+```
+usb 1-8 : 1209:eab1  N-Series AVB Switchover Main    serial 0  high speed -> ALSA card 2 [Main]
+usb 1-10: 1209:eab2  N-Series AVB Switchover Backup  serial 1  high speed -> ALSA card 3 [Backup]
+[AVB-AES3] gPTP sync=227 offset=688 ns  gm=d0699efffe04e912 valid=1
+[SRP] talker_en=1 bridge_class=6 have_brmac=1   [AVDECC] adp=3 acmp=10/10 aecp=93/112
+```
+
+Build and flash:
+
+```bash
+cd firmware && make && cd ..          # MANDATORY: USB2=1 adds CSRs; see below
+BOARD=breakout USB2=1 ./build.sh
+# known-good: bitstreams/known-good/breakout-dual-usb-avb.bit
+```
+
+Almost all of this was already in the tree from the July Phase-2 work
+(`ulpi2` resource, `cd_usb2` on a 3rd PLL, `usb_avb_subsystem2.v`, per-PHY
+IDELAY CSRs, the A/B sample mux, `usb_source_select`, the dual floorplan).
+Only four things were missing or wrong:
+
+1. **DIR and NXT were transposed** in `_ULPI_PINS[("breakout","backup")]`.
+   J5's pin order differs from J4's, so the two hand-soldered leads got
+   swapped: the map now reads `dir=AB7(103) nxt=AB6(97)`. This one
+   transposition is why the 2026-07-09 dual bring-up saw `error -71` at
+   *every* clock phase and *every* clocking mode — `oe = ~dir_i` was driven
+   from the NXT pin, so the bus was never released during the PHY's
+   turnaround and we read back our own TXCMD bytes.
+   **A phase-invariant failure is a wiring permutation, never a timing
+   problem.**
+2. **Every `create_clock` named a net that did not exist** (see below).
+3. `usb_avb_subsystem2.v` had Main's `idProduct`; regenerated so Backup is
+   `1209:eab2`, matching avb-usb-host.
+4. No firmware command for the Backup tap — now `U` (see §7).
+
+#### Per-PHY IDELAY taps are mandatory
+
+The two PHYs need **separate** taps; a value that is right for one is wrong for
+the other. The two failure modes are *opposite* and bracket the eye:
+
+| symptom | meaning |
+|---|---|
+| RX decodes fine but the device never presents a pull-up | tap too **LARGE** — reads tolerate delay, but the register-write handshake times our driven data against the PHY's NXT |
+| pull-up fine but it falls back to Full Speed | tap too **SMALL** — the HS chirp is lost |
+
+Both CSRs reset to tap 8 (`IDELAY_VALUE=8` must match the CSR reset — in
+VAR_LOAD the line powers up at `IDELAY_VALUE` and only takes `CNTVALUEIN` on an
+LD pulse). `u` / `U` step them live, so **eye-centring needs no rebuild** —
+unlike avb-usb-host, whose taps are FIXED at synthesis.
+
+> Caveat: tap 8 is a single *passing* point for both PHYs here, not a measured
+> centre. `usb 1-10` still logs one `Device not responding to setup address`
+> before it enumerates, which is what a near-edge tap looks like. Sweep `U` with
+> a port cycle per step to find both edges and pin the midpoint.
+
+#### THE CLOCK-CONSTRAINT BUG — all four `create_clock` lines were dead
+
+The XDC asked for `get_nets avbsoc_crg_s7pll0_clkout_buf0`; the netlist has
+`crg_s7pll0_clkout_buf0` — **no `avbsoc_` prefix**. `get_nets` matched nothing,
+so every `create_clock` *and* the `set_clock_groups` were silently dropped.
+`e0d5c9d` (2026-07-09) had the names right; a later edit re-broke them behind a
+comment asserting the prefix was required, and from then until 2026-10-29 sys
+and usb were timed at nextpnr's 125 MHz default with every async CDC crossing
+timed as a real path. That is what the seed-pinning has been compensating for.
+
+Fixing it measurably *improved* the design:
+
+| clock | unbound (before) | bound at real period |
+|---|---|---|
+| sys  | 53.70 MHz *FAIL at 125.00* | **68.62 MHz PASS at 60.00** |
+| usb  | 77.24 MHz *FAIL at 125.00* | **95.71 MHz PASS at 60.00** |
+| usb2 | — (never constrained)       | **91.71 MHz PASS at 60.00** |
+
+**Verify binding by the TARGET, not the name.** nextpnr-xilinx always reports a
+clock by its *net* name, so seeing `crg_s7pll0_clkout_buf0` proves nothing. The
+tell is the period in parentheses — `at 125.00 MHz` is the default for an
+unconstrained net, i.e. timed blind.
+
+#### A hopeless timing target hangs the placer
+
+`sys_clk` was pinned at **8.000 ns (125 MHz)** on a design that measures
+53–68 MHz, justified by a comment claiming an aggressive target makes the placer
+"grind harder". That evidence was worthless — it was gathered while the
+constraint was a no-op. The moment the net name was fixed and 8 ns actually
+bound, HeAP hung at `Running main analytical placer` with **zero iterations**
+for 35 minutes on a build that normally takes 8–9.
+
+**A timing constraint far outside what the design can reach does not push
+harder — it removes the gradient the analytic placer needs.** `sys_clk` is now
+16.667 ns (60 MHz: a 20 % stretch over the real 50 MHz, inside the achievable
+range), overridable with `SYS_PERIOD_NS`.
+
+Consequence: with the constraints sane, **HeAP converged on the dual netlist
+first try — `PLACER=sa` was not needed.** The July conclusion that "HeAP does
+not converge on USB2=1" has the identical signature and was most likely this
+same bad `sys_clk` target rather than cell count.
+
+#### Utilisation (dual vs single USB)
+
+| | single | dual | device |
+|---|---|---|---|
+| SLICE_LUTX | 15174 (23 %) | 17541 (26 %) | 65200 |
+| SLICE_FFX  | 9507 (14 %)  | 10714 (16 %) | 65200 |
+| RAMB36E1   | 34 (45 %)    | 38 (50 %)    | 75 |
+| RAMB18E1   | 47 (31 %)    | 47 (31 %)    | 150 |
+| IDELAYE2   | 15           | 25           | 250 |
+| PLLE2_ADV  | 3 (60 %)     | **4 (80 %)** | 5 |
+
+Only **one** `IDELAYCTRL` may exist per IODELAY group — both PHYs share the
+CRG's `S7IDELAYCTRL` on `cd_idelay`. Do not add a second.
+
+#### Rules for this configuration
+
+- **`make` the firmware before building.** `USB2=1` adds four CSRs
+  (`ulpi2_idelay_tap/_load`, `usb2_fb_ovr`, `usb2_sample_overflow`). Emit the
+  headers first with `BOARD=breakout USB2=1 python3 avb_soc.py --soft-only`,
+  then `make`. (Here they appended at `0x4844`+ and nothing shifted, but that
+  is not guaranteed.)
+- **A firmware change re-rolls placement**, so the pinned `--seed 7` is only
+  verified for the firmware it was tested with.
+- `cd_usb` and `cd_usb_b` are independent crystals — measured **72 ppm apart**
+  in avb-usb-host. They drift forever; everything crossing between them needs a
+  real CDC.
+- Y4 (SODIMM 89) must stay unused — it is the differential partner of the
+  Backup clock on AA4 (SODIMM 87). V4 (88) and R4 (90) must never be outputs.
 
 ### Open / next
 

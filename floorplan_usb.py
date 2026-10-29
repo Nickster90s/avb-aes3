@@ -63,9 +63,38 @@ if _u:
 USB2_REGION = "usb2_fp"
 USB2_PREFIX = "usb_avb_subsystem2"
 _HAS_USB2 = any(USB2_PREFIX in c for c, _ in ctx.cells)
+# PHASE-2 dual-USB floorplan (2026-09-09 rework): the OLD scheme split the left
+# edge into USB1=lower(Y0-76) / USB2=upper(Y80-156). That assumed the two ULPIs'
+# pins sat in different Y halves. They DON'T: BOTH PHYs land on the far-LEFT IO
+# column at LOW Y (Main ULPI ~Y23-49; the Backup pins moved to bank-14 P3 at
+# Y11-34). The upper/lower split therefore dragged USB2's logic to Y80-156, far
+# from its Y11-34 pins -> the HeAP analytic placer could not satisfy the region
+# vs IO anchor and STALLED (spun at "Running main analytical placer", 0 iters).
+# An X-split can't help either since both PHYs share the same far-left IO column.
+# FIX: give BOTH subsystems one SHARED tall left region and let the placer +
+# seed cluster each PHY's cells near its own pins. 5752 USB cells fit easily in
+# the 56x156 left column. Widened X to 55 for the 2x cell count.
+#
+# BOARD=breakout (custom SODIMM baseboard, 2026-10): both ULPIs move into bank
+# 34, and for the first time their pad bands are DISJOINT --
+#   USB1 data/ctrl pads IOB Y35-Y49   (clock T4 at Y23)
+#   USB2 data/ctrl pads IOB Y1-Y13    (clock W4 at Y25)
+# so a Y-split finally has a basis it never had on the ext board. Clock pads are
+# excluded from the bands on purpose: a ULPI clock reaches its logic through a
+# BUFG, which spans the device, so only the data/control pads anchor placement.
+# Still OFF by default -- the shared column is the configuration that actually
+# builds, and this has not been run yet. Enable with NEXTPNR_USB_SPLIT=1, or set
+# explicit boxes via NEXTPNR_USB_REGION / NEXTPNR_USB2_REGION.
+_split = os.environ.get("NEXTPNR_USB_SPLIT", "") == "1"
 if _HAS_USB2 and not _u:
-    UY1 = 76                                  # USB1 -> lower half
-U2X0, U2Y0, U2X1, U2Y1 = 0, 80, 45, 156       # USB2 -> upper half
+    UX1, UY1 = 48, 156                        # USB1 -> full tall left column
+U2X0, U2Y0, U2X1, U2Y1 = 0, 0, 48, 156         # USB2 -> same shared left column
+if _HAS_USB2 and _split and not _u:
+    UX0, UY0, UX1, UY1     = 0, 28, 48, 156   # USB1 -> upper, around Y35-49
+    U2X0, U2Y0, U2X1, U2Y1 = 0,  0, 48,  60   # USB2 -> lower, around Y1-13
+_u2 = os.environ.get("NEXTPNR_USB2_REGION", "").strip()
+if _u2:
+    U2X0, U2Y0, U2X1, U2Y1 = (int(v) for v in _u2.split(","))
 
 # ---- eth TX datapath: compact box near the TX pins (X1,Y51) ----------------
 # Matches the cells seen on the critical path. storage_2 is the TX CDC FIFO
@@ -175,9 +204,19 @@ for nname, net in ctx.nets:
     for u in getattr(net, "users", []):
         nu += _pull(getattr(u, "cell", None), USB_REGION)
 
-# ---- Pass 1+2 for USB2 (Backup), pulled into its own upper-half region --------
+# ---- Pass 1+2 for USB2 (Backup) — OFF by default -----------------------------
+# 2026-09-09: constraining BOTH USB subsystems (~5750 cells) into the left region
+# stiffened HeAP's analytic solve so much it HUNG (never returned from the initial
+# solve; 0 main-placer iters). Proven by: --no-floorplan cleared HeAP in 50s, and
+# the single-USB build (~3000 constrained cells) never stalled. So pull ONLY USB1
+# (Main) by default -> Main keeps its proven HS floorplan/timing, USB2 (Backup)
+# floats. That's fine for now: the Backup ULPI hardware isn't ready anyway (marginal
+# crystal + pending P3 rewire), and floating cells do NOT stall HeAP (the no-fp build
+# proved that) — it was the CONSTRAINT stiffness, not scatter. Re-enable the USB2
+# pull with USB2_FLOORPLAN=1 once Backup HW is live and its ULPI HS needs tuning
+# (then also lighten it, e.g. constrain fewer cell types, to avoid the stall).
 nu2 = 0
-if _HAS_USB2:
+if _HAS_USB2 and os.environ.get("USB2_FLOORPLAN", "") == "1":
     for cname, cell in ctx.cells:
         if USB2_PREFIX in cname:
             nu2 += _pull(cell, USB2_REGION)

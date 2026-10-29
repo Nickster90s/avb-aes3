@@ -1,0 +1,47 @@
+# 466df96-dirty_2026-10-13_1708_breakout-usb1-avb
+# archived:  2026-10-13T17:08:45+02:00
+# source:    /home/lisp/FPGA/avb-aes3/build/colorlight_i9plus/gateware/colorlight_i9plus.bit (2026-10-13 17:08:22)
+# size:      2192127 bytes
+
+commit 466df9624669ba9cf5e7182c5fa90a61d8b23774
+Author: Nick <nick.eventslight@gmail.com>
+Date:   Thu Jul 30 11:47:32 2026 +0200
+
+    CRF: less MSRP churn + seamless transient recovery; pin seed 7 (good USB)
+    
+    Two CRF robustness fixes (researched against GenAVB_TSN MRP/MSRP, the authoritative
+    NXP reference; avdecc/jdksavdecc are AVDECC-only, no MSRP):
+    
+    1) srp.c — on a RECEIVED LeaveAll (RLA), restart our own LeaveAll timer instead of
+       also originating one. 802.1Q Table 10-5 / GenAVB mrp.c:1234-1237: only one
+       participant per segment should source LeaveAlls. We were double-originating,
+       doubling segment-wide re-declaration churn; every LeaveAll forces the MOTU
+       talker to re-declare, and a slow re-declare is a window where the CRF can gap.
+    
+    2) main.c — AAF talker gate for cs=1 now keys on mcr.bound (CRF still PATCHED),
+       not the instantaneous mcr.servo_locked. On a transient CRF stall the stale
+       watchdog holds the NCO at gptp_locked_base (= the GM/MOTU 48 kHz), so audio
+       keeps flowing at the correct rate through the ~1-3s self-heal instead of muting.
+       Explicit unpatch unbinds -> mutes, so "no CRF = no audio" holds. No harsh tone:
+       the NCO is never at an unverified CRF rate.
+    
+    Diagnosis (from the on-HW log): SRP was healthy (talker_reg=1, our_fail=0) at the
+    CRF stale, and the stale watchdog reads on-wire frames via the HW CRF extractor,
+    so the ~1s gap was frames physically stopping (external MacBook-wake/MOTU
+    transient), not our reservation aging out. Our MSRP is already more-than-compliant
+    (LeaveAll handling + 1s periodic Join). Fix 1 reduces churn; Fix 2 makes any
+    residual transient inaudible.
+    
+    avb_soc.py — pin --seed default 7. The firmware change re-rolled placement; seeds
+    4/5 stalled HeAP, seed 6 placed but its intra-region USB placement was marginal
+    (bad USB FIFO) despite fine global Fmax. Seed 7 places AND has HW-verified good
+    USB. Global sys Fmax does NOT predict USB — re-sweep + HW-test after firmware
+    changes.
+    
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+## uncommitted diff vs HEAD:  3 files changed, 149 insertions(+), 66 deletions(-)
+ avb_soc.py       | 144 ++++++++++++++++++++++++++++++++++++-------------------
+ firmware/main.c  |  24 +++++-----
+ floorplan_usb.py |  47 ++++++++++++++++--
+ 3 files changed, 149 insertions(+), 66 deletions(-)
